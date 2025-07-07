@@ -12,7 +12,7 @@ namespace riscv {
  */
 class Memory {
 public:
-    static constexpr size_t DEFAULT_SIZE = 4 * 1024; // 默认4KB内存
+    static constexpr size_t DEFAULT_SIZE = 1 * 1024 * 1024; // 默认1MB内存
     
     explicit Memory(size_t size = DEFAULT_SIZE);
     ~Memory() = default;

@@ -5,8 +5,11 @@
 #include "decoder.h"
 #include "alu.h"
 #include <array>
+#include <memory>
 
 namespace riscv {
+
+class SyscallHandler;
 
 /**
  * RISC-V CPU 核心类
@@ -17,7 +20,7 @@ public:
     static constexpr size_t NUM_REGISTERS = 32;
     
     explicit CPU(std::shared_ptr<Memory> memory);
-    ~CPU() = default;
+    ~CPU();
     
     // 禁用拷贝构造和赋值
     CPU(const CPU&) = delete;
@@ -47,6 +50,7 @@ public:
 private:
     std::shared_ptr<Memory> memory_;
     Decoder decoder_;
+    std::unique_ptr<SyscallHandler> syscall_handler_;
     
     // CPU 状态
     std::array<uint32_t, NUM_REGISTERS> registers_;

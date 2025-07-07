@@ -11,10 +11,12 @@ void printUsage(const char* programName) {
     std::cout << "  -s, --step     单步执行模式\n";
     std::cout << "  -d, --debug    调试模式\n";
     std::cout << "  -m SIZE        设置内存大小（字节）\n";
+    std::cout << "  -e, --elf      加载ELF文件（自动检测）\n";
     std::cout << "\n";
     std::cout << "示例:\n";
-    std::cout << "  " << programName << " program.bin\n";
-    std::cout << "  " << programName << " -s -d program.bin\n";
+    std::cout << "  " << programName << " program.bin    # 二进制文件\n";
+    std::cout << "  " << programName << " program.elf    # ELF文件\n";
+    std::cout << "  " << programName << " -s -d program.elf\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -30,6 +32,7 @@ int main(int argc, char* argv[]) {
     std::string filename;
     bool stepMode = false;
     bool debugMode = false;
+    bool forceElf = false;
     size_t memorySize = Memory::DEFAULT_SIZE;
     
     for (int i = 1; i < argc; ++i) {
@@ -42,6 +45,8 @@ int main(int argc, char* argv[]) {
             stepMode = true;
         } else if (arg == "-d" || arg == "--debug") {
             debugMode = true;
+        } else if (arg == "-e" || arg == "--elf") {
+            forceElf = true;
         } else if (arg == "-m" && i + 1 < argc) {
             memorySize = std::stoul(argv[++i]);
         } else if (filename.empty()) {
@@ -55,7 +60,21 @@ int main(int argc, char* argv[]) {
         
         if (!filename.empty()) {
             std::cout << "加载程序: " << filename << "\n";
-            if (!simulator.loadRiscvProgram(filename, 0x1000)) {
+            
+            // 自动检测文件类型或根据用户指定加载
+            bool loadSuccess = false;
+            
+            if (forceElf || filename.find(".elf") != std::string::npos) {
+                // 尝试加载ELF文件
+                std::cout << "尝试加载ELF文件...\n";
+                loadSuccess = simulator.loadElfProgram(filename);
+            } else {
+                // 尝试加载二进制文件
+                std::cout << "尝试加载二进制文件...\n";
+                loadSuccess = simulator.loadRiscvProgram(filename, 0x1000);
+            }
+            
+            if (!loadSuccess) {
                 std::cerr << "错误: 无法加载程序文件\n";
                 return 1;
             }

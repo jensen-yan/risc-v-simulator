@@ -1,4 +1,5 @@
 #include "cpu.h"
+#include "syscall_handler.h"
 #include <iostream>
 #include <iomanip>
 
@@ -8,7 +9,12 @@ CPU::CPU(std::shared_ptr<Memory> memory)
     : memory_(memory), pc_(0), halted_(false), instruction_count_(0) {
     // 初始化寄存器，x0寄存器始终为0
     registers_.fill(0);
+    
+    // 初始化系统调用处理器
+    syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
 }
+
+CPU::~CPU() = default;
 
 void CPU::step() {
     if (halted_) {
@@ -18,6 +24,13 @@ void CPU::step() {
     try {
         // 1. 取指令
         Instruction inst = memory_->fetchInstruction(pc_);
+        
+        // 如果PC为0，可能表明程序错误跳转
+        if (pc_ == 0) {
+            std::cerr << "警告: PC跳转到地址0，指令=0x" << std::hex << inst << std::dec << std::endl;
+            halted_ = true;
+            return;
+        }
         
         // 2. 解码指令
         DecodedInstruction decoded = decoder_.decode(inst);
@@ -382,8 +395,13 @@ void CPU::storeToMemory(Address addr, uint32_t value, Funct3 funct3) {
 }
 
 void CPU::handleEcall() {
-    // TODO: 实现系统调用
-    halted_ = true;
+    // 处理系统调用
+    bool shouldHalt = syscall_handler_->handleSyscall(this);
+    if (shouldHalt) {
+        halted_ = true;
+    } else {
+        incrementPC();  // 系统调用完成后继续执行
+    }
 }
 
 void CPU::handleEbreak() {

@@ -172,4 +172,32 @@ std::vector<uint8_t> Simulator::loadBinaryFile(const std::string& filename) {
     return program;
 }
 
+bool Simulator::loadElfProgram(const std::string& filename) {
+    try {
+        // 加载ELF文件
+        ElfLoader::ElfInfo elfInfo = ElfLoader::loadElfFile(filename, memory_);
+        
+        if (!elfInfo.isValid) {
+            std::cerr << "无效的ELF文件: " << filename << std::endl;
+            return false;
+        }
+
+        // 重置CPU状态
+        cpu_->reset();
+        
+        // 设置程序计数器为ELF入口点
+        cpu_->setPC(elfInfo.entryPoint);
+        
+        // 设置栈指针 - 栈从内存顶部开始向下增长
+        cpu_->setRegister(2, memory_->getSize() - 4); // sp
+        cpu_->setRegister(8, memory_->getSize() - 4); // s0/fp
+        
+        std::cout << "ELF程序加载成功，入口点: 0x" << std::hex << elfInfo.entryPoint << std::dec << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "加载ELF程序失败: " << e.what() << std::endl;
+        return false;
+    }
+}
+
 } // namespace riscv

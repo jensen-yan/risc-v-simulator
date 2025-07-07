@@ -23,6 +23,8 @@ set(SOURCES
     src/decoder.cpp
     src/alu.cpp
     src/simulator.cpp
+    src/elf_loader.cpp
+    src/syscall_handler.cpp
 )
 
 set(HEADERS
@@ -32,6 +34,8 @@ set(HEADERS
     include/alu.h
     include/simulator.h
     include/types.h
+    include/elf_loader.h
+    include/syscall_handler.h
 )
 
 add_executable(risc-v-sim

@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+默认用中文回答，代码注释也用中文。
+
 ## 构建命令
 
 **标准构建:**

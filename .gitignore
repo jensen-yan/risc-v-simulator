@@ -16,6 +16,12 @@ programs/*.s
 programs/*.dis
 programs/build/
 
+runtime/*.elf
+runtime/*.bin
+runtime/*.s
+runtime/*.dis
+runtime/build/
+
 # 调试文件
 *.dSYM/
 *.pdb

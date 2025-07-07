@@ -23,6 +23,30 @@ protected:
         return inst;
     }
     
+    // 辅助方法：创建R-Type指令
+    uint32_t createRType(Opcode opcode, RegNum rd, RegNum rs1, RegNum rs2, Funct3 funct3, Funct7 funct7) {
+        uint32_t inst = 0;
+        inst |= static_cast<uint32_t>(opcode) & 0x7F;           // opcode [6:0]
+        inst |= (rd & 0x1F) << 7;                               // rd [11:7]
+        inst |= (static_cast<uint32_t>(funct3) & 0x7) << 12;    // funct3 [14:12]
+        inst |= (rs1 & 0x1F) << 15;                             // rs1 [19:15]
+        inst |= (rs2 & 0x1F) << 20;                             // rs2 [24:20]
+        inst |= (static_cast<uint32_t>(funct7) & 0x7F) << 25;   // funct7 [31:25]
+        return inst;
+    }
+    
+    // 辅助方法：创建S-Type指令
+    uint32_t createSType(Opcode opcode, RegNum rs1, RegNum rs2, int32_t imm, Funct3 funct3) {
+        uint32_t inst = 0;
+        inst |= static_cast<uint32_t>(opcode) & 0x7F;           // opcode [6:0]
+        inst |= (imm & 0x1F) << 7;                              // imm[4:0] [11:7]
+        inst |= (static_cast<uint32_t>(funct3) & 0x7) << 12;    // funct3 [14:12]
+        inst |= (rs1 & 0x1F) << 15;                             // rs1 [19:15]
+        inst |= (rs2 & 0x1F) << 20;                             // rs2 [24:20]
+        inst |= ((imm >> 5) & 0x7F) << 25;                      // imm[11:5] [31:25]
+        return inst;
+    }
+    
     std::shared_ptr<Memory> memory;
     std::unique_ptr<CPU> cpu;
 };
@@ -90,4 +114,192 @@ TEST_F(CPUTest, RegisterX0_AlwaysZero) {
     cpu->step();
     
     EXPECT_EQ(cpu->getRegister(0), 0);
+}
+
+TEST_F(CPUTest, ADD_Instruction) {
+    // 设置寄存器值
+    cpu->setRegister(1, 15);
+    cpu->setRegister(2, 25);
+    
+    // 测试 ADD x3, x1, x2  (15 + 25 = 40)
+    uint32_t inst = createRType(Opcode::OP, 3, 1, 2, Funct3::ADD_SUB, Funct7::NORMAL);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    EXPECT_EQ(cpu->getRegister(3), 40);
+    EXPECT_EQ(cpu->getPC(), 4);
+}
+
+TEST_F(CPUTest, SUB_Instruction) {
+    // 设置寄存器值
+    cpu->setRegister(1, 100);
+    cpu->setRegister(2, 30);
+    
+    // 测试 SUB x3, x1, x2  (100 - 30 = 70)
+    uint32_t inst = createRType(Opcode::OP, 3, 1, 2, Funct3::ADD_SUB, Funct7::SUB_SRA);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    EXPECT_EQ(cpu->getRegister(3), 70);
+}
+
+TEST_F(CPUTest, XOR_Instruction) {
+    // 设置寄存器值
+    cpu->setRegister(1, 0xF0F0F0F0);
+    cpu->setRegister(2, 0x0F0F0F0F);
+    
+    // 测试 XOR x3, x1, x2  (0xF0F0F0F0 ^ 0x0F0F0F0F = 0xFFFFFFFF)
+    uint32_t inst = createRType(Opcode::OP, 3, 1, 2, Funct3::XOR, Funct7::NORMAL);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    EXPECT_EQ(cpu->getRegister(3), 0xFFFFFFFF);
+}
+
+TEST_F(CPUTest, SLT_Instruction) {
+    // 设置寄存器值
+    cpu->setRegister(1, static_cast<uint32_t>(-10)); // 负数
+    cpu->setRegister(2, 5);
+    
+    // 测试 SLT x3, x1, x2  (-10 < 5, 结果应该是1)
+    uint32_t inst = createRType(Opcode::OP, 3, 1, 2, Funct3::SLT, Funct7::NORMAL);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    EXPECT_EQ(cpu->getRegister(3), 1);
+}
+
+TEST_F(CPUTest, SLTU_Instruction) {
+    // 设置寄存器值
+    cpu->setRegister(1, static_cast<uint32_t>(-10)); // 作为无符号数很大
+    cpu->setRegister(2, 5);
+    
+    // 测试 SLTU x3, x1, x2  (4294967286 < 5, 结果应该是0)
+    uint32_t inst = createRType(Opcode::OP, 3, 1, 2, Funct3::SLTU, Funct7::NORMAL);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    EXPECT_EQ(cpu->getRegister(3), 0);
+}
+
+TEST_F(CPUTest, SLL_Instruction) {
+    // 设置寄存器值
+    cpu->setRegister(1, 7);
+    cpu->setRegister(2, 3);
+    
+    // 测试 SLL x3, x1, x2  (7 << 3 = 56)
+    uint32_t inst = createRType(Opcode::OP, 3, 1, 2, Funct3::SLL, Funct7::NORMAL);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    EXPECT_EQ(cpu->getRegister(3), 56);
+}
+
+TEST_F(CPUTest, LoadWord_Instruction) {
+    // 在内存地址100处写入数据
+    memory->writeWord(100, 0x12345678);
+    
+    // 设置基址寄存器
+    cpu->setRegister(1, 80);  // 基址80
+    
+    // 测试 LW x2, 20(x1)  (从地址80+20=100加载字)
+    uint32_t inst = createIType(Opcode::LOAD, 2, 1, 20, Funct3::LW);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    EXPECT_EQ(cpu->getRegister(2), 0x12345678);
+}
+
+TEST_F(CPUTest, LoadByte_Instruction) {
+    // 在内存地址100处写入字节数据
+    memory->writeByte(100, 0x80); // 负数字节
+    
+    // 设置基址寄存器
+    cpu->setRegister(1, 100);
+    
+    // 测试 LB x2, 0(x1)  (从地址100加载有符号字节)
+    uint32_t inst = createIType(Opcode::LOAD, 2, 1, 0, Funct3::LB);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // 0x80应该符号扩展为0xFFFFFF80
+    EXPECT_EQ(cpu->getRegister(2), 0xFFFFFF80);
+}
+
+TEST_F(CPUTest, LoadByteUnsigned_Instruction) {
+    // 在内存地址100处写入字节数据
+    memory->writeByte(100, 0x80);
+    
+    // 设置基址寄存器
+    cpu->setRegister(1, 100);
+    
+    // 测试 LBU x2, 0(x1)  (从地址100加载无符号字节)
+    uint32_t inst = createIType(Opcode::LOAD, 2, 1, 0, Funct3::LBU);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // 0x80应该无符号扩展为0x00000080
+    EXPECT_EQ(cpu->getRegister(2), 0x00000080);
+}
+
+TEST_F(CPUTest, StoreWord_Instruction) {
+    // 设置要存储的值
+    cpu->setRegister(1, 200);         // 基址
+    cpu->setRegister(2, 0xABCDEF12);  // 要存储的值
+    
+    // 测试 SW x2, 4(x1)  (将x2存储到地址200+4=204)
+    uint32_t inst = createSType(Opcode::STORE, 1, 2, 4, Funct3::SW);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // 验证内存中的值
+    EXPECT_EQ(memory->readWord(204), 0xABCDEF12);
+}
+
+TEST_F(CPUTest, StoreByte_Instruction) {
+    // 设置要存储的值
+    cpu->setRegister(1, 200);       // 基址
+    cpu->setRegister(2, 0x12345678); // 要存储的值(只存储低8位)
+    
+    // 测试 SB x2, 8(x1)  (将x2的低8位存储到地址200+8=208)
+    uint32_t inst = createSType(Opcode::STORE, 1, 2, 8, Funct3::SB);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // 验证内存中的值(只有低8位0x78被存储)
+    EXPECT_EQ(memory->readByte(208), 0x78);
+}
+
+TEST_F(CPUTest, LoadStore_Combined) {
+    // 组合测试：存储然后加载
+    cpu->setRegister(1, 300);        // 基址
+    cpu->setRegister(2, 0x9876FEDC); // 要存储的值
+    
+    // 1. 存储：SW x2, 0(x1)
+    uint32_t store_inst = createSType(Opcode::STORE, 1, 2, 0, Funct3::SW);
+    memory->writeWord(0, store_inst);
+    cpu->step();
+    
+    // 重置x2寄存器
+    cpu->setRegister(2, 0);
+    
+    // 2. 加载：LW x3, 0(x1)
+    uint32_t load_inst = createIType(Opcode::LOAD, 3, 1, 0, Funct3::LW);
+    memory->writeWord(4, load_inst);
+    cpu->step();
+    
+    // 验证加载的值
+    EXPECT_EQ(cpu->getRegister(3), 0x9876FEDC);
+    EXPECT_EQ(cpu->getRegister(2), 0);  // x2应该保持为0
 }

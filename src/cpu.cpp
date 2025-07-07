@@ -178,9 +178,54 @@ void CPU::executeJALR(const DecodedInstruction& inst) {
     pc_ = target;
 }
 
-// 临时实现，TODO: 完整实现各种指令类型
 void CPU::executeRType(const DecodedInstruction& inst) {
-    // TODO: 实现R-type指令
+    uint32_t rs1_val = getRegister(inst.rs1);
+    uint32_t rs2_val = getRegister(inst.rs2);
+    uint32_t result = 0;
+    
+    switch (inst.funct3) {
+        case Funct3::ADD_SUB:
+            if (inst.funct7 == Funct7::NORMAL) {
+                // ADD
+                result = rs1_val + rs2_val;
+            } else {
+                // SUB
+                result = rs1_val - rs2_val;
+            }
+            break;
+        case Funct3::SLL: // SLL - 逻辑左移
+            result = rs1_val << (rs2_val & 0x1F);
+            break;
+        case Funct3::SLT: // SLT - 有符号比较
+            result = (static_cast<int32_t>(rs1_val) < static_cast<int32_t>(rs2_val)) ? 1 : 0;
+            break;
+        case Funct3::SLTU: // SLTU - 无符号比较
+            result = (rs1_val < rs2_val) ? 1 : 0;
+            break;
+        case Funct3::XOR: // XOR - 异或
+            result = rs1_val ^ rs2_val;
+            break;
+        case Funct3::SRL_SRA:
+            if (inst.funct7 == Funct7::NORMAL) {
+                // SRL - 逻辑右移
+                result = rs1_val >> (rs2_val & 0x1F);
+            } else {
+                // SRA - 算术右移
+                result = static_cast<int32_t>(rs1_val) >> (rs2_val & 0x1F);
+            }
+            break;
+        case Funct3::OR: // OR - 或
+            result = rs1_val | rs2_val;
+            break;
+        case Funct3::AND: // AND - 与
+            result = rs1_val & rs2_val;
+            break;
+        default:
+            throw IllegalInstructionException("不支持的R-type指令");
+    }
+    
+    setRegister(inst.rd, result);
+    incrementPC();
 }
 
 void CPU::executeIType(const DecodedInstruction& inst) {
@@ -202,7 +247,14 @@ void CPU::executeIType(const DecodedInstruction& inst) {
 }
 
 void CPU::executeSType(const DecodedInstruction& inst) {
-    // TODO: 实现S-type指令
+    if (inst.opcode == Opcode::STORE) {
+        uint32_t addr = getRegister(inst.rs1) + inst.imm;
+        uint32_t value = getRegister(inst.rs2);
+        storeToMemory(addr, value, inst.funct3);
+        incrementPC();
+    } else {
+        throw IllegalInstructionException("不支持的S-type指令");
+    }
 }
 
 void CPU::executeBType(const DecodedInstruction& inst) {
@@ -239,7 +291,19 @@ uint32_t CPU::loadFromMemory(Address addr, Funct3 funct3) {
 }
 
 void CPU::storeToMemory(Address addr, uint32_t value, Funct3 funct3) {
-    // TODO: 实现内存存储
+    switch (funct3) {
+        case Funct3::SB: // Store Byte
+            memory_->writeByte(addr, static_cast<uint8_t>(value & 0xFF));
+            break;
+        case Funct3::SH: // Store Half Word
+            memory_->writeHalfWord(addr, static_cast<uint16_t>(value & 0xFFFF));
+            break;
+        case Funct3::SW: // Store Word
+            memory_->writeWord(addr, value);
+            break;
+        default:
+            throw IllegalInstructionException("不支持的存储指令");
+    }
 }
 
 void CPU::handleEcall() {

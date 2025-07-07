@@ -47,6 +47,43 @@ protected:
         return inst;
     }
     
+    // 辅助方法：创建U-Type指令
+    uint32_t createUType(Opcode opcode, RegNum rd, int32_t imm) {
+        uint32_t inst = 0;
+        inst |= static_cast<uint32_t>(opcode) & 0x7F;           // opcode [6:0]
+        inst |= (rd & 0x1F) << 7;                               // rd [11:7]
+        inst |= (imm & 0xFFFFF000);                             // imm[31:12] [31:12]
+        return inst;
+    }
+    
+    // 辅助方法：创建J-Type指令
+    uint32_t createJType(Opcode opcode, RegNum rd, int32_t imm) {
+        uint32_t inst = 0;
+        inst |= static_cast<uint32_t>(opcode) & 0x7F;           // opcode [6:0]
+        inst |= (rd & 0x1F) << 7;                               // rd [11:7]
+        
+        // J-Type立即数编码比较复杂
+        inst |= ((imm >> 12) & 0xFF) << 12;                     // imm[19:12] [19:12]
+        inst |= ((imm >> 11) & 0x1) << 20;                      // imm[11] [20]
+        inst |= ((imm >> 1) & 0x3FF) << 21;                     // imm[10:1] [30:21]
+        inst |= ((imm >> 20) & 0x1) << 31;                      // imm[20] [31]
+        return inst;
+    }
+    
+    // 辅助方法：创建B-Type指令
+    uint32_t createBType(Opcode opcode, RegNum rs1, RegNum rs2, int32_t imm, Funct3 funct3) {
+        uint32_t inst = 0;
+        inst |= static_cast<uint32_t>(opcode) & 0x7F;           // opcode [6:0]
+        inst |= ((imm >> 11) & 0x1) << 7;                       // imm[11] [7]
+        inst |= ((imm >> 1) & 0xF) << 8;                        // imm[4:1] [11:8]
+        inst |= (static_cast<uint32_t>(funct3) & 0x7) << 12;    // funct3 [14:12]
+        inst |= (rs1 & 0x1F) << 15;                             // rs1 [19:15]
+        inst |= (rs2 & 0x1F) << 20;                             // rs2 [24:20]
+        inst |= ((imm >> 5) & 0x3F) << 25;                      // imm[10:5] [30:25]
+        inst |= ((imm >> 12) & 0x1) << 31;                      // imm[12] [31]
+        return inst;
+    }
+    
     std::shared_ptr<Memory> memory;
     std::unique_ptr<CPU> cpu;
 };
@@ -302,4 +339,110 @@ TEST_F(CPUTest, LoadStore_Combined) {
     // 验证加载的值
     EXPECT_EQ(cpu->getRegister(3), 0x9876FEDC);
     EXPECT_EQ(cpu->getRegister(2), 0);  // x2应该保持为0
+}
+
+TEST_F(CPUTest, LUI_Instruction) {
+    // 测试 LUI x1, 0x12345  (将0x12345加载到高20位)
+    uint32_t inst = createUType(Opcode::LUI, 1, 0x12345000);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // LUI应该将立即数放到高20位，低12位为0
+    EXPECT_EQ(cpu->getRegister(1), 0x12345000);
+    EXPECT_EQ(cpu->getPC(), 4);
+}
+
+TEST_F(CPUTest, AUIPC_Instruction) {
+    // 设置PC为100
+    cpu->setPC(100);
+    
+    // 测试 AUIPC x2, 0x1000  (PC + 0x1000000)
+    uint32_t inst = createUType(Opcode::AUIPC, 2, 0x1000000);
+    memory->writeWord(100, inst);
+    
+    cpu->step();
+    
+    // AUIPC应该将PC + 立即数存入寄存器
+    EXPECT_EQ(cpu->getRegister(2), 100 + 0x1000000);
+    EXPECT_EQ(cpu->getPC(), 104);
+}
+
+TEST_F(CPUTest, JAL_Instruction) {
+    // 设置PC为0
+    cpu->setPC(0);
+    
+    // 测试 JAL x1, 20  (跳转到PC+20，保存返回地址)
+    uint32_t inst = createJType(Opcode::JAL, 1, 20);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // 检查返回地址和PC
+    EXPECT_EQ(cpu->getRegister(1), 4);   // 返回地址是PC+4
+    EXPECT_EQ(cpu->getPC(), 20);         // PC应该跳转到0+20
+}
+
+TEST_F(CPUTest, BEQ_Instruction_Taken) {
+    // 设置相等的寄存器值
+    cpu->setRegister(1, 42);
+    cpu->setRegister(2, 42);
+    cpu->setPC(0);
+    
+    // 测试 BEQ x1, x2, 16  (如果相等则跳转)
+    uint32_t inst = createBType(Opcode::BRANCH, 1, 2, 16, Funct3::BEQ);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // 应该跳转
+    EXPECT_EQ(cpu->getPC(), 16);
+}
+
+TEST_F(CPUTest, BEQ_Instruction_NotTaken) {
+    // 设置不相等的寄存器值
+    cpu->setRegister(1, 42);
+    cpu->setRegister(2, 43);
+    cpu->setPC(0);
+    
+    // 测试 BEQ x1, x2, 16  (如果相等则跳转)
+    uint32_t inst = createBType(Opcode::BRANCH, 1, 2, 16, Funct3::BEQ);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // 不应该跳转，PC正常递增
+    EXPECT_EQ(cpu->getPC(), 4);
+}
+
+TEST_F(CPUTest, BLT_Instruction) {
+    // 设置寄存器值：-10 < 5
+    cpu->setRegister(1, static_cast<uint32_t>(-10));
+    cpu->setRegister(2, 5);
+    cpu->setPC(0);
+    
+    // 测试 BLT x1, x2, 12  (有符号比较)
+    uint32_t inst = createBType(Opcode::BRANCH, 1, 2, 12, Funct3::BLT);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // 应该跳转（-10 < 5）
+    EXPECT_EQ(cpu->getPC(), 12);
+}
+
+TEST_F(CPUTest, BLTU_Instruction) {
+    // 设置寄存器值：作为无符号数，-10实际是很大的正数
+    cpu->setRegister(1, static_cast<uint32_t>(-10));
+    cpu->setRegister(2, 5);
+    cpu->setPC(0);
+    
+    // 测试 BLTU x1, x2, 12  (无符号比较)
+    uint32_t inst = createBType(Opcode::BRANCH, 1, 2, 12, Funct3::BLTU);
+    memory->writeWord(0, inst);
+    
+    cpu->step();
+    
+    // 不应该跳转（作为无符号数，-10 > 5）
+    EXPECT_EQ(cpu->getPC(), 4);
 }

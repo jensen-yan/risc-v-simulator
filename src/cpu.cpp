@@ -258,19 +258,94 @@ void CPU::executeSType(const DecodedInstruction& inst) {
 }
 
 void CPU::executeBType(const DecodedInstruction& inst) {
-    // TODO: 实现B-type指令
+    if (inst.opcode == Opcode::BRANCH) {
+        uint32_t rs1_val = getRegister(inst.rs1);
+        uint32_t rs2_val = getRegister(inst.rs2);
+        bool branch_taken = false;
+        
+        switch (inst.funct3) {
+            case Funct3::BEQ: // Branch if Equal
+                branch_taken = (rs1_val == rs2_val);
+                break;
+            case Funct3::BNE: // Branch if Not Equal
+                branch_taken = (rs1_val != rs2_val);
+                break;
+            case Funct3::BLT: // Branch if Less Than (signed)
+                branch_taken = (static_cast<int32_t>(rs1_val) < static_cast<int32_t>(rs2_val));
+                break;
+            case Funct3::BGE: // Branch if Greater or Equal (signed)
+                branch_taken = (static_cast<int32_t>(rs1_val) >= static_cast<int32_t>(rs2_val));
+                break;
+            case Funct3::BLTU: // Branch if Less Than Unsigned
+                branch_taken = (rs1_val < rs2_val);
+                break;
+            case Funct3::BGEU: // Branch if Greater or Equal Unsigned
+                branch_taken = (rs1_val >= rs2_val);
+                break;
+            default:
+                throw IllegalInstructionException("不支持的分支指令");
+        }
+        
+        if (branch_taken) {
+            // 跳转到 PC + 符号扩展的立即数
+            pc_ = pc_ + inst.imm;
+        } else {
+            // 不跳转，正常递增PC
+            incrementPC();
+        }
+    } else {
+        throw IllegalInstructionException("不支持的B-type指令");
+    }
 }
 
 void CPU::executeUType(const DecodedInstruction& inst) {
-    // TODO: 实现U-type指令
+    uint32_t result = 0;
+    
+    switch (inst.opcode) {
+        case Opcode::LUI: // Load Upper Immediate
+            // LUI将20位立即数加载到目标寄存器的高20位，低12位清零
+            result = static_cast<uint32_t>(inst.imm);
+            break;
+        case Opcode::AUIPC: // Add Upper Immediate to PC
+            // AUIPC将20位立即数加载到高20位，然后加上PC值
+            result = static_cast<uint32_t>(inst.imm) + pc_;
+            break;
+        default:
+            throw IllegalInstructionException("不支持的U-type指令");
+    }
+    
+    setRegister(inst.rd, result);
+    incrementPC();
 }
 
 void CPU::executeJType(const DecodedInstruction& inst) {
-    // TODO: 实现J-type指令
+    if (inst.opcode == Opcode::JAL) {
+        // JAL: Jump and Link
+        // 1. 保存返回地址（PC + 4）到目标寄存器
+        setRegister(inst.rd, pc_ + 4);
+        
+        // 2. 跳转到 PC + 符号扩展的立即数
+        pc_ = pc_ + inst.imm;
+    } else {
+        throw IllegalInstructionException("不支持的J-type指令");
+    }
 }
 
 void CPU::executeSystem(const DecodedInstruction& inst) {
-    // TODO: 实现系统指令
+    if (inst.opcode == Opcode::SYSTEM) {
+        // 根据立即数字段区分ECALL和EBREAK
+        if (inst.imm == 0) {
+            // ECALL - 环境调用
+            handleEcall();
+        } else if (inst.imm == 1) {
+            // EBREAK - 断点
+            handleEbreak();
+        } else {
+            throw IllegalInstructionException("不支持的系统指令");
+        }
+    } else {
+        throw IllegalInstructionException("不支持的系统指令");
+    }
 }
 
 uint32_t CPU::loadFromMemory(Address addr, Funct3 funct3) {

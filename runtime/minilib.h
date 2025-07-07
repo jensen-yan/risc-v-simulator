@@ -3,6 +3,8 @@
 // 最小运行时库，提供基本的printf支持
 // 针对RISC-V模拟器优化
 
+// printf函数现在使用直接寄存器访问，无需va_list
+
 #ifdef __cplusplus
 extern "C" {
 #endif

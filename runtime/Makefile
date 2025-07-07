@@ -13,7 +13,10 @@ LDFLAGS = -T link.ld -nostdlib -static
 
 # 目标文件
 RUNTIME_OBJS = start.o minilib.o
-TEST_PROGRAMS = test_printf.elf test_simple.elf test_debug.elf test_simple_debug.elf
+
+# 测试程序源文件（不带.elf后缀）
+TEST_NAMES = test_printf test_simple test_debug test_simple_debug
+TEST_PROGRAMS = $(addsuffix .elf, $(TEST_NAMES))
 
 .PHONY: all clean
 
@@ -26,17 +29,8 @@ start.o: start.s
 minilib.o: minilib.c minilib.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# 测试程序
-test_printf.elf: ../programs/test_printf.c $(RUNTIME_OBJS)
-	$(CC) $(CFLAGS) -o $@ $< $(RUNTIME_OBJS) $(LDFLAGS)
-
-test_simple.elf: ../programs/test_simple.c $(RUNTIME_OBJS)
-	$(CC) $(CFLAGS) -o $@ $< $(RUNTIME_OBJS) $(LDFLAGS)
-
-test_debug.elf: ../programs/test_debug.c $(RUNTIME_OBJS)
-	$(CC) $(CFLAGS) -o $@ $< $(RUNTIME_OBJS) $(LDFLAGS)
-
-test_simple_debug.elf: ../programs/test_simple_debug.c $(RUNTIME_OBJS)
+# 统一规则编译所有测试程序
+%.elf: ../programs/%.c $(RUNTIME_OBJS)
 	$(CC) $(CFLAGS) -o $@ $< $(RUNTIME_OBJS) $(LDFLAGS)
 
 # 清理

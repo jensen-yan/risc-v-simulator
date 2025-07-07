@@ -141,14 +141,22 @@ void itoa(int value, char* str, int base) {
     }
 }
 
-// 测试专用的简单printf - 只支持一个整数参数
+// 简化的printf实现，支持可变参数
 int printf(const char* format, ...) {
     if (!format) return 0;
     
-    // 简化测试：假设只有一个整数参数，值为42
-    // 这是为了验证其他逻辑是否正确
-    long fixed_arg = 42;
-    long* args = &fixed_arg;
+    // 直接使用寄存器传递的参数，简化实现
+    // 在RISC-V ABI中，format在a0，第一个参数在a1
+    register long arg1 asm("a1");
+    register long arg2 asm("a2");
+    register long arg3 asm("a3");
+    register long arg4 asm("a4");
+    register long arg5 asm("a5");
+    register long arg6 asm("a6");
+    register long arg7 asm("a7");
+    
+    // 将寄存器值保存到数组中
+    long regs[7] = {arg1, arg2, arg3, arg4, arg5, arg6, arg7};
     int arg_index = 0;
     int written = 0;
     
@@ -159,7 +167,7 @@ int printf(const char* format, ...) {
             switch (*format) {
                 case 'd': {
                     // 输出整数
-                    int value = (int)args[arg_index++];
+                    int value = (int)regs[arg_index++];
                     char buffer[32];
                     itoa(value, buffer, 10);
                     int len = strlen(buffer);
@@ -169,7 +177,7 @@ int printf(const char* format, ...) {
                 }
                 case 'x': {
                     // 输出十六进制
-                    unsigned int value = (unsigned int)args[arg_index++];
+                    unsigned int value = (unsigned int)regs[arg_index++];
                     char buffer[32];
                     itoa((int)value, buffer, 16);
                     int len = strlen(buffer);
@@ -179,14 +187,14 @@ int printf(const char* format, ...) {
                 }
                 case 'c': {
                     // 输出字符
-                    char c = (char)args[arg_index++];
+                    char c = (char)regs[arg_index++];
                     syscall3(SYS_WRITE, STDOUT, (long)&c, 1);
                     written++;
                     break;
                 }
                 case 's': {
                     // 输出字符串
-                    char* str = (char*)args[arg_index++];
+                    char* str = (char*)regs[arg_index++];
                     if (str) {
                         int len = strlen(str);
                         syscall3(SYS_WRITE, STDOUT, (long)str, len);

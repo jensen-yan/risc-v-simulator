@@ -18,6 +18,7 @@ class SyscallHandler;
 class CPU {
 public:
     static constexpr size_t NUM_REGISTERS = 32;
+    static constexpr size_t NUM_FP_REGISTERS = 32;
     
     explicit CPU(std::shared_ptr<Memory> memory);
     ~CPU();
@@ -35,6 +36,12 @@ public:
     uint32_t getRegister(RegNum reg) const;
     void setRegister(RegNum reg, uint32_t value);
     
+    // 浮点寄存器访问
+    uint32_t getFPRegister(RegNum reg) const;
+    void setFPRegister(RegNum reg, uint32_t value);
+    float getFPRegisterFloat(RegNum reg) const;
+    void setFPRegisterFloat(RegNum reg, float value);
+    
     // 程序计数器
     uint32_t getPC() const { return pc_; }
     void setPC(uint32_t pc) { pc_ = pc; }
@@ -42,6 +49,10 @@ public:
     // 状态查询
     bool isHalted() const { return halted_; }
     uint64_t getInstructionCount() const { return instruction_count_; }
+    
+    // 扩展支持
+    void setEnabledExtensions(uint32_t extensions) { enabled_extensions_ = extensions; }
+    uint32_t getEnabledExtensions() const { return enabled_extensions_; }
     
     // 调试功能
     void dumpRegisters() const;
@@ -54,9 +65,11 @@ private:
     
     // CPU 状态
     std::array<uint32_t, NUM_REGISTERS> registers_;
+    std::array<uint32_t, NUM_FP_REGISTERS> fp_registers_;
     uint32_t pc_;                   // 程序计数器
     bool halted_;                   // 停机标志
     uint64_t instruction_count_;    // 指令计数器
+    uint32_t enabled_extensions_;   // 启用的扩展
     
     // 指令执行方法
     void executeRType(const DecodedInstruction& inst);
@@ -66,6 +79,10 @@ private:
     void executeUType(const DecodedInstruction& inst);
     void executeJType(const DecodedInstruction& inst);
     void executeSystem(const DecodedInstruction& inst);
+    
+    // 扩展指令执行方法
+    void executeMExtension(const DecodedInstruction& inst);
+    void executeFPExtension(const DecodedInstruction& inst);
     
     // I-Type指令子方法
     void executeImmediateOperations(const DecodedInstruction& inst);

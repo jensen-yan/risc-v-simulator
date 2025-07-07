@@ -2,7 +2,7 @@
 
 namespace riscv {
 
-DecodedInstruction Decoder::decode(Instruction instruction) const {
+DecodedInstruction Decoder::decode(Instruction instruction, uint32_t enabled_extensions) const {
     DecodedInstruction decoded;
     decoded.opcode = extractOpcode(instruction);
     decoded.type = determineType(decoded.opcode);
@@ -11,6 +11,9 @@ DecodedInstruction Decoder::decode(Instruction instruction) const {
     decoded.rd = extractRd(instruction);
     decoded.rs1 = extractRs1(instruction);
     decoded.rs2 = extractRs2(instruction);
+    decoded.rs3 = extractRs3(instruction);
+    decoded.rm = extractRM(instruction);
+    decoded.is_compressed = false;
     
     // 根据指令类型解码立即数
     switch (decoded.type) {
@@ -34,6 +37,9 @@ DecodedInstruction Decoder::decode(Instruction instruction) const {
             break;
     }
     
+    // 验证指令合法性
+    validateInstruction(decoded, enabled_extensions);
+    
     return decoded;
 }
 
@@ -53,12 +59,20 @@ RegNum Decoder::extractRs2(Instruction inst) {
     return static_cast<RegNum>((inst >> 20) & 0x1F);
 }
 
+RegNum Decoder::extractRs3(Instruction inst) {
+    return static_cast<RegNum>((inst >> 27) & 0x1F);
+}
+
 Funct3 Decoder::extractFunct3(Instruction inst) {
     return static_cast<Funct3>((inst >> 12) & 0x07);
 }
 
 Funct7 Decoder::extractFunct7(Instruction inst) {
     return static_cast<Funct7>((inst >> 25) & 0x7F);
+}
+
+FPRoundingMode Decoder::extractRM(Instruction inst) {
+    return static_cast<FPRoundingMode>((inst >> 12) & 0x07);
 }
 
 int32_t Decoder::extractImmediateI(Instruction inst) {
@@ -94,6 +108,7 @@ int32_t Decoder::extractImmediateJ(Instruction inst) {
 InstructionType Decoder::determineType(Opcode opcode) {
     switch (opcode) {
         case Opcode::OP:
+        case Opcode::OP_FP:
             return InstructionType::R_TYPE;
         case Opcode::OP_IMM:
         case Opcode::LOAD:
@@ -113,8 +128,78 @@ InstructionType Decoder::determineType(Opcode opcode) {
     }
 }
 
-void Decoder::validateInstruction(const DecodedInstruction& decoded) {
-    // TODO: 实现指令验证
+void Decoder::validateInstruction(const DecodedInstruction& decoded, uint32_t enabled_extensions) {
+    // 检查M扩展指令
+    if (decoded.opcode == Opcode::OP && decoded.funct7 == Funct7::M_EXT) {
+        if (!isExtensionEnabled(enabled_extensions, Extension::M)) {
+            throw IllegalInstructionException("M扩展指令未启用");
+        }
+    }
+    
+    // 检查F扩展指令
+    if (decoded.opcode == Opcode::OP_FP) {
+        if (!isExtensionEnabled(enabled_extensions, Extension::F)) {
+            throw IllegalInstructionException("F扩展指令未启用");
+        }
+    }
+    
+    // 检查寄存器范围
+    if (decoded.rd >= 32 || decoded.rs1 >= 32 || decoded.rs2 >= 32 || decoded.rs3 >= 32) {
+        throw IllegalInstructionException("寄存器编号超出范围");
+    }
+}
+
+DecodedInstruction Decoder::decodeCompressed(uint16_t instruction, uint32_t enabled_extensions) const {
+    if (!isExtensionEnabled(enabled_extensions, Extension::C)) {
+        throw IllegalInstructionException("C扩展指令未启用");
+    }
+    
+    DecodedInstruction decoded = expandCompressedInstruction(instruction);
+    decoded.is_compressed = true;
+    validateInstruction(decoded, enabled_extensions);
+    return decoded;
+}
+
+bool Decoder::isCompressedInstruction(uint16_t instruction) {
+    // 压缩指令的最低2位不是11
+    return (instruction & 0x03) != 0x03;
+}
+
+DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
+    DecodedInstruction decoded;
+    uint8_t op = instruction & 0x03;
+    uint8_t funct3 = (instruction >> 13) & 0x07;
+    
+    // 简化的压缩指令解码 - 仅实现几个常用指令
+    switch (op) {
+        case 0x01: // C.J, C.JAL等
+            if (funct3 == 0x01) { // C.JAL
+                decoded.opcode = Opcode::JAL;
+                decoded.type = InstructionType::J_TYPE;
+                decoded.rd = 1; // x1 (ra)
+                // 提取立即数 (简化)
+                decoded.imm = ((instruction >> 3) & 0x1F) << 1;
+            }
+            break;
+        case 0x02: // C.LWSP, C.SWSP等
+            if (funct3 == 0x02) { // C.LWSP
+                decoded.opcode = Opcode::LOAD;
+                decoded.type = InstructionType::I_TYPE;
+                decoded.funct3 = Funct3::LW;
+                decoded.rd = (instruction >> 7) & 0x1F;
+                decoded.rs1 = 2; // x2 (sp)
+                decoded.imm = ((instruction >> 2) & 0x3F) << 2;
+            }
+            break;
+        default:
+            throw IllegalInstructionException("不支持的压缩指令");
+    }
+    
+    return decoded;
+}
+
+bool Decoder::isExtensionEnabled(uint32_t enabled_extensions, Extension ext) {
+    return (enabled_extensions & static_cast<uint32_t>(ext)) != 0;
 }
 
 } // namespace riscv

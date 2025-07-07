@@ -2,13 +2,17 @@
 #include "syscall_handler.h"
 #include <iostream>
 #include <iomanip>
+#include <limits>
 
 namespace riscv {
 
 CPU::CPU(std::shared_ptr<Memory> memory) 
-    : memory_(memory), pc_(0), halted_(false), instruction_count_(0) {
+    : memory_(memory), pc_(0), halted_(false), instruction_count_(0), 
+      enabled_extensions_(static_cast<uint32_t>(Extension::I) | static_cast<uint32_t>(Extension::M) | 
+                         static_cast<uint32_t>(Extension::F) | static_cast<uint32_t>(Extension::C)) {
     // 初始化寄存器，x0寄存器始终为0
     registers_.fill(0);
+    fp_registers_.fill(0);
     
     // 初始化系统调用处理器
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
@@ -25,15 +29,15 @@ void CPU::step() {
         // 1. 取指令
         Instruction inst = memory_->fetchInstruction(pc_);
         
-        // 如果PC为0，可能表明程序错误跳转
-        if (pc_ == 0) {
-            std::cerr << "警告: PC跳转到地址0，指令=0x" << std::hex << inst << std::dec << std::endl;
+        // 如果指令为0，可能表明程序结束或到达无效内存区域
+        if (inst == 0) {
+            std::cerr << "警告: 执行了空指令(NOP)，程序可能结束" << std::endl;
             halted_ = true;
             return;
         }
         
         // 2. 解码指令
-        DecodedInstruction decoded = decoder_.decode(inst);
+        DecodedInstruction decoded = decoder_.decode(inst, enabled_extensions_);
         
         // 3. 执行指令
         switch (decoded.type) {
@@ -92,6 +96,7 @@ void CPU::run() {
 
 void CPU::reset() {
     registers_.fill(0);
+    fp_registers_.fill(0);
     pc_ = 0;
     halted_ = false;
     instruction_count_ = 0;
@@ -113,6 +118,36 @@ void CPU::setRegister(RegNum reg, uint32_t value) {
     if (reg != 0) {
         registers_[reg] = value;
     }
+}
+
+uint32_t CPU::getFPRegister(RegNum reg) const {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    return fp_registers_[reg];
+}
+
+void CPU::setFPRegister(RegNum reg, uint32_t value) {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    fp_registers_[reg] = value;
+}
+
+float CPU::getFPRegisterFloat(RegNum reg) const {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    // 重新解释32位整数为IEEE 754单精度浮点数
+    return *reinterpret_cast<const float*>(&fp_registers_[reg]);
+}
+
+void CPU::setFPRegisterFloat(RegNum reg, float value) {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    // 重新解释IEEE 754单精度浮点数为32位整数
+    fp_registers_[reg] = *reinterpret_cast<const uint32_t*>(&value);
 }
 
 void CPU::dumpRegisters() const {
@@ -192,6 +227,18 @@ void CPU::executeJALR(const DecodedInstruction& inst) {
 }
 
 void CPU::executeRType(const DecodedInstruction& inst) {
+    // 检查是否为M扩展指令
+    if (inst.opcode == Opcode::OP && inst.funct7 == Funct7::M_EXT) {
+        executeMExtension(inst);
+        return;
+    }
+    
+    // 检查是否为F扩展指令
+    if (inst.opcode == Opcode::OP_FP) {
+        executeFPExtension(inst);
+        return;
+    }
+    
     uint32_t rs1_val = getRegister(inst.rs1);
     uint32_t rs2_val = getRegister(inst.rs2);
     uint32_t result = 0;
@@ -262,6 +309,7 @@ void CPU::executeIType(const DecodedInstruction& inst) {
 void CPU::executeSType(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::STORE) {
         uint32_t addr = getRegister(inst.rs1) + inst.imm;
+        
         uint32_t value = getRegister(inst.rs2);
         storeToMemory(addr, value, inst.funct3);
         incrementPC();
@@ -413,6 +461,158 @@ int32_t CPU::signExtend(uint32_t value, int bits) const {
     int32_t mask = (1 << bits) - 1;
     int32_t signBit = 1 << (bits - 1);
     return (value & mask) | (((value & signBit) != 0) ? ~mask : 0);
+}
+
+void CPU::executeMExtension(const DecodedInstruction& inst) {
+    uint32_t rs1_val = getRegister(inst.rs1);
+    uint32_t rs2_val = getRegister(inst.rs2);
+    
+    switch (inst.funct3) {
+        case Funct3::MUL: { // MUL - 32位乘法，取低32位
+            uint64_t result = static_cast<uint64_t>(rs1_val) * static_cast<uint64_t>(rs2_val);
+            setRegister(inst.rd, static_cast<uint32_t>(result));
+            break;
+        }
+        case Funct3::MULH: { // MULH - 有符号高位乘法
+            int64_t result = static_cast<int64_t>(static_cast<int32_t>(rs1_val)) * 
+                            static_cast<int64_t>(static_cast<int32_t>(rs2_val));
+            setRegister(inst.rd, static_cast<uint32_t>(result >> 32));
+            break;
+        }
+        case Funct3::MULHSU: { // MULHSU - 有符号*无符号高位乘法
+            int64_t result = static_cast<int64_t>(static_cast<int32_t>(rs1_val)) * 
+                            static_cast<int64_t>(rs2_val);
+            setRegister(inst.rd, static_cast<uint32_t>(result >> 32));
+            break;
+        }
+        case Funct3::MULHU: { // MULHU - 无符号高位乘法
+            uint64_t result = static_cast<uint64_t>(rs1_val) * static_cast<uint64_t>(rs2_val);
+            setRegister(inst.rd, static_cast<uint32_t>(result >> 32));
+            break;
+        }
+        case Funct3::DIV: { // DIV - 有符号除法
+            if (rs2_val == 0) {
+                setRegister(inst.rd, 0xFFFFFFFF); // 除零结果
+            } else {
+                int32_t result = static_cast<int32_t>(rs1_val) / static_cast<int32_t>(rs2_val);
+                setRegister(inst.rd, static_cast<uint32_t>(result));
+            }
+            break;
+        }
+        case Funct3::DIVU: { // DIVU - 无符号除法
+            if (rs2_val == 0) {
+                setRegister(inst.rd, 0xFFFFFFFF); // 除零结果
+            } else {
+                setRegister(inst.rd, rs1_val / rs2_val);
+            }
+            break;
+        }
+        case Funct3::REM: { // REM - 有符号求余
+            if (rs2_val == 0) {
+                setRegister(inst.rd, rs1_val); // 除零时返回被除数
+            } else {
+                int32_t result = static_cast<int32_t>(rs1_val) % static_cast<int32_t>(rs2_val);
+                setRegister(inst.rd, static_cast<uint32_t>(result));
+            }
+            break;
+        }
+        case Funct3::REMU: { // REMU - 无符号求余
+            if (rs2_val == 0) {
+                setRegister(inst.rd, rs1_val); // 除零时返回被除数
+            } else {
+                setRegister(inst.rd, rs1_val % rs2_val);
+            }
+            break;
+        }
+        default:
+            throw IllegalInstructionException("不支持的M扩展指令");
+    }
+    
+    incrementPC();
+}
+
+void CPU::executeFPExtension(const DecodedInstruction& inst) {
+    // 简化的F扩展实现 - 仅支持基本操作
+    float rs1_val = getFPRegisterFloat(inst.rs1);
+    float rs2_val = getFPRegisterFloat(inst.rs2);
+    
+    // funct7的高5位表示操作类型
+    uint8_t operation = static_cast<uint8_t>(inst.funct7) >> 2;
+    
+    switch (operation) {
+        case 0x00: { // FADD.S - 浮点加法
+            float result = rs1_val + rs2_val;
+            setFPRegisterFloat(inst.rd, result);
+            break;
+        }
+        case 0x01: { // FSUB.S - 浮点减法
+            float result = rs1_val - rs2_val;
+            setFPRegisterFloat(inst.rd, result);
+            break;
+        }
+        case 0x02: { // FMUL.S - 浮点乘法
+            float result = rs1_val * rs2_val;
+            setFPRegisterFloat(inst.rd, result);
+            break;
+        }
+        case 0x03: { // FDIV.S - 浮点除法
+            if (rs2_val == 0.0f) {
+                // 处理除零情况，返回无穷大
+                setFPRegisterFloat(inst.rd, std::numeric_limits<float>::infinity());
+            } else {
+                float result = rs1_val / rs2_val;
+                setFPRegisterFloat(inst.rd, result);
+            }
+            break;
+        }
+        case 0x14: { // FEQ.S, FLT.S, FLE.S - 浮点比较
+            uint32_t result = 0;
+            switch (inst.funct3) {
+                case static_cast<Funct3>(0x02): // FEQ.S
+                    result = (rs1_val == rs2_val) ? 1 : 0;
+                    break;
+                case static_cast<Funct3>(0x01): // FLT.S
+                    result = (rs1_val < rs2_val) ? 1 : 0;
+                    break;
+                case static_cast<Funct3>(0x00): // FLE.S
+                    result = (rs1_val <= rs2_val) ? 1 : 0;
+                    break;
+                default:
+                    throw IllegalInstructionException("不支持的浮点比较指令");
+            }
+            setRegister(inst.rd, result); // 比较结果存入整数寄存器
+            break;
+        }
+        case 0x18: { // FCVT.W.S, FCVT.WU.S - 浮点转整数
+            if (inst.rs2 == 0) { // FCVT.W.S - 转有符号整数
+                int32_t result = static_cast<int32_t>(rs1_val);
+                setRegister(inst.rd, static_cast<uint32_t>(result));
+            } else if (inst.rs2 == 1) { // FCVT.WU.S - 转无符号整数
+                uint32_t result = static_cast<uint32_t>(rs1_val);
+                setRegister(inst.rd, result);
+            } else {
+                throw IllegalInstructionException("不支持的浮点转换指令");
+            }
+            break;
+        }
+        case 0x1A: { // FCVT.S.W, FCVT.S.WU - 整数转浮点
+            uint32_t int_val = getRegister(inst.rs1);
+            if (inst.rs2 == 0) { // FCVT.S.W - 有符号整数转浮点
+                float result = static_cast<float>(static_cast<int32_t>(int_val));
+                setFPRegisterFloat(inst.rd, result);
+            } else if (inst.rs2 == 1) { // FCVT.S.WU - 无符号整数转浮点
+                float result = static_cast<float>(int_val);
+                setFPRegisterFloat(inst.rd, result);
+            } else {
+                throw IllegalInstructionException("不支持的整数转换指令");
+            }
+            break;
+        }
+        default:
+            throw IllegalInstructionException("不支持的F扩展指令");
+    }
+    
+    incrementPC();
 }
 
 } // namespace riscv

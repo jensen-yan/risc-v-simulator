@@ -63,6 +63,11 @@ private:
     void executeJType(const DecodedInstruction& inst);
     void executeSystem(const DecodedInstruction& inst);
     
+    // I-Type指令子方法
+    void executeImmediateOperations(const DecodedInstruction& inst);
+    void executeLoadOperations(const DecodedInstruction& inst);
+    void executeJALR(const DecodedInstruction& inst);
+    
     // 内存访问辅助方法
     uint32_t loadFromMemory(Address addr, Funct3 funct3);
     void storeToMemory(Address addr, uint32_t value, Funct3 funct3);

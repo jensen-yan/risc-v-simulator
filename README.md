@@ -18,6 +18,9 @@ mkdir build
 cd build
 cmake ..
 make
+
+# 生成compile_commands.json
+cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
 ```
 
 ## 使用方法

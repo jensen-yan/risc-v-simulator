@@ -3,12 +3,37 @@
 namespace riscv {
 
 DecodedInstruction Decoder::decode(Instruction instruction) const {
-    // 临时实现，返回空的解码结果
     DecodedInstruction decoded;
     decoded.opcode = extractOpcode(instruction);
     decoded.type = determineType(decoded.opcode);
+    decoded.funct3 = extractFunct3(instruction);
+    decoded.funct7 = extractFunct7(instruction);
+    decoded.rd = extractRd(instruction);
+    decoded.rs1 = extractRs1(instruction);
+    decoded.rs2 = extractRs2(instruction);
     
-    // TODO: 完整实现指令解码
+    // 根据指令类型解码立即数
+    switch (decoded.type) {
+        case InstructionType::I_TYPE:
+            decoded.imm = extractImmediateI(instruction);
+            break;
+        case InstructionType::S_TYPE:
+            decoded.imm = extractImmediateS(instruction);
+            break;
+        case InstructionType::B_TYPE:
+            decoded.imm = extractImmediateB(instruction);
+            break;
+        case InstructionType::U_TYPE:
+            decoded.imm = extractImmediateU(instruction);
+            break;
+        case InstructionType::J_TYPE:
+            decoded.imm = extractImmediateJ(instruction);
+            break;
+        default:
+            decoded.imm = 0;
+            break;
+    }
+    
     return decoded;
 }
 

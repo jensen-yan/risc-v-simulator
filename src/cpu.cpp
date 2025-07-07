@@ -15,14 +15,53 @@ void CPU::step() {
         return;
     }
     
-    // TODO: 实现完整的指令执行
-    // 暂时只是递增PC和指令计数
-    pc_ += 4;
-    instruction_count_++;
-    
-    // 简单的停机条件：PC超出内存范围
-    if (pc_ >= memory_->getSize()) {
+    try {
+        // 1. 取指令
+        Instruction inst = memory_->fetchInstruction(pc_);
+        
+        // 2. 解码指令
+        DecodedInstruction decoded = decoder_.decode(inst);
+        
+        // 3. 执行指令
+        switch (decoded.type) {
+            case InstructionType::R_TYPE:
+                executeRType(decoded);
+                break;
+            case InstructionType::I_TYPE:
+                executeIType(decoded);
+                break;
+            case InstructionType::S_TYPE:
+                executeSType(decoded);
+                break;
+            case InstructionType::B_TYPE:
+                executeBType(decoded);
+                break;
+            case InstructionType::U_TYPE:
+                executeUType(decoded);
+                break;
+            case InstructionType::J_TYPE:
+                executeJType(decoded);
+                break;
+            default:
+                if (decoded.opcode == Opcode::SYSTEM) {
+                    executeSystem(decoded);
+                } else {
+                    throw IllegalInstructionException("未知指令类型");
+                }
+                break;
+        }
+        
+        instruction_count_++;
+        
+        // 简单的停机条件：PC超出内存范围
+        if (pc_ >= memory_->getSize()) {
+            halted_ = true;
+        }
+        
+    } catch (const MemoryException& e) {
+        // PC超出范围或访问无效内存
         halted_ = true;
+        throw;
     }
 }
 
@@ -84,13 +123,82 @@ void CPU::dumpState() const {
     dumpRegisters();
 }
 
+void CPU::executeImmediateOperations(const DecodedInstruction& inst) {
+    uint32_t rs1_val = getRegister(inst.rs1);
+    uint32_t result = 0;
+    
+    switch (inst.funct3) {
+        case Funct3::ADD_SUB: // ADDI
+            result = rs1_val + inst.imm;
+            break;
+        case Funct3::SLT: // SLTI
+            result = (static_cast<int32_t>(rs1_val) < inst.imm) ? 1 : 0;
+            break;
+        case Funct3::SLTU: // SLTIU
+            result = (rs1_val < static_cast<uint32_t>(inst.imm)) ? 1 : 0;
+            break;
+        case Funct3::XOR: // XORI
+            result = rs1_val ^ inst.imm;
+            break;
+        case Funct3::OR: // ORI
+            result = rs1_val | inst.imm;
+            break;
+        case Funct3::AND: // ANDI
+            result = rs1_val & inst.imm;
+            break;
+        case Funct3::SLL: // SLLI
+            // 立即数只取低5位作为移位数
+            result = rs1_val << (inst.imm & 0x1F);
+            break;
+        case Funct3::SRL_SRA: // SRLI/SRAI
+            if (inst.funct7 == Funct7::NORMAL) {
+                // SRLI - 逻辑右移
+                result = rs1_val >> (inst.imm & 0x1F);
+            } else {
+                // SRAI - 算术右移
+                result = static_cast<int32_t>(rs1_val) >> (inst.imm & 0x1F);
+            }
+            break;
+        default:
+            throw IllegalInstructionException("不支持的立即数运算");
+    }
+    
+    setRegister(inst.rd, result);
+}
+
+void CPU::executeLoadOperations(const DecodedInstruction& inst) {
+    uint32_t addr = getRegister(inst.rs1) + inst.imm;
+    uint32_t value = loadFromMemory(addr, inst.funct3);
+    setRegister(inst.rd, value);
+}
+
+void CPU::executeJALR(const DecodedInstruction& inst) {
+    uint32_t target = (getRegister(inst.rs1) + inst.imm) & ~1; // 清除最低位
+    setRegister(inst.rd, pc_ + 4); // 保存返回地址
+    pc_ = target;
+}
+
 // 临时实现，TODO: 完整实现各种指令类型
 void CPU::executeRType(const DecodedInstruction& inst) {
     // TODO: 实现R-type指令
 }
 
 void CPU::executeIType(const DecodedInstruction& inst) {
-    // TODO: 实现I-type指令
+    switch (inst.opcode) {
+        case Opcode::OP_IMM:
+            executeImmediateOperations(inst);
+            incrementPC();
+            break;
+        case Opcode::LOAD:
+            executeLoadOperations(inst);
+            incrementPC();
+            break;
+        case Opcode::JALR:
+            executeJALR(inst);
+            break;
+        default:
+            throw IllegalInstructionException("不支持的I-type指令");
+    }
 }
 
 void CPU::executeSType(const DecodedInstruction& inst) {
@@ -114,8 +222,20 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
 }
 
 uint32_t CPU::loadFromMemory(Address addr, Funct3 funct3) {
-    // TODO: 实现内存加载
-    return 0;
+    switch (funct3) {
+        case Funct3::LB: // Load Byte (符号扩展)
+            return static_cast<uint32_t>(static_cast<int8_t>(memory_->readByte(addr)));
+        case Funct3::LH: // Load Half Word (符号扩展)
+            return static_cast<uint32_t>(static_cast<int16_t>(memory_->readHalfWord(addr)));
+        case Funct3::LW: // Load Word
+            return memory_->readWord(addr);
+        case Funct3::LBU: // Load Byte Unsigned
+            return static_cast<uint32_t>(memory_->readByte(addr));
+        case Funct3::LHU: // Load Half Word Unsigned
+            return static_cast<uint32_t>(memory_->readHalfWord(addr));
+        default:
+            throw IllegalInstructionException("不支持的加载指令");
+    }
 }
 
 void CPU::storeToMemory(Address addr, uint32_t value, Funct3 funct3) {

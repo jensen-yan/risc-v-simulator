@@ -55,7 +55,7 @@ int main(int argc, char* argv[]) {
         
         if (!filename.empty()) {
             std::cout << "加载程序: " << filename << "\n";
-            if (!simulator.loadProgram(filename)) {
+            if (!simulator.loadRiscvProgram(filename, 0x1000)) {
                 std::cerr << "错误: 无法加载程序文件\n";
                 return 1;
             }

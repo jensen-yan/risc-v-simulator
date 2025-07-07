@@ -9,6 +9,13 @@ cmake-build-*/
 *.dylib
 *.exe
 
+# RISC-V 程序编译输出
+programs/*.elf
+programs/*.bin
+programs/*.s
+programs/*.dis
+programs/build/
+
 # 调试文件
 *.dSYM/
 *.pdb

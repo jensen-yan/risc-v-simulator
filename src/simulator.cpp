@@ -38,6 +38,38 @@ bool Simulator::loadProgramFromBytes(const std::vector<uint8_t>& program, Addres
     }
 }
 
+bool Simulator::loadRiscvProgram(const std::string& filename, Address loadAddr) {
+    try {
+        auto program = loadBinaryFile(filename);
+        if (program.empty()) {
+            return false;
+        }
+        
+        // 加载程序到指定地址
+        memory_->loadProgram(program, loadAddr);
+        
+        // 重置CPU状态
+        cpu_->reset();
+        
+        // 设置程序计数器
+        cpu_->setPC(loadAddr);
+        
+        // 设置栈指针 - 栈从内存顶部开始向下增长
+        // RISC-V ABI约定：x2 是栈指针 (sp)
+        cpu_->setRegister(2, memory_->getSize() - 4); // sp
+        
+        // 其他ABI寄存器：
+        // x1 = ra (返回地址寄存器)，暂时设为0，程序结束时会用到
+        // x8 = s0/fp (帧指针)，初始化为栈指针值
+        cpu_->setRegister(8, memory_->getSize() - 4); // s0/fp
+        
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "加载RISC-V程序失败: " << e.what() << "\n";
+        return false;
+    }
+}
+
 void Simulator::step() {
     cpu_->step();
 }

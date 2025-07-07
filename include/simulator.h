@@ -23,6 +23,7 @@ public:
     // 程序管理
     bool loadProgram(const std::string& filename);
     bool loadProgramFromBytes(const std::vector<uint8_t>& program, Address startAddr = 0);
+    bool loadRiscvProgram(const std::string& filename, Address loadAddr = 0x1000);
     
     // 执行控制
     void step();                    // 单步执行

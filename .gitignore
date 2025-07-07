@@ -1,0 +1,31 @@
+# 构建目录
+build/
+cmake-build-*/
+
+# 编译输出
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# 调试文件
+*.dSYM/
+*.pdb
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 测试输出
+*.log
+test_results/
+
+.cache/

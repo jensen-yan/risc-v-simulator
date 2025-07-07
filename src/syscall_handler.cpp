@@ -37,8 +37,8 @@ bool SyscallHandler::handleSyscall(CPU* cpu) {
             
         default:
             std::cerr << "不支持的系统调用: " << syscallNum << std::endl;
-            // 返回错误码 -1
-            cpu->setRegister(10, static_cast<uint32_t>(-1));
+            // 对于未知系统调用，返回0而不是-1，避免无限循环
+            cpu->setRegister(10, 0);
             break;
     }
     
@@ -47,7 +47,21 @@ bool SyscallHandler::handleSyscall(CPU* cpu) {
 
 void SyscallHandler::handleExit(CPU* cpu) {
     uint32_t exitCode = cpu->getRegister(10);  // a0
-    std::cout << "\n程序正常退出，退出码: " << exitCode << std::endl;
+    
+    // riscv-tests使用退出码表示测试结果
+    if (exitCode == 0) {
+        std::cout << "\n=== 测试结果: PASS ===\n";
+        std::cout << "程序正常退出，退出码: " << exitCode << std::endl;
+    } else {
+        std::cout << "\n=== 测试结果: FAIL ===\n";
+        std::cout << "程序异常退出，退出码: " << exitCode << std::endl;
+        
+        // 如果退出码是1，通常表示测试失败但程序正常
+        // 如果退出码大于1，可能表示具体的失败测试编号
+        if (exitCode > 1) {
+            std::cout << "失败的测试编号: " << exitCode << std::endl;
+        }
+    }
     // 不需要设置返回值，程序将停机
 }
 

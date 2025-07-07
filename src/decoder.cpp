@@ -113,6 +113,7 @@ InstructionType Decoder::determineType(Opcode opcode) {
         case Opcode::OP_IMM:
         case Opcode::LOAD:
         case Opcode::JALR:
+        case Opcode::MISC_MEM:
             return InstructionType::I_TYPE;
         case Opcode::STORE:
             return InstructionType::S_TYPE;
@@ -123,6 +124,8 @@ InstructionType Decoder::determineType(Opcode opcode) {
             return InstructionType::U_TYPE;
         case Opcode::JAL:
             return InstructionType::J_TYPE;
+        case Opcode::SYSTEM:
+            return InstructionType::SYSTEM_TYPE;
         default:
             return InstructionType::UNKNOWN;
     }

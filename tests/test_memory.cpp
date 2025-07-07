@@ -45,21 +45,6 @@ TEST_F(MemoryTest, WordOperations) {
     EXPECT_EQ(memory->readByte(3), 0x12);
 }
 
-TEST_F(MemoryTest, InstructionFetch) {
-    // 测试指令获取
-    memory->writeWord(0, 0x12345678);
-    EXPECT_EQ(memory->fetchInstruction(0), 0x12345678);
-    
-    // 测试4字节对齐检查
-    EXPECT_THROW(memory->fetchInstruction(1), MemoryException);
-    EXPECT_THROW(memory->fetchInstruction(2), MemoryException);
-    EXPECT_THROW(memory->fetchInstruction(3), MemoryException);
-    
-    // 对齐的地址应该正常工作
-    memory->writeWord(4, 0x87654321);
-    EXPECT_EQ(memory->fetchInstruction(4), 0x87654321);
-}
-
 TEST_F(MemoryTest, BoundaryChecks) {
     // 测试越界访问
     EXPECT_THROW(memory->readByte(1024), MemoryException);

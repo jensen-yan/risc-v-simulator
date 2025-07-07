@@ -31,6 +31,7 @@ enum class InstructionType {
     B_TYPE,     // 分支指令
     U_TYPE,     // 上位立即数指令
     J_TYPE,     // 跳转指令
+    SYSTEM_TYPE, // 系统指令
     UNKNOWN
 };
 
@@ -59,6 +60,9 @@ enum class Opcode : uint8_t {
     
     // 浮点运算指令 (F/D扩展)
     OP_FP       = 0b1010011,    // 浮点运算指令
+    
+    // 同步指令
+    MISC_MEM    = 0b0001111,    // FENCE指令
     
     // 系统指令
     SYSTEM      = 0b1110011     // ECALL, EBREAK

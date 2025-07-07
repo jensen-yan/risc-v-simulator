@@ -120,10 +120,15 @@ class TestRunner:
         print("测试结果摘要")
         print("="*60)
         print(f"总测试数: {total}")
-        print(f"✅ 通过:   {passed} ({passed/total*100:.1f}%)")
-        print(f"❌ 失败:   {failed} ({failed/total*100:.1f}%)")
-        print(f"⏰ 超时:   {timeout} ({timeout/total*100:.1f}%)")
-        print(f"💥 错误:   {error} ({error/total*100:.1f}%)")
+        if total > 0:
+            print(f"✅ 通过:   {passed} ({passed/total*100:.1f}%)")
+            print(f"❌ 失败:   {failed} ({failed/total*100:.1f}%)")
+            print(f"⏰ 超时:   {timeout} ({timeout/total*100:.1f}%)")
+            print(f"💥 错误:   {error} ({error/total*100:.1f}%)")
+        
+        # 打印通过的测试（如果全部通过）
+        if passed == total and total > 0:
+            print(f"\n🎉 所有测试通过！")
         
         # 打印失败的测试详情
         if failed > 0:
@@ -139,7 +144,24 @@ class TestRunner:
         if error > 0:
             print(f"\n出错的测试:")
             for test in self.results['error']:
-                print(f"  - {test['name']}: {test['output'][:100]}...")
+                print(f"  - {test['name']}")
+                # 只显示前100个字符
+                if test['output'] and len(test['output']) > 100:
+                    print(f"    错误: {test['output'][:100]}...")
+                elif test['output']:
+                    print(f"    错误: {test['output']}")
+        
+        # 提供改进建议
+        if error > 0 or failed > 0 or timeout > 0:
+            print(f"\n💡 可能的改进方向:")
+            if any("内存错误" in test.get('output', '') for test in self.results['error']):
+                print("  - 内存管理：检查程序加载地址和内存大小配置")
+            if any("压缩指令" in test.get('name', '') or "rvc" in test.get('name', '') for test in self.results['error'] + self.results['failed']):
+                print("  - C扩展支持：实现16位压缩指令解码")
+            if any("浮点" in test.get('name', '') or "uf-" in test.get('name', '') for test in self.results['error'] + self.results['failed']):
+                print("  - F扩展支持：完善浮点指令实现")
+            if any("原子" in test.get('name', '') or "ua-" in test.get('name', '') for test in self.results['error'] + self.results['failed']):
+                print("  - A扩展支持：实现原子操作指令")
     
     def save_results(self, output_file: str):
         """保存详细结果到文件"""

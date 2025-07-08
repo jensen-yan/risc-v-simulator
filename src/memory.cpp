@@ -61,12 +61,24 @@ void Memory::writeWord(Address addr, uint32_t value) {
 }
 
 Instruction Memory::fetchInstruction(Address addr) const {
-    // RISC-V 指令必须4字节对齐
-    if (addr % 4 != 0) {
-        throw MemoryException("指令地址必须4字节对齐: 0x" + 
+    // 支持 C 扩展：指令只需要2字节对齐
+    if (addr % 2 != 0) {
+        throw MemoryException("指令地址必须2字节对齐: 0x" + 
                              std::to_string(addr));
     }
-    return readWord(addr);
+    
+    // 先读取16位，检查是否为压缩指令
+    uint16_t first_half = readHalfWord(addr);
+    
+    // 检查是否为32位指令（最低2位为11）
+    if ((first_half & 0x03) == 0x03) {
+        // 32位指令，读取完整的32位（可能跨越4字节边界）
+        uint16_t second_half = readHalfWord(addr + 2);
+        return static_cast<uint32_t>(first_half) | (static_cast<uint32_t>(second_half) << 16);
+    } else {
+        // 16位压缩指令，直接返回
+        return static_cast<uint32_t>(first_half);
+    }
 }
 
 void Memory::clear() {

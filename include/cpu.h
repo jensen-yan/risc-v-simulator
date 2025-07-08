@@ -70,6 +70,7 @@ private:
     bool halted_;                   // 停机标志
     uint64_t instruction_count_;    // 指令计数器
     uint32_t enabled_extensions_;   // 启用的扩展
+    bool last_instruction_compressed_; // 上一条指令是否为压缩指令
     
     // 指令执行方法
     void executeRType(const DecodedInstruction& inst);
@@ -98,7 +99,9 @@ private:
     void handleEbreak();
     
     // 辅助方法
-    void incrementPC() { pc_ += 4; }
+    void incrementPC() { 
+        pc_ += last_instruction_compressed_ ? 2 : 4; 
+    }
     int32_t signExtend(uint32_t value, int bits) const;
 }; 
 

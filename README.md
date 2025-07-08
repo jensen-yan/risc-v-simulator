@@ -65,3 +65,11 @@ make test
 ## 开发说明
 
 本项目遵循测试驱动开发（TDD）实践。每条指令都有对应的单元测试。
+
+python3 run_tests.py
+
+来运行测试，会自动运行riscv-tests 中的rv32ui 测试。
+
+./risc-v-sim -e -d -m 2164260864 ../riscv-tests/isa/rv32uc-p-rvc
+
+可以运行C 扩展指令测试

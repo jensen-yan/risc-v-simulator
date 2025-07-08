@@ -9,7 +9,8 @@ namespace riscv {
 CPU::CPU(std::shared_ptr<Memory> memory) 
     : memory_(memory), pc_(0), halted_(false), instruction_count_(0), 
       enabled_extensions_(static_cast<uint32_t>(Extension::I) | static_cast<uint32_t>(Extension::M) | 
-                         static_cast<uint32_t>(Extension::F) | static_cast<uint32_t>(Extension::C)) {
+                         static_cast<uint32_t>(Extension::F) | static_cast<uint32_t>(Extension::C)),
+      last_instruction_compressed_(false) {
     // 初始化寄存器，x0寄存器始终为0
     registers_.fill(0);
     fp_registers_.fill(0);
@@ -37,7 +38,18 @@ void CPU::step() {
         }
         
         // 2. 解码指令
-        DecodedInstruction decoded = decoder_.decode(inst, enabled_extensions_);
+        DecodedInstruction decoded;
+        
+        // 检查是否为压缩指令（16位）
+        if ((inst & 0x03) != 0x03) {
+            // 压缩指令
+            decoded = decoder_.decodeCompressed(static_cast<uint16_t>(inst), enabled_extensions_);
+            last_instruction_compressed_ = true;
+        } else {
+            // 标准32位指令
+            decoded = decoder_.decode(inst, enabled_extensions_);
+            last_instruction_compressed_ = false;
+        }
         
         // 3. 执行指令
         switch (decoded.type) {
@@ -221,7 +233,8 @@ void CPU::executeLoadOperations(const DecodedInstruction& inst) {
 
 void CPU::executeJALR(const DecodedInstruction& inst) {
     uint32_t target = (getRegister(inst.rs1) + inst.imm) & ~1; // 清除最低位
-    setRegister(inst.rd, pc_ + 4); // 保存返回地址
+    uint32_t return_addr = pc_ + (inst.is_compressed ? 2 : 4); // 根据指令长度确定返回地址
+    setRegister(inst.rd, return_addr);
     pc_ = target;
 }
 
@@ -385,8 +398,9 @@ void CPU::executeUType(const DecodedInstruction& inst) {
 void CPU::executeJType(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::JAL) {
         // JAL: Jump and Link
-        // 1. 保存返回地址（PC + 4）到目标寄存器
-        setRegister(inst.rd, pc_ + 4);
+        // 1. 保存返回地址（根据指令长度确定增量）
+        uint32_t return_addr = pc_ + (inst.is_compressed ? 2 : 4);
+        setRegister(inst.rd, return_addr);
         
         // 2. 跳转到 PC + 符号扩展的立即数
         pc_ = pc_ + inst.imm;

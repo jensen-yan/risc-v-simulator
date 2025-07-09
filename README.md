@@ -17,10 +17,11 @@
 mkdir build
 cd build
 cmake ..
-make
+make -j
 
-# 生成compile_commands.json
-cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
+# 生成debug 版本
+cmake -DCMAKE_BUILD_TYPE=debug ..
+make -j
 ```
 
 ## 使用方法
@@ -29,23 +30,21 @@ cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
 ./risc-v-sim [program.bin]
 ```
 
-## 测试
-
-```bash
-make test
-```
-
 ## 项目结构
 
 ```
 ├── src/           # 源代码文件
 ├── include/       # 头文件
 ├── tests/         # 单元测试
-├── examples/      # 示例程序
+├── riscv-tests/    # riscv-tests 测试用例
+├── runtime/        # 运行时库，主要包好minilibc库
+├── programs/       # 测试程序，结合runtime库生成elf 文件，用于测试
 └── docs/          # 文档
 ```
 
 ## 支持的指令
+
+目前支持RISCV 的RV32I 指令集，以及C 扩展指令集，还有乘除法指令。
 
 ### 算术运算
 - ADD, SUB, AND, OR, XOR, SLL, SRL, SRA
@@ -69,6 +68,12 @@ make test
 python3 run_tests.py
 
 来运行测试，会自动运行riscv-tests 中的rv32ui 测试。
+
+通过-p 参数可以指定运行测试的文件，例如：
+
+python3 run_tests.py -p "rv32uc-p-*"
+
+可以运行所有C 扩展指令测试，对应如下命令：
 
 ./risc-v-sim -e -d -m 2164260864 ../riscv-tests/isa/rv32uc-p-rvc
 

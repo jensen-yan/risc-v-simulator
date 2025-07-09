@@ -7,6 +7,8 @@ project(risc-v-simulator
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# compile_commands.json
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
@@ -17,26 +19,12 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 include_directories(include)
 
-set(SOURCES
-    src/cpu.cpp
-    src/memory.cpp
-    src/decoder.cpp
-    src/alu.cpp
-    src/simulator.cpp
-    src/elf_loader.cpp
-    src/syscall_handler.cpp
-)
+# 自动读取 src 目录下所有 .cpp 文件，但排除 main.cpp
+file(GLOB SOURCES "src/*.cpp")
+list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
 
-set(HEADERS
-    include/cpu.h
-    include/memory.h
-    include/decoder.h
-    include/alu.h
-    include/simulator.h
-    include/types.h
-    include/elf_loader.h
-    include/syscall_handler.h
-)
+# 自动读取 include 目录下所有 .h 文件
+file(GLOB HEADERS "include/*.h")
 
 add_executable(risc-v-sim
     src/main.cpp

@@ -1,5 +1,5 @@
 #include "syscall_handler.h"
-#include "cpu.h"
+#include "cpu_interface.h"
 #include "memory.h"
 #include <iostream>
 #include <cstring>
@@ -9,7 +9,7 @@ namespace riscv {
 SyscallHandler::SyscallHandler(std::shared_ptr<Memory> memory) : memory_(memory) {
 }
 
-bool SyscallHandler::handleSyscall(CPU* cpu) {
+bool SyscallHandler::handleSyscall(ICpuInterface* cpu) {
     // RISC-V ABI: 系统调用号在 a7 (x17), 参数在 a0-a6 (x10-x16)
     uint32_t syscallNum = cpu->getRegister(17);  // a7
     uint32_t a0 = cpu->getRegister(10);  // a0
@@ -45,7 +45,7 @@ bool SyscallHandler::handleSyscall(CPU* cpu) {
     return false;  // 不需要停机
 }
 
-void SyscallHandler::handleExit(CPU* cpu) {
+void SyscallHandler::handleExit(ICpuInterface* cpu) {
     uint32_t exitCode = cpu->getRegister(10);  // a0
     
     // riscv-tests使用退出码表示测试结果
@@ -65,7 +65,7 @@ void SyscallHandler::handleExit(CPU* cpu) {
     // 不需要设置返回值，程序将停机
 }
 
-void SyscallHandler::handleWrite(CPU* cpu) {
+void SyscallHandler::handleWrite(ICpuInterface* cpu) {
     uint32_t fd = cpu->getRegister(10);      // a0: 文件描述符
     uint32_t bufAddr = cpu->getRegister(11); // a1: 缓冲区地址
     uint32_t count = cpu->getRegister(12);   // a2: 写入字节数
@@ -100,7 +100,7 @@ void SyscallHandler::handleWrite(CPU* cpu) {
     }
 }
 
-void SyscallHandler::handleRead(CPU* cpu) {
+void SyscallHandler::handleRead(ICpuInterface* cpu) {
     uint32_t fd = cpu->getRegister(10);      // a0: 文件描述符
     uint32_t bufAddr = cpu->getRegister(11); // a1: 缓冲区地址
     uint32_t count = cpu->getRegister(12);   // a2: 读取字节数
@@ -127,7 +127,7 @@ void SyscallHandler::handleRead(CPU* cpu) {
     }
 }
 
-void SyscallHandler::handleBrk(CPU* cpu) {
+void SyscallHandler::handleBrk(ICpuInterface* cpu) {
     uint32_t addr = cpu->getRegister(10);  // a0: 新的程序断点
     
     // 简化实现：总是返回请求的地址

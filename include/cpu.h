@@ -4,6 +4,7 @@
 #include "memory.h"
 #include "decoder.h"
 #include "alu.h"
+#include "cpu_interface.h"
 #include <array>
 #include <memory>
 
@@ -15,48 +16,48 @@ class SyscallHandler;
  * RISC-V CPU 核心类
  * 管理寄存器状态，执行指令的主要逻辑
  */
-class CPU {
+class CPU : public ICpuInterface {
 public:
     static constexpr size_t NUM_REGISTERS = 32;
     static constexpr size_t NUM_FP_REGISTERS = 32;
     
     explicit CPU(std::shared_ptr<Memory> memory);
-    ~CPU();
+    ~CPU() override;
     
     // 禁用拷贝构造和赋值
     CPU(const CPU&) = delete;
     CPU& operator=(const CPU&) = delete;
     
     // 执行控制
-    void step();                    // 单步执行
-    void run();                     // 连续执行直到结束
-    void reset();                   // 重置CPU状态
+    void step() override;                    // 单步执行
+    void run() override;                     // 连续执行直到结束
+    void reset() override;                   // 重置CPU状态
     
     // 寄存器访问
-    uint32_t getRegister(RegNum reg) const;
-    void setRegister(RegNum reg, uint32_t value);
+    uint32_t getRegister(RegNum reg) const override;
+    void setRegister(RegNum reg, uint32_t value) override;
     
     // 浮点寄存器访问
-    uint32_t getFPRegister(RegNum reg) const;
-    void setFPRegister(RegNum reg, uint32_t value);
-    float getFPRegisterFloat(RegNum reg) const;
-    void setFPRegisterFloat(RegNum reg, float value);
+    uint32_t getFPRegister(RegNum reg) const override;
+    void setFPRegister(RegNum reg, uint32_t value) override;
+    float getFPRegisterFloat(RegNum reg) const override;
+    void setFPRegisterFloat(RegNum reg, float value) override;
     
     // 程序计数器
-    uint32_t getPC() const { return pc_; }
-    void setPC(uint32_t pc) { pc_ = pc; }
+    uint32_t getPC() const override { return pc_; }
+    void setPC(uint32_t pc) override { pc_ = pc; }
     
     // 状态查询
-    bool isHalted() const { return halted_; }
-    uint64_t getInstructionCount() const { return instruction_count_; }
+    bool isHalted() const override { return halted_; }
+    uint64_t getInstructionCount() const override { return instruction_count_; }
     
     // 扩展支持
-    void setEnabledExtensions(uint32_t extensions) { enabled_extensions_ = extensions; }
-    uint32_t getEnabledExtensions() const { return enabled_extensions_; }
+    void setEnabledExtensions(uint32_t extensions) override { enabled_extensions_ = extensions; }
+    uint32_t getEnabledExtensions() const override { return enabled_extensions_; }
     
     // 调试功能
-    void dumpRegisters() const;
-    void dumpState() const;
+    void dumpRegisters() const override;
+    void dumpState() const override;
     
 private:
     std::shared_ptr<Memory> memory_;

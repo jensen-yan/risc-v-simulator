@@ -7,6 +7,7 @@
 #include "reservation_station.h"
 #include "reorder_buffer.h"
 #include "ooo_types.h"
+#include "cpu_interface.h"
 #include <array>
 #include <memory>
 #include <queue>
@@ -25,54 +26,54 @@ class SyscallHandler;
  * 4. 支持分支预测错误恢复
  * 5. 维护程序语义正确性
  */
-class OutOfOrderCPU {
+class OutOfOrderCPU : public ICpuInterface {
 public:
     static constexpr size_t NUM_REGISTERS = 32;
     static constexpr size_t NUM_FP_REGISTERS = 32;
     static constexpr size_t PIPELINE_WIDTH = 4;  // 流水线宽度
     
     explicit OutOfOrderCPU(std::shared_ptr<Memory> memory);
-    ~OutOfOrderCPU();
+    ~OutOfOrderCPU() override;
     
     // 禁用拷贝构造和赋值
     OutOfOrderCPU(const OutOfOrderCPU&) = delete;
     OutOfOrderCPU& operator=(const OutOfOrderCPU&) = delete;
     
     // 执行控制
-    void step();                    // 单步执行（执行一个时钟周期）
-    void run();                     // 连续执行直到结束
-    void reset();                   // 重置CPU状态
+    void step() override;                    // 单步执行（执行一个时钟周期）
+    void run() override;                     // 连续执行直到结束
+    void reset() override;                   // 重置CPU状态
     
     // 寄存器访问（架构寄存器值）
-    uint32_t getRegister(RegNum reg) const;
-    void setRegister(RegNum reg, uint32_t value);
+    uint32_t getRegister(RegNum reg) const override;
+    void setRegister(RegNum reg, uint32_t value) override;
     
     // 浮点寄存器访问
-    uint32_t getFPRegister(RegNum reg) const;
-    void setFPRegister(RegNum reg, uint32_t value);
-    float getFPRegisterFloat(RegNum reg) const;
-    void setFPRegisterFloat(RegNum reg, float value);
+    uint32_t getFPRegister(RegNum reg) const override;
+    void setFPRegister(RegNum reg, uint32_t value) override;
+    float getFPRegisterFloat(RegNum reg) const override;
+    void setFPRegisterFloat(RegNum reg, float value) override;
     
     // 程序计数器
-    uint32_t getPC() const { return pc_; }
-    void setPC(uint32_t pc) { pc_ = pc; }
+    uint32_t getPC() const override { return pc_; }
+    void setPC(uint32_t pc) override { pc_ = pc; }
     
     // 状态查询
-    bool isHalted() const { return halted_; }
-    uint64_t getInstructionCount() const { return instruction_count_; }
+    bool isHalted() const override { return halted_; }
+    uint64_t getInstructionCount() const override { return instruction_count_; }
     uint64_t getCycleCount() const { return cycle_count_; }
     
     // 扩展支持
-    void setEnabledExtensions(uint32_t extensions) { enabled_extensions_ = extensions; }
-    uint32_t getEnabledExtensions() const { return enabled_extensions_; }
+    void setEnabledExtensions(uint32_t extensions) override { enabled_extensions_ = extensions; }
+    uint32_t getEnabledExtensions() const override { return enabled_extensions_; }
     
     // 性能统计
     void getPerformanceStats(uint64_t& instructions, uint64_t& cycles, 
                             uint64_t& branch_mispredicts, uint64_t& stalls) const;
     
     // 调试功能
-    void dumpRegisters() const;
-    void dumpState() const;
+    void dumpRegisters() const override;
+    void dumpState() const override;
     void dumpPipelineState() const;
     
 private:
@@ -152,9 +153,7 @@ private:
     
     // 指令执行
     void execute_instruction(ExecutionUnit& unit, const ReservationStationEntry& entry);
-    uint32_t execute_alu_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2);
     bool execute_branch_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2);
-    uint32_t execute_load_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2);
     void execute_store_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2);
     
     // 异常处理

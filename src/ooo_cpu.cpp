@@ -1,9 +1,8 @@
 #include "ooo_cpu.h"
 #include "syscall_handler.h"
+#include "instruction_executor.h"
 #include <iostream>
 #include <iomanip>
-#include <limits>
-#include <algorithm>
 
 namespace riscv {
 
@@ -413,14 +412,30 @@ void OutOfOrderCPU::execute_instruction(ExecutionUnit& unit, const ReservationSt
         
         switch (inst.type) {
             case InstructionType::R_TYPE:
+                // 寄存器-寄存器运算
+                unit.result = InstructionExecutor::executeRegisterOperation(inst, entry.src1_value, entry.src2_value);
+                break;
+                
             case InstructionType::I_TYPE:
-                // ALU运算
-                unit.result = execute_alu_operation(inst, entry.src1_value, entry.src2_value);
+                if (inst.opcode == Opcode::OP_IMM) {
+                    // 立即数运算
+                    unit.result = InstructionExecutor::executeImmediateOperation(inst, entry.src1_value);
+                } else if (inst.opcode == Opcode::LOAD) {
+                    // 加载指令
+                    uint32_t addr = entry.src1_value + inst.imm;
+                    unit.result = InstructionExecutor::loadFromMemory(memory_, addr, inst.funct3);
+                } else if (inst.opcode == Opcode::SYSTEM) {
+                    // 系统调用 - 不需要计算结果
+                    unit.result = 0;
+                } else {
+                    unit.has_exception = true;
+                    unit.exception_msg = "不支持的I-type指令";
+                }
                 break;
                 
             case InstructionType::B_TYPE:
                 // 分支指令
-                if (execute_branch_operation(inst, entry.src1_value, entry.src2_value)) {
+                if (InstructionExecutor::evaluateBranchCondition(inst, entry.src1_value, entry.src2_value)) {
                     // 分支预测错误，需要刷新流水线
                     flush_pipeline();
                     branch_mispredicts_++;
@@ -429,22 +444,21 @@ void OutOfOrderCPU::execute_instruction(ExecutionUnit& unit, const ReservationSt
                 
             case InstructionType::S_TYPE:
                 // 存储指令
-                execute_store_operation(inst, entry.src1_value, entry.src2_value);
+                {
+                    uint32_t addr = entry.src1_value + inst.imm;
+                    InstructionExecutor::storeToMemory(memory_, addr, entry.src2_value, inst.funct3);
+                }
                 break;
                 
             case InstructionType::U_TYPE:
-                // 立即数操作
-                if (inst.opcode == Opcode::LUI) {
-                    unit.result = static_cast<uint32_t>(inst.imm);
-                } else if (inst.opcode == Opcode::AUIPC) {
-                    unit.result = static_cast<uint32_t>(inst.imm) + entry.pc;
-                }
+                // 上位立即数指令
+                unit.result = InstructionExecutor::executeUpperImmediate(inst, entry.pc);
                 break;
                 
             case InstructionType::J_TYPE:
                 // 跳转指令
                 unit.result = entry.pc + (inst.is_compressed ? 2 : 4);  // 返回地址
-                pc_ = entry.pc + inst.imm;  // 跳转目标
+                pc_ = InstructionExecutor::calculateJumpTarget(inst, entry.pc);  // 跳转目标
                 break;
                 
             default:
@@ -459,126 +473,8 @@ void OutOfOrderCPU::execute_instruction(ExecutionUnit& unit, const ReservationSt
     }
 }
 
-uint32_t OutOfOrderCPU::execute_alu_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2) {
-    uint32_t result = 0;
-    
-    if (inst.type == InstructionType::I_TYPE && inst.opcode == Opcode::OP_IMM) {
-        // 立即数运算
-        switch (inst.funct3) {
-            case Funct3::ADD_SUB:
-                result = src1 + inst.imm;
-                break;
-            case Funct3::SLT:
-                result = (static_cast<int32_t>(src1) < inst.imm) ? 1 : 0;
-                break;
-            case Funct3::SLTU:
-                result = (src1 < static_cast<uint32_t>(inst.imm)) ? 1 : 0;
-                break;
-            case Funct3::XOR:
-                result = src1 ^ inst.imm;
-                break;
-            case Funct3::OR:
-                result = src1 | inst.imm;
-                break;
-            case Funct3::AND:
-                result = src1 & inst.imm;
-                break;
-            case Funct3::SLL:
-                result = src1 << (inst.imm & 0x1F);
-                break;
-            case Funct3::SRL_SRA:
-                if (inst.funct7 == Funct7::NORMAL) {
-                    result = src1 >> (inst.imm & 0x1F);
-                } else {
-                    result = static_cast<int32_t>(src1) >> (inst.imm & 0x1F);
-                }
-                break;
-            default:
-                throw IllegalInstructionException("不支持的立即数运算");
-        }
-    } else if (inst.type == InstructionType::R_TYPE) {
-        // 寄存器运算
-        switch (inst.funct3) {
-            case Funct3::ADD_SUB:
-                if (inst.funct7 == Funct7::NORMAL) {
-                    result = src1 + src2;
-                } else {
-                    result = src1 - src2;
-                }
-                break;
-            case Funct3::SLL:
-                result = src1 << (src2 & 0x1F);
-                break;
-            case Funct3::SLT:
-                result = (static_cast<int32_t>(src1) < static_cast<int32_t>(src2)) ? 1 : 0;
-                break;
-            case Funct3::SLTU:
-                result = (src1 < src2) ? 1 : 0;
-                break;
-            case Funct3::XOR:
-                result = src1 ^ src2;
-                break;
-            case Funct3::SRL_SRA:
-                if (inst.funct7 == Funct7::NORMAL) {
-                    result = src1 >> (src2 & 0x1F);
-                } else {
-                    result = static_cast<int32_t>(src1) >> (src2 & 0x1F);
-                }
-                break;
-            case Funct3::OR:
-                result = src1 | src2;
-                break;
-            case Funct3::AND:
-                result = src1 & src2;
-                break;
-            default:
-                throw IllegalInstructionException("不支持的寄存器运算");
-        }
-    } else if (inst.type == InstructionType::I_TYPE && inst.opcode == Opcode::LOAD) {
-        // 加载指令
-        uint32_t addr = src1 + inst.imm;
-        result = loadFromMemory(addr, inst.funct3);
-    } else if (inst.type == InstructionType::I_TYPE && inst.opcode == Opcode::SYSTEM) {
-        // 系统指令（ECALL/EBREAK）
-        if (inst.funct3 == Funct3::ADD_SUB && inst.imm == 0) {
-            // ECALL - 系统调用，不需要计算结果
-            result = 0;
-        } else if (inst.funct3 == Funct3::ADD_SUB && inst.imm == 1) {
-            // EBREAK - 断点，不需要计算结果
-            result = 0;
-        } else {
-            throw IllegalInstructionException("不支持的系统指令");
-        }
-    }
-    
-    return result;
-}
-
 bool OutOfOrderCPU::execute_branch_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2) {
-    bool should_branch = false;
-    
-    switch (inst.funct3) {
-        case Funct3::BEQ:
-            should_branch = (src1 == src2);
-            break;
-        case Funct3::BNE:
-            should_branch = (src1 != src2);
-            break;
-        case Funct3::BLT:
-            should_branch = (static_cast<int32_t>(src1) < static_cast<int32_t>(src2));
-            break;
-        case Funct3::BGE:
-            should_branch = (static_cast<int32_t>(src1) >= static_cast<int32_t>(src2));
-            break;
-        case Funct3::BLTU:
-            should_branch = (src1 < src2);
-            break;
-        case Funct3::BGEU:
-            should_branch = (src1 >= src2);
-            break;
-        default:
-            throw IllegalInstructionException("不支持的分支指令");
-    }
+    bool should_branch = InstructionExecutor::evaluateBranchCondition(inst, src1, src2);
     
     // 简化的分支预测检查
     bool predicted = predict_branch(pc_);
@@ -596,7 +492,7 @@ bool OutOfOrderCPU::execute_branch_operation(const DecodedInstruction& inst, uin
 
 void OutOfOrderCPU::execute_store_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2) {
     uint32_t addr = src1 + inst.imm;
-    storeToMemory(addr, src2, inst.funct3);
+    InstructionExecutor::storeToMemory(memory_, addr, src2, inst.funct3);
 }
 
 void OutOfOrderCPU::writeback_stage() {
@@ -655,12 +551,10 @@ void OutOfOrderCPU::commit_stage() {
         
         // 处理系统调用
         if (committed_inst.instruction.opcode == Opcode::SYSTEM) {
-            if (committed_inst.instruction.funct3 == Funct3::ADD_SUB && 
-                committed_inst.instruction.imm == 0) {
+            if (InstructionExecutor::isSystemCall(committed_inst.instruction)) {
                 // ECALL
                 handleEcall();
-            } else if (committed_inst.instruction.funct3 == Funct3::ADD_SUB && 
-                      committed_inst.instruction.imm == 1) {
+            } else if (InstructionExecutor::isBreakpoint(committed_inst.instruction)) {
                 // EBREAK
                 handleEbreak();
             }
@@ -909,11 +803,11 @@ void OutOfOrderCPU::update_branch_predictor(uint32_t pc, bool taken) {
 }
 
 void OutOfOrderCPU::handleEcall() {
-    // 系统调用处理需要使用原始CPU接口
-    // 这里我们创建一个适配器或者修改syscall_handler接口
-    // 暂时简化处理
-    halted_ = true;
-    std::cout << "系统调用: 程序退出" << std::endl;
+    // 处理系统调用
+    bool shouldHalt = syscall_handler_->handleSyscall(this);
+    if (shouldHalt) {
+        halted_ = true;
+    }
 }
 
 void OutOfOrderCPU::handleEbreak() {
@@ -922,42 +816,15 @@ void OutOfOrderCPU::handleEbreak() {
 }
 
 uint32_t OutOfOrderCPU::loadFromMemory(Address addr, Funct3 funct3) {
-    switch (funct3) {
-        case Funct3::LB:
-            return static_cast<uint32_t>(static_cast<int8_t>(memory_->readByte(addr)));
-        case Funct3::LH:
-            return static_cast<uint32_t>(static_cast<int16_t>(memory_->readHalfWord(addr)));
-        case Funct3::LW:
-            return memory_->readWord(addr);
-        case Funct3::LBU:
-            return static_cast<uint32_t>(memory_->readByte(addr));
-        case Funct3::LHU:
-            return static_cast<uint32_t>(memory_->readHalfWord(addr));
-        default:
-            throw IllegalInstructionException("不支持的加载指令");
-    }
+    return InstructionExecutor::loadFromMemory(memory_, addr, funct3);
 }
 
 void OutOfOrderCPU::storeToMemory(Address addr, uint32_t value, Funct3 funct3) {
-    switch (funct3) {
-        case Funct3::SB:
-            memory_->writeByte(addr, static_cast<uint8_t>(value & 0xFF));
-            break;
-        case Funct3::SH:
-            memory_->writeHalfWord(addr, static_cast<uint16_t>(value & 0xFFFF));
-            break;
-        case Funct3::SW:
-            memory_->writeWord(addr, value);
-            break;
-        default:
-            throw IllegalInstructionException("不支持的存储指令");
-    }
+    InstructionExecutor::storeToMemory(memory_, addr, value, funct3);
 }
 
 int32_t OutOfOrderCPU::signExtend(uint32_t value, int bits) const {
-    int32_t mask = (1 << bits) - 1;
-    int32_t signBit = 1 << (bits - 1);
-    return (value & mask) | (((value & signBit) != 0) ? ~mask : 0);
+    return InstructionExecutor::signExtend(value, bits);
 }
 
 void OutOfOrderCPU::getPerformanceStats(uint64_t& instructions, uint64_t& cycles, 

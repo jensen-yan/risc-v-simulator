@@ -1,8 +1,8 @@
 #include "cpu.h"
 #include "syscall_handler.h"
+#include "instruction_executor.h"
 #include <iostream>
 #include <iomanip>
-#include <limits>
 
 namespace riscv {
 
@@ -184,55 +184,18 @@ void CPU::dumpState() const {
 
 void CPU::executeImmediateOperations(const DecodedInstruction& inst) {
     uint32_t rs1_val = getRegister(inst.rs1);
-    uint32_t result = 0;
-    
-    switch (inst.funct3) {
-        case Funct3::ADD_SUB: // ADDI
-            result = rs1_val + inst.imm;
-            break;
-        case Funct3::SLT: // SLTI
-            result = (static_cast<int32_t>(rs1_val) < inst.imm) ? 1 : 0;
-            break;
-        case Funct3::SLTU: // SLTIU
-            result = (rs1_val < static_cast<uint32_t>(inst.imm)) ? 1 : 0;
-            break;
-        case Funct3::XOR: // XORI
-            result = rs1_val ^ inst.imm;
-            break;
-        case Funct3::OR: // ORI
-            result = rs1_val | inst.imm;
-            break;
-        case Funct3::AND: // ANDI
-            result = rs1_val & inst.imm;
-            break;
-        case Funct3::SLL: // SLLI
-            // 立即数只取低5位作为移位数
-            result = rs1_val << (inst.imm & 0x1F);
-            break;
-        case Funct3::SRL_SRA: // SRLI/SRAI
-            if (inst.funct7 == Funct7::NORMAL) {
-                // SRLI - 逻辑右移
-                result = rs1_val >> (inst.imm & 0x1F);
-            } else {
-                // SRAI - 算术右移
-                result = static_cast<int32_t>(rs1_val) >> (inst.imm & 0x1F);
-            }
-            break;
-        default:
-            throw IllegalInstructionException("不支持的立即数运算");
-    }
-    
+    uint32_t result = InstructionExecutor::executeImmediateOperation(inst, rs1_val);
     setRegister(inst.rd, result);
 }
 
 void CPU::executeLoadOperations(const DecodedInstruction& inst) {
     uint32_t addr = getRegister(inst.rs1) + inst.imm;
-    uint32_t value = loadFromMemory(addr, inst.funct3);
+    uint32_t value = InstructionExecutor::loadFromMemory(memory_, addr, inst.funct3);
     setRegister(inst.rd, value);
 }
 
 void CPU::executeJALR(const DecodedInstruction& inst) {
-    uint32_t target = (getRegister(inst.rs1) + inst.imm) & ~1; // 清除最低位
+    uint32_t target = InstructionExecutor::calculateJumpAndLinkTarget(inst, pc_, getRegister(inst.rs1));
     uint32_t return_addr = pc_ + (inst.is_compressed ? 2 : 4); // 根据指令长度确定返回地址
     setRegister(inst.rd, return_addr);
     pc_ = target;
@@ -253,49 +216,7 @@ void CPU::executeRType(const DecodedInstruction& inst) {
     
     uint32_t rs1_val = getRegister(inst.rs1);
     uint32_t rs2_val = getRegister(inst.rs2);
-    uint32_t result = 0;
-    
-    switch (inst.funct3) {
-        case Funct3::ADD_SUB:
-            if (inst.funct7 == Funct7::NORMAL) {
-                // ADD
-                result = rs1_val + rs2_val;
-            } else {
-                // SUB
-                result = rs1_val - rs2_val;
-            }
-            break;
-        case Funct3::SLL: // SLL - 逻辑左移
-            result = rs1_val << (rs2_val & 0x1F);
-            break;
-        case Funct3::SLT: // SLT - 有符号比较
-            result = (static_cast<int32_t>(rs1_val) < static_cast<int32_t>(rs2_val)) ? 1 : 0;
-            break;
-        case Funct3::SLTU: // SLTU - 无符号比较
-            result = (rs1_val < rs2_val) ? 1 : 0;
-            break;
-        case Funct3::XOR: // XOR - 异或
-            result = rs1_val ^ rs2_val;
-            break;
-        case Funct3::SRL_SRA:
-            if (inst.funct7 == Funct7::NORMAL) {
-                // SRL - 逻辑右移
-                result = rs1_val >> (rs2_val & 0x1F);
-            } else {
-                // SRA - 算术右移
-                result = static_cast<int32_t>(rs1_val) >> (rs2_val & 0x1F);
-            }
-            break;
-        case Funct3::OR: // OR - 或
-            result = rs1_val | rs2_val;
-            break;
-        case Funct3::AND: // AND - 与
-            result = rs1_val & rs2_val;
-            break;
-        default:
-            throw IllegalInstructionException("不支持的R-type指令");
-    }
-    
+    uint32_t result = InstructionExecutor::executeRegisterOperation(inst, rs1_val, rs2_val);
     setRegister(inst.rd, result);
     incrementPC();
 }
@@ -325,9 +246,8 @@ void CPU::executeIType(const DecodedInstruction& inst) {
 void CPU::executeSType(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::STORE) {
         uint32_t addr = getRegister(inst.rs1) + inst.imm;
-        
         uint32_t value = getRegister(inst.rs2);
-        storeToMemory(addr, value, inst.funct3);
+        InstructionExecutor::storeToMemory(memory_, addr, value, inst.funct3);
         incrementPC();
     } else {
         throw IllegalInstructionException("不支持的S-type指令");
@@ -338,30 +258,7 @@ void CPU::executeBType(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::BRANCH) {
         uint32_t rs1_val = getRegister(inst.rs1);
         uint32_t rs2_val = getRegister(inst.rs2);
-        bool branch_taken = false;
-        
-        switch (inst.funct3) {
-            case Funct3::BEQ: // Branch if Equal
-                branch_taken = (rs1_val == rs2_val);
-                break;
-            case Funct3::BNE: // Branch if Not Equal
-                branch_taken = (rs1_val != rs2_val);
-                break;
-            case Funct3::BLT: // Branch if Less Than (signed)
-                branch_taken = (static_cast<int32_t>(rs1_val) < static_cast<int32_t>(rs2_val));
-                break;
-            case Funct3::BGE: // Branch if Greater or Equal (signed)
-                branch_taken = (static_cast<int32_t>(rs1_val) >= static_cast<int32_t>(rs2_val));
-                break;
-            case Funct3::BLTU: // Branch if Less Than Unsigned
-                branch_taken = (rs1_val < rs2_val);
-                break;
-            case Funct3::BGEU: // Branch if Greater or Equal Unsigned
-                branch_taken = (rs1_val >= rs2_val);
-                break;
-            default:
-                throw IllegalInstructionException("不支持的分支指令");
-        }
+        bool branch_taken = InstructionExecutor::evaluateBranchCondition(inst, rs1_val, rs2_val);
         
         if (branch_taken) {
             // 跳转到 PC + 符号扩展的立即数
@@ -376,21 +273,7 @@ void CPU::executeBType(const DecodedInstruction& inst) {
 }
 
 void CPU::executeUType(const DecodedInstruction& inst) {
-    uint32_t result = 0;
-    
-    switch (inst.opcode) {
-        case Opcode::LUI: // Load Upper Immediate
-            // LUI将20位立即数加载到目标寄存器的高20位，低12位清零
-            result = static_cast<uint32_t>(inst.imm);
-            break;
-        case Opcode::AUIPC: // Add Upper Immediate to PC
-            // AUIPC将20位立即数加载到高20位，然后加上PC值
-            result = static_cast<uint32_t>(inst.imm) + pc_;
-            break;
-        default:
-            throw IllegalInstructionException("不支持的U-type指令");
-    }
-    
+    uint32_t result = InstructionExecutor::executeUpperImmediate(inst, pc_);
     setRegister(inst.rd, result);
     incrementPC();
 }
@@ -403,7 +286,7 @@ void CPU::executeJType(const DecodedInstruction& inst) {
         setRegister(inst.rd, return_addr);
         
         // 2. 跳转到 PC + 符号扩展的立即数
-        pc_ = pc_ + inst.imm;
+        pc_ = InstructionExecutor::calculateJumpTarget(inst, pc_);
     } else {
         throw IllegalInstructionException("不支持的J-type指令");
     }
@@ -412,16 +295,16 @@ void CPU::executeJType(const DecodedInstruction& inst) {
 void CPU::executeSystem(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::SYSTEM) {
         // CSR指令通过funct3区分，特权指令通过立即数区分
-        if (inst.funct3 == Funct3::ADD_SUB && inst.imm == 0) {
+        if (InstructionExecutor::isSystemCall(inst)) {
             // ECALL - 环境调用
             handleEcall();
-        } else if (inst.funct3 == Funct3::ADD_SUB && inst.imm == 1) {
+        } else if (InstructionExecutor::isBreakpoint(inst)) {
             // EBREAK - 断点
             handleEbreak();
-        } else if (inst.funct3 == Funct3::ADD_SUB && inst.imm == 0x302) {
+        } else if (inst.funct3 == Funct3::ECALL_EBREAK && inst.imm == 0x302) {
             // MRET - 机器模式返回（简化实现：直接跳转到mepc）
             incrementPC();
-        } else if (inst.funct3 != Funct3::ADD_SUB) {
+        } else if (inst.funct3 != Funct3::ECALL_EBREAK) {
             // CSR指令 - 暂时不实现，直接跳过
             incrementPC();
         } else {
@@ -432,38 +315,6 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
     }
 }
 
-uint32_t CPU::loadFromMemory(Address addr, Funct3 funct3) {
-    switch (funct3) {
-        case Funct3::LB: // Load Byte (符号扩展)
-            return static_cast<uint32_t>(static_cast<int8_t>(memory_->readByte(addr)));
-        case Funct3::LH: // Load Half Word (符号扩展)
-            return static_cast<uint32_t>(static_cast<int16_t>(memory_->readHalfWord(addr)));
-        case Funct3::LW: // Load Word
-            return memory_->readWord(addr);
-        case Funct3::LBU: // Load Byte Unsigned
-            return static_cast<uint32_t>(memory_->readByte(addr));
-        case Funct3::LHU: // Load Half Word Unsigned
-            return static_cast<uint32_t>(memory_->readHalfWord(addr));
-        default:
-            throw IllegalInstructionException("不支持的加载指令");
-    }
-}
-
-void CPU::storeToMemory(Address addr, uint32_t value, Funct3 funct3) {
-    switch (funct3) {
-        case Funct3::SB: // Store Byte
-            memory_->writeByte(addr, static_cast<uint8_t>(value & 0xFF));
-            break;
-        case Funct3::SH: // Store Half Word
-            memory_->writeHalfWord(addr, static_cast<uint16_t>(value & 0xFFFF));
-            break;
-        case Funct3::SW: // Store Word
-            memory_->writeWord(addr, value);
-            break;
-        default:
-            throw IllegalInstructionException("不支持的存储指令");
-    }
-}
 
 void CPU::handleEcall() {
     // 处理系统调用
@@ -490,66 +341,8 @@ void CPU::executeMExtension(const DecodedInstruction& inst) {
     uint32_t rs1_val = getRegister(inst.rs1);
     uint32_t rs2_val = getRegister(inst.rs2);
     
-    switch (inst.funct3) {
-        case Funct3::MUL: { // MUL - 32位乘法，取低32位
-            uint64_t result = static_cast<uint64_t>(rs1_val) * static_cast<uint64_t>(rs2_val);
-            setRegister(inst.rd, static_cast<uint32_t>(result));
-            break;
-        }
-        case Funct3::MULH: { // MULH - 有符号高位乘法
-            int64_t result = static_cast<int64_t>(static_cast<int32_t>(rs1_val)) * 
-                            static_cast<int64_t>(static_cast<int32_t>(rs2_val));
-            setRegister(inst.rd, static_cast<uint32_t>(result >> 32));
-            break;
-        }
-        case Funct3::MULHSU: { // MULHSU - 有符号*无符号高位乘法
-            int64_t result = static_cast<int64_t>(static_cast<int32_t>(rs1_val)) * 
-                            static_cast<int64_t>(rs2_val);
-            setRegister(inst.rd, static_cast<uint32_t>(result >> 32));
-            break;
-        }
-        case Funct3::MULHU: { // MULHU - 无符号高位乘法
-            uint64_t result = static_cast<uint64_t>(rs1_val) * static_cast<uint64_t>(rs2_val);
-            setRegister(inst.rd, static_cast<uint32_t>(result >> 32));
-            break;
-        }
-        case Funct3::DIV: { // DIV - 有符号除法
-            if (rs2_val == 0) {
-                setRegister(inst.rd, 0xFFFFFFFF); // 除零结果
-            } else {
-                int32_t result = static_cast<int32_t>(rs1_val) / static_cast<int32_t>(rs2_val);
-                setRegister(inst.rd, static_cast<uint32_t>(result));
-            }
-            break;
-        }
-        case Funct3::DIVU: { // DIVU - 无符号除法
-            if (rs2_val == 0) {
-                setRegister(inst.rd, 0xFFFFFFFF); // 除零结果
-            } else {
-                setRegister(inst.rd, rs1_val / rs2_val);
-            }
-            break;
-        }
-        case Funct3::REM: { // REM - 有符号求余
-            if (rs2_val == 0) {
-                setRegister(inst.rd, rs1_val); // 除零时返回被除数
-            } else {
-                int32_t result = static_cast<int32_t>(rs1_val) % static_cast<int32_t>(rs2_val);
-                setRegister(inst.rd, static_cast<uint32_t>(result));
-            }
-            break;
-        }
-        case Funct3::REMU: { // REMU - 无符号求余
-            if (rs2_val == 0) {
-                setRegister(inst.rd, rs1_val); // 除零时返回被除数
-            } else {
-                setRegister(inst.rd, rs1_val % rs2_val);
-            }
-            break;
-        }
-        default:
-            throw IllegalInstructionException("不支持的M扩展指令");
-    }
+    uint32_t result = InstructionExecutor::executeMExtension(inst, rs1_val, rs2_val);
+    setRegister(inst.rd, result);
     
     incrementPC();
 }
@@ -559,80 +352,24 @@ void CPU::executeFPExtension(const DecodedInstruction& inst) {
     float rs1_val = getFPRegisterFloat(inst.rs1);
     float rs2_val = getFPRegisterFloat(inst.rs2);
     
-    // funct7的高5位表示操作类型
-    uint8_t operation = static_cast<uint8_t>(inst.funct7) >> 2;
+    uint32_t result = InstructionExecutor::executeFPExtension(inst, rs1_val, rs2_val);
     
-    switch (operation) {
-        case 0x00: { // FADD.S - 浮点加法
-            float result = rs1_val + rs2_val;
-            setFPRegisterFloat(inst.rd, result);
-            break;
-        }
-        case 0x01: { // FSUB.S - 浮点减法
-            float result = rs1_val - rs2_val;
-            setFPRegisterFloat(inst.rd, result);
-            break;
-        }
-        case 0x02: { // FMUL.S - 浮点乘法
-            float result = rs1_val * rs2_val;
-            setFPRegisterFloat(inst.rd, result);
-            break;
-        }
-        case 0x03: { // FDIV.S - 浮点除法
-            if (rs2_val == 0.0f) {
-                // 处理除零情况，返回无穷大
-                setFPRegisterFloat(inst.rd, std::numeric_limits<float>::infinity());
-            } else {
-                float result = rs1_val / rs2_val;
-                setFPRegisterFloat(inst.rd, result);
-            }
-            break;
-        }
-        case 0x14: { // FEQ.S, FLT.S, FLE.S - 浮点比较
-            uint32_t result = 0;
-            switch (inst.funct3) {
-                case static_cast<Funct3>(0x02): // FEQ.S
-                    result = (rs1_val == rs2_val) ? 1 : 0;
-                    break;
-                case static_cast<Funct3>(0x01): // FLT.S
-                    result = (rs1_val < rs2_val) ? 1 : 0;
-                    break;
-                case static_cast<Funct3>(0x00): // FLE.S
-                    result = (rs1_val <= rs2_val) ? 1 : 0;
-                    break;
-                default:
-                    throw IllegalInstructionException("不支持的浮点比较指令");
-            }
-            setRegister(inst.rd, result); // 比较结果存入整数寄存器
-            break;
-        }
-        case 0x18: { // FCVT.W.S, FCVT.WU.S - 浮点转整数
-            if (inst.rs2 == 0) { // FCVT.W.S - 转有符号整数
-                int32_t result = static_cast<int32_t>(rs1_val);
-                setRegister(inst.rd, static_cast<uint32_t>(result));
-            } else if (inst.rs2 == 1) { // FCVT.WU.S - 转无符号整数
-                uint32_t result = static_cast<uint32_t>(rs1_val);
-                setRegister(inst.rd, result);
-            } else {
-                throw IllegalInstructionException("不支持的浮点转换指令");
-            }
-            break;
-        }
-        case 0x1A: { // FCVT.S.W, FCVT.S.WU - 整数转浮点
-            uint32_t int_val = getRegister(inst.rs1);
-            if (inst.rs2 == 0) { // FCVT.S.W - 有符号整数转浮点
-                float result = static_cast<float>(static_cast<int32_t>(int_val));
-                setFPRegisterFloat(inst.rd, result);
-            } else if (inst.rs2 == 1) { // FCVT.S.WU - 无符号整数转浮点
-                float result = static_cast<float>(int_val);
-                setFPRegisterFloat(inst.rd, result);
-            } else {
-                throw IllegalInstructionException("不支持的整数转换指令");
-            }
-            break;
-        }
-        default:
-            throw IllegalInstructionException("不支持的F扩展指令");
+    // 根据指令类型决定结果存储位置
+    uint8_t operation = static_cast<uint8_t>(inst.funct7) >> 2;
+    if (operation == 0x14) { // 浮点比较指令，结果存入整数寄存器
+        setRegister(inst.rd, result);
+    } else if (operation == 0x18) { // 浮点转整数指令，结果存入整数寄存器
+        setRegister(inst.rd, result);
+    } else if (operation == 0x1A) { // 整数转浮点指令，结果存入浮点寄存器
+        // 将uint32_t结果重新解释为float
+        union { uint32_t i; float f; } converter;
+        converter.i = result;
+        setFPRegisterFloat(inst.rd, converter.f);
+    } else { // 其他浮点运算指令，结果存入浮点寄存器
+        // 将uint32_t结果重新解释为float
+        union { uint32_t i; float f; } converter;
+        converter.i = result;
+        setFPRegisterFloat(inst.rd, converter.f);
     }
     
     incrementPC();

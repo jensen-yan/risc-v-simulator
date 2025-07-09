@@ -2,13 +2,12 @@
 
 #include "types.h"
 #include <memory>
-#include <iostream>
 #include <string>
 
 namespace riscv {
 
 class Memory;
-class CPU;
+class ICpuInterface;
 
 /**
  * 系统调用处理器
@@ -40,16 +39,16 @@ public:
      * @param cpu CPU实例，用于访问寄存器
      * @return 是否需要停机
      */
-    bool handleSyscall(CPU* cpu);
+    bool handleSyscall(ICpuInterface* cpu);
 
 private:
     std::shared_ptr<Memory> memory_;
     
     // 系统调用实现
-    void handleExit(CPU* cpu);
-    void handleWrite(CPU* cpu);
-    void handleRead(CPU* cpu);
-    void handleBrk(CPU* cpu);
+    void handleExit(ICpuInterface* cpu);
+    void handleWrite(ICpuInterface* cpu);
+    void handleRead(ICpuInterface* cpu);
+    void handleBrk(ICpuInterface* cpu);
     
     // 辅助方法
     std::string readStringFromMemory(Address addr, size_t maxLen = 1024);

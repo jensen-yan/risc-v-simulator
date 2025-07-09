@@ -40,6 +40,9 @@ struct RenameEntry {
 struct ReservationStationEntry {
     DecodedInstruction instruction;
     
+    // 指令跟踪
+    uint64_t instruction_id;    // 全局指令序号
+    
     // 操作数信息
     bool src1_ready;
     bool src2_ready;
@@ -60,7 +63,7 @@ struct ReservationStationEntry {
     // 指令地址
     uint32_t pc;
     
-    ReservationStationEntry() : src1_ready(false), src2_ready(false), 
+    ReservationStationEntry() : instruction_id(0), src1_ready(false), src2_ready(false), 
                                src1_value(0), src2_value(0), 
                                src1_reg(0), src2_reg(0), dest_reg(0),
                                rob_entry(0), valid(false), pc(0) {}
@@ -70,12 +73,16 @@ struct ReservationStationEntry {
 struct ReorderBufferEntry {
     DecodedInstruction instruction;
     
+    // 指令跟踪
+    uint64_t instruction_id;    // 全局指令序号
+    
     // 指令状态
     enum class State {
-        ISSUED,     // 已发射到保留站
-        EXECUTING,  // 正在执行
-        COMPLETED,  // 执行完成
-        RETIRED     // 已退休
+        ALLOCATED,   // 已分配到ROB，等待发射
+        ISSUED,      // 已发射到保留站，等待调度
+        EXECUTING,   // 正在执行
+        COMPLETED,   // 执行完成
+        RETIRED      // 已退休
     } state;
     
     // 结果信息
@@ -96,7 +103,7 @@ struct ReorderBufferEntry {
     // 是否有效
     bool valid;
     
-    ReorderBufferEntry() : state(State::ISSUED), result(0), result_ready(false),
+    ReorderBufferEntry() : instruction_id(0), state(State::ALLOCATED), result(0), result_ready(false),
                           logical_dest(0), physical_dest(0), has_exception(false),
                           pc(0), valid(false) {}
 };

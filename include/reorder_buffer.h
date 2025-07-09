@@ -18,10 +18,11 @@ namespace riscv {
  * 5. 跟踪指令执行状态和结果
  */
 class ReorderBuffer {
-private:
+public:
     // 配置参数
     static const int MAX_ROB_ENTRIES = 32;       // ROB最大容量
-    
+
+private:
     // ROB表项存储（使用循环队列）
     std::vector<ReorderBufferEntry> rob_entries;
     
@@ -63,6 +64,15 @@ public:
     // 更新ROB表项执行结果
     void update_entry(ROBEntry rob_entry, uint32_t result, bool has_exception = false, 
                      const std::string& exception_msg = "");
+    
+    // 设置指令序号
+    void set_instruction_id(ROBEntry rob_entry, uint64_t instruction_id);
+    
+    // 获取可以发射的指令
+    ROBEntry get_dispatchable_entry() const;
+    
+    // 标记指令为已发射到保留站
+    void mark_as_dispatched(ROBEntry rob_entry);
     
     // 尝试提交一条指令
     CommitResult commit_instruction();

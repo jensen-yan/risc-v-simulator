@@ -22,7 +22,7 @@ void ReorderBuffer::initialize_rob() {
     // 初始化所有ROB表项
     for (int i = 0; i < MAX_ROB_ENTRIES; ++i) {
         rob_entries[i].valid = false;
-        rob_entries[i].state = ReorderBufferEntry::State::ISSUED;
+        rob_entries[i].state = ReorderBufferEntry::State::ALLOCATED;
         rob_entries[i].result_ready = false;
         rob_entries[i].has_exception = false;
         rob_entries[i].pc = 0;
@@ -60,7 +60,7 @@ ReorderBuffer::AllocateResult ReorderBuffer::allocate_entry(
     rob_entries[index].instruction = instruction;
     rob_entries[index].pc = pc;
     rob_entries[index].valid = true;
-    rob_entries[index].state = ReorderBufferEntry::State::ISSUED;
+    rob_entries[index].state = ReorderBufferEntry::State::ALLOCATED;
     rob_entries[index].result_ready = false;
     rob_entries[index].has_exception = false;
     rob_entries[index].result = 0;
@@ -77,6 +77,32 @@ ReorderBuffer::AllocateResult ReorderBuffer::allocate_entry(
     return result;
 }
 
+void ReorderBuffer::set_instruction_id(ROBEntry rob_entry, uint64_t instruction_id) {
+    int index = entry_to_index(rob_entry);
+    assert(is_valid_index(index) && rob_entries[index].valid && "ROB表项无效");
+    
+    rob_entries[index].instruction_id = instruction_id;
+}
+
+ROBEntry ReorderBuffer::get_dispatchable_entry() const {
+    // 遍历ROB，找到第一条状态为ALLOCATED的指令
+    for (int i = 0; i < MAX_ROB_ENTRIES; ++i) {
+        int index = (head_ptr + i) % MAX_ROB_ENTRIES;
+        if (rob_entries[index].valid && rob_entries[index].state == ReorderBufferEntry::State::ALLOCATED) {
+            return index_to_entry(index);
+        }
+    }
+    return 32;  // 没有可发射的指令
+}
+
+void ReorderBuffer::mark_as_dispatched(ROBEntry rob_entry) {
+    int index = entry_to_index(rob_entry);
+    assert(is_valid_index(index) && rob_entries[index].valid && "ROB表项无效");
+    assert(rob_entries[index].state == ReorderBufferEntry::State::ALLOCATED && "指令状态错误");
+    
+    rob_entries[index].state = ReorderBufferEntry::State::ISSUED;
+}
+
 void ReorderBuffer::update_entry(ROBEntry rob_entry, uint32_t result, 
                                 bool has_exception, const std::string& exception_msg) {
     
@@ -91,10 +117,6 @@ void ReorderBuffer::update_entry(ROBEntry rob_entry, uint32_t result,
     
     if (has_exception) {
         exception_count++;
-        std::cout << "ROB表项 " << rob_entry << " 异常: " << exception_msg << std::endl;
-    } else {
-        std::cout << "ROB表项 " << rob_entry << " 完成, 结果=0x" 
-                  << std::hex << result << std::dec << std::endl;
     }
 }
 
@@ -351,6 +373,7 @@ void ReorderBuffer::dump_reorder_buffer() const {
             
             // 状态
             switch (entry.state) {
+                case ReorderBufferEntry::State::ALLOCATED: std::cout << "已分配"; break;
                 case ReorderBufferEntry::State::ISSUED: std::cout << "已发射"; break;
                 case ReorderBufferEntry::State::EXECUTING: std::cout << "执行中"; break;
                 case ReorderBufferEntry::State::COMPLETED: std::cout << "已完成"; break;

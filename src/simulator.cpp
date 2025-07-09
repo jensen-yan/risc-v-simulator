@@ -5,9 +5,10 @@
 
 namespace riscv {
 
-Simulator::Simulator(size_t memorySize) 
+Simulator::Simulator(size_t memorySize, CpuType cpuType) 
     : memory_(std::make_shared<Memory>(memorySize)),
-      cpu_(std::make_unique<CPU>(memory_)) {
+      cpu_(CpuFactory::createCpu(cpuType, memory_)),
+      cpuType_(cpuType) {
 }
 
 bool Simulator::loadProgram(const std::string& filename) {

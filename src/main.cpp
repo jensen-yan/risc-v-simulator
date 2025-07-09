@@ -12,11 +12,14 @@ void printUsage(const char* programName) {
     std::cout << "  -d, --debug    调试模式\n";
     std::cout << "  -m SIZE        设置内存大小（字节）\n";
     std::cout << "  -e, --elf      加载ELF文件（自动检测）\n";
+    std::cout << "  --ooo          使用乱序执行CPU\n";
+    std::cout << "  --in-order     使用顺序执行CPU（默认）\n";
     std::cout << "\n";
     std::cout << "示例:\n";
     std::cout << "  " << programName << " program.bin    # 二进制文件\n";
     std::cout << "  " << programName << " program.elf    # ELF文件\n";
     std::cout << "  " << programName << " -s -d program.elf\n";
+    std::cout << "  " << programName << " --ooo program.elf  # 使用乱序执行CPU\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -34,6 +37,7 @@ int main(int argc, char* argv[]) {
     bool debugMode = false;
     bool forceElf = false;
     size_t memorySize = Memory::DEFAULT_SIZE;
+    CpuType cpuType = CpuType::IN_ORDER;  // 默认使用顺序执行CPU
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -47,6 +51,10 @@ int main(int argc, char* argv[]) {
             debugMode = true;
         } else if (arg == "-e" || arg == "--elf") {
             forceElf = true;
+        } else if (arg == "--ooo") {
+            cpuType = CpuType::OUT_OF_ORDER;
+        } else if (arg == "--in-order") {
+            cpuType = CpuType::IN_ORDER;
         } else if (arg == "-m" && i + 1 < argc) {
             memorySize = std::stoul(argv[++i]);
         } else if (filename.empty()) {
@@ -56,7 +64,11 @@ int main(int argc, char* argv[]) {
     
     try {
         // 创建模拟器
-        Simulator simulator(memorySize);
+        Simulator simulator(memorySize, cpuType);
+        
+        // 显示CPU类型
+        std::cout << "CPU类型: " << (cpuType == CpuType::OUT_OF_ORDER ? "乱序执行" : "顺序执行") << "\n";
+        std::cout << "内存大小: " << memorySize << " 字节\n\n";
         
         if (!filename.empty()) {
             std::cout << "加载程序: " << filename << "\n";
@@ -127,6 +139,15 @@ int main(int argc, char* argv[]) {
         }
         
         simulator.printStatistics();
+        
+        // 如果使用乱序执行CPU，显示额外的性能统计
+        if (cpuType == CpuType::OUT_OF_ORDER) {
+            std::cout << "\n=== 乱序执行性能统计 ===\n";
+            // 通过适配器获取OutOfOrderCPU的特有功能
+            // 这里需要dynamic_cast来安全地转换
+            // 暂时简化处理
+            std::cout << "注意: 乱序执行CPU的详细性能统计需要访问特定接口\n";
+        }
         
     } catch (const std::exception& e) {
         std::cerr << "错误: " << e.what() << "\n";

@@ -1,0 +1,1062 @@
+#include "ooo_cpu.h"
+#include "syscall_handler.h"
+#include <iostream>
+#include <iomanip>
+#include <limits>
+#include <algorithm>
+
+namespace riscv {
+
+OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) 
+    : memory_(memory), pc_(0), halted_(false), instruction_count_(0), cycle_count_(0),
+      enabled_extensions_(static_cast<uint32_t>(Extension::I) | static_cast<uint32_t>(Extension::M) | 
+                         static_cast<uint32_t>(Extension::F) | static_cast<uint32_t>(Extension::C)),
+      branch_mispredicts_(0), pipeline_stalls_(0), global_instruction_id_(0), debug_enabled_(true) {
+    
+    initialize_components();
+    initialize_registers();
+    initialize_execution_units();
+    
+    // 初始化系统调用处理器
+    syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
+    
+    std::cout << "乱序执行CPU初始化完成" << std::endl;
+}
+
+OutOfOrderCPU::~OutOfOrderCPU() = default;
+
+void OutOfOrderCPU::initialize_components() {
+    // 初始化乱序执行组件
+    register_rename_ = std::make_unique<RegisterRenameUnit>();
+    reservation_station_ = std::make_unique<ReservationStation>();
+    reorder_buffer_ = std::make_unique<ReorderBuffer>();
+    
+    std::cout << "乱序执行组件初始化完成" << std::endl;
+}
+
+void OutOfOrderCPU::initialize_registers() {
+    // 初始化架构寄存器
+    arch_registers_.fill(0);
+    arch_fp_registers_.fill(0);
+    
+    // 初始化物理寄存器
+    physical_registers_.fill(0);
+    physical_fp_registers_.fill(0);
+    
+    std::cout << "寄存器文件初始化完成" << std::endl;
+}
+
+void OutOfOrderCPU::initialize_execution_units() {
+    // 初始化ALU单元
+    for (auto& unit : alu_units_) {
+        unit.busy = false;
+        unit.remaining_cycles = 0;
+        unit.has_exception = false;
+    }
+    
+    // 初始化分支单元
+    for (auto& unit : branch_units_) {
+        unit.busy = false;
+        unit.remaining_cycles = 0;
+        unit.has_exception = false;
+    }
+    
+    // 初始化加载单元
+    for (auto& unit : load_units_) {
+        unit.busy = false;
+        unit.remaining_cycles = 0;
+        unit.has_exception = false;
+    }
+    
+    // 初始化存储单元
+    for (auto& unit : store_units_) {
+        unit.busy = false;
+        unit.remaining_cycles = 0;
+        unit.has_exception = false;
+    }
+    
+    std::cout << "执行单元初始化完成" << std::endl;
+}
+
+void OutOfOrderCPU::step() {
+    if (halted_) {
+        return;
+    }
+    
+    try {
+        // 打印周期头部
+        if (debug_enabled_) {
+            print_cycle_header();
+        }
+        
+        // 乱序执行流水线各阶段
+        commit_stage();      // 提交阶段（最先执行，维护程序顺序）
+        writeback_stage();   // 写回阶段
+        execute_stage();     // 执行阶段
+        issue_stage();       // 发射阶段
+        decode_stage();      // 译码阶段
+        fetch_stage();       // 取指阶段
+        
+        cycle_count_++;
+        
+        // 更新执行单元状态
+        update_execution_units();
+        
+        // 简单的停机条件检查
+        if (cycle_count_ > 1000000) {
+            std::cout << "警告: 执行周期数超过1000000，自动停止" << std::endl;
+            halted_ = true;
+        }
+        
+        if (debug_enabled_) {
+            std::cout << "===========================================" << std::endl;
+        }
+        
+    } catch (const MemoryException& e) {
+        handle_exception(e.what(), pc_);
+    } catch (const SimulatorException& e) {
+        handle_exception(e.what(), pc_);
+    }
+}
+
+void OutOfOrderCPU::run() {
+    while (!halted_) {
+        step();
+    }
+}
+
+void OutOfOrderCPU::reset() {
+    // 重置CPU状态
+    pc_ = 0;
+    halted_ = false;
+    instruction_count_ = 0;
+    cycle_count_ = 0;
+    branch_mispredicts_ = 0;
+    pipeline_stalls_ = 0;
+    
+    // 重置寄存器
+    initialize_registers();
+    
+    // 重置执行单元
+    initialize_execution_units();
+    
+    // 重置乱序执行组件
+    register_rename_ = std::make_unique<RegisterRenameUnit>();
+    reservation_station_ = std::make_unique<ReservationStation>();
+    reorder_buffer_ = std::make_unique<ReorderBuffer>();
+    
+    // 清空缓冲区
+    while (!fetch_buffer_.empty()) {
+        fetch_buffer_.pop();
+    }
+    while (!cdb_queue_.empty()) {
+        cdb_queue_.pop();
+    }
+    
+    std::cout << "乱序执行CPU重置完成" << std::endl;
+}
+
+void OutOfOrderCPU::fetch_stage() {
+    print_stage_activity("FETCH", "开始取指阶段");
+    
+    // 如果已经停机，不再取指
+    if (halted_) {
+        print_stage_activity("FETCH", "CPU已停机，跳过取指");
+        return;
+    }
+    
+    // 如果取指缓冲区有空间，取指令
+    if (fetch_buffer_.size() < 4) {  // 最多缓存4条指令
+        try {
+            Instruction raw_inst = memory_->fetchInstruction(pc_);
+            
+            // 如果指令为0，可能表明程序结束，但不要立即停机
+            // 要等待流水线中的指令全部完成提交
+            if (raw_inst == 0) {
+                print_stage_activity("FETCH", "取指到空指令(0x0)，停止取指但等待流水线清空");
+                
+                // 检查是否还有未完成的指令
+                if (reorder_buffer_->is_empty() && fetch_buffer_.empty() && cdb_queue_.empty()) {
+                    halted_ = true;
+                    print_stage_activity("FETCH", "流水线已清空，程序结束");
+                }
+                return;
+            }
+            
+            FetchedInstruction fetched;
+            fetched.pc = pc_;
+            fetched.instruction = raw_inst;
+            
+            // 检查是否为压缩指令
+            if ((raw_inst & 0x03) != 0x03) {
+                fetched.is_compressed = true;
+                pc_ += 2;
+                print_stage_activity("FETCH", "取指令 0x" + std::to_string(raw_inst) + 
+                                   " 从PC=0x" + std::to_string(fetched.pc) + " (压缩指令，PC+2)");
+            } else {
+                fetched.is_compressed = false;
+                pc_ += 4;
+                print_stage_activity("FETCH", "取指令 0x" + std::to_string(raw_inst) + 
+                                   " 从PC=0x" + std::to_string(fetched.pc) + " (正常指令，PC+4)");
+            }
+            
+            fetch_buffer_.push(fetched);
+            
+        } catch (const MemoryException& e) {
+            // 取指失败，停止取指但等待流水线清空
+            print_stage_activity("FETCH", "取指失败，停止取指但等待流水线清空: " + std::string(e.what()));
+            
+            // 检查是否还有未完成的指令
+            if (reorder_buffer_->is_empty() && fetch_buffer_.empty() && cdb_queue_.empty()) {
+                halted_ = true;
+                print_stage_activity("FETCH", "流水线已清空，程序结束");
+            }
+            return;
+        }
+    } else {
+        print_stage_activity("FETCH", "取指缓冲区已满，跳过取指");
+    }
+    
+    // 每个周期结束时检查是否应该停机
+    // 如果没有更多指令可取，且流水线为空，则停机
+    if (pc_ >= memory_->getSize() || 
+        (reorder_buffer_->is_empty() && fetch_buffer_.empty() && cdb_queue_.empty())) {
+        // 检查是否还有任何正在执行的指令
+        bool has_busy_units = false;
+        for (const auto& unit : alu_units_) {
+            if (unit.busy) has_busy_units = true;
+        }
+        for (const auto& unit : branch_units_) {
+            if (unit.busy) has_busy_units = true;
+        }
+        for (const auto& unit : load_units_) {
+            if (unit.busy) has_busy_units = true;
+        }
+        for (const auto& unit : store_units_) {
+            if (unit.busy) has_busy_units = true;
+        }
+        
+        if (!has_busy_units && reorder_buffer_->is_empty()) {
+            halted_ = true;
+            print_stage_activity("FETCH", "所有指令完成，CPU停机");
+        }
+    }
+}
+
+void OutOfOrderCPU::decode_stage() {
+    print_stage_activity("DECODE", "开始译码阶段");
+    
+    // 如果取指缓冲区为空，无法译码
+    if (fetch_buffer_.empty()) {
+        print_stage_activity("DECODE", "取指缓冲区为空，跳过译码");
+        return;
+    }
+    
+    // 如果ROB已满，无法译码
+    if (!reorder_buffer_->has_free_entry()) {
+        print_stage_activity("DECODE", "ROB已满，译码停顿");
+        pipeline_stalls_++;
+        return;
+    }
+    
+    // 取出一条指令进行译码
+    FetchedInstruction fetched = fetch_buffer_.front();
+    fetch_buffer_.pop();
+    
+    // 分配全局指令序号
+    uint64_t instruction_id = ++global_instruction_id_;
+    
+    // 解码指令
+    DecodedInstruction decoded;
+    if (fetched.is_compressed) {
+        decoded = decoder_.decodeCompressed(static_cast<uint16_t>(fetched.instruction), enabled_extensions_);
+        print_stage_activity("DECODE", get_instruction_debug_info(instruction_id, fetched.pc, "压缩指令") + " 译码完成");
+    } else {
+        decoded = decoder_.decode(fetched.instruction, enabled_extensions_);
+        print_stage_activity("DECODE", get_instruction_debug_info(instruction_id, fetched.pc, "标准指令") + " 译码完成");
+    }
+    
+    // 分配ROB表项
+    auto rob_result = reorder_buffer_->allocate_entry(decoded, fetched.pc);
+    if (!rob_result.success) {
+        // ROB分配失败，放回取指缓冲区
+        fetch_buffer_.push(fetched);
+        print_stage_activity("DECODE", "ROB分配失败，指令放回缓冲区");
+        pipeline_stalls_++;
+        return;
+    }
+    
+    // 设置指令序号
+    reorder_buffer_->set_instruction_id(rob_result.rob_entry, instruction_id);
+    
+    print_stage_activity("DECODE", get_instruction_debug_info(instruction_id, fetched.pc, "指令") + 
+                        " 分配到ROB[" + std::to_string(rob_result.rob_entry) + "]");
+    
+    // 继续到发射阶段的处理将在issue_stage中完成
+    // 这里我们需要一个中间缓冲区来存储译码后的指令
+    // 简化实现：直接在issue_stage中处理
+}
+
+void OutOfOrderCPU::issue_stage() {
+    print_stage_activity("ISSUE", "开始发射阶段");
+    
+    // 检查ROB中是否有待发射的指令
+    if (reorder_buffer_->is_empty()) {
+        print_stage_activity("ISSUE", "ROB为空，跳过发射");
+        return;
+    }
+    
+    // 遍历ROB，找到状态为ISSUED但还没有发射到保留站的指令
+    // 这里简化实现：处理ROB中第一条状态为ISSUED的指令
+    
+    // 获取可以发射的指令
+    auto dispatchable_entry = reorder_buffer_->get_dispatchable_entry();
+    if (dispatchable_entry == ReorderBuffer::MAX_ROB_ENTRIES) {  // 没有可发射的指令
+        print_stage_activity("ISSUE", "没有可发射的指令");
+        return;
+    }
+    
+    const auto& rob_entry = reorder_buffer_->get_entry(dispatchable_entry);
+    if (!rob_entry.valid || rob_entry.state != ReorderBufferEntry::State::ALLOCATED) {
+        print_stage_activity("ISSUE", "ROB表项状态不正确");
+        return;
+    }
+    
+    print_stage_activity("ISSUE", "尝试发射 Inst#" + std::to_string(rob_entry.instruction_id) + 
+                        " (ROB[" + std::to_string(dispatchable_entry) + "])");
+    
+    // 检查保留站是否有空闲表项
+    if (!reservation_station_->has_free_entry()) {
+        print_stage_activity("ISSUE", "保留站已满，发射停顿");
+        pipeline_stalls_++;
+        return;
+    }
+    
+    // 进行寄存器重命名
+    auto rename_result = register_rename_->rename_instruction(rob_entry.instruction);
+    if (!rename_result.success) {
+        print_stage_activity("ISSUE", "寄存器重命名失败，发射停顿");
+        pipeline_stalls_++;
+        return;
+    }
+    
+    // 准备保留站表项
+    ReservationStationEntry rs_entry;
+    rs_entry.instruction = rob_entry.instruction;
+    rs_entry.instruction_id = rob_entry.instruction_id;
+    rs_entry.src1_reg = rename_result.src1_reg;
+    rs_entry.src2_reg = rename_result.src2_reg;
+    rs_entry.dest_reg = rename_result.dest_reg;
+    rs_entry.pc = rob_entry.pc;
+    rs_entry.rob_entry = dispatchable_entry;
+    rs_entry.valid = true;
+    
+    // 检查操作数是否准备好
+    rs_entry.src1_ready = rename_result.src1_ready;
+    rs_entry.src2_ready = rename_result.src2_ready;
+    
+    // 获取操作数值
+    rs_entry.src1_value = rename_result.src1_value;
+    rs_entry.src2_value = rename_result.src2_value;
+    
+    // 发射到保留站
+    auto issue_result = reservation_station_->issue_instruction(rs_entry);
+    if (!issue_result.success) {
+        print_stage_activity("ISSUE", "保留站发射失败，回退重命名");
+        register_rename_->release_physical_register(rename_result.dest_reg);
+        pipeline_stalls_++;
+        return;
+    }
+    
+    print_stage_activity("ISSUE", "Inst#" + std::to_string(rob_entry.instruction_id) + 
+                        " 成功发射到保留站RS[" + std::to_string(issue_result.rs_entry) + "]");
+    
+    // 更新ROB表项状态，标记为已发射到保留站
+    reorder_buffer_->mark_as_dispatched(dispatchable_entry);
+}
+
+void OutOfOrderCPU::execute_stage() {
+    // 尝试从保留站调度指令到执行单元
+    auto dispatch_result = reservation_station_->dispatch_instruction();
+    if (dispatch_result.success) {
+        ExecutionUnit* unit = get_available_unit(dispatch_result.unit_type);
+        if (unit) {
+            unit->busy = true;
+            unit->instruction = dispatch_result.instruction;
+            unit->has_exception = false;
+            
+            // 根据指令类型设置执行周期
+            switch (dispatch_result.unit_type) {
+                case ExecutionUnitType::ALU:
+                    unit->remaining_cycles = 1;
+                    break;
+                case ExecutionUnitType::BRANCH:
+                    unit->remaining_cycles = 1;
+                    break;
+                case ExecutionUnitType::LOAD:
+                    unit->remaining_cycles = 2;  // 加载指令需要2个周期
+                    break;
+                case ExecutionUnitType::STORE:
+                    unit->remaining_cycles = 1;
+                    break;
+            }
+            
+            // 开始执行指令
+            execute_instruction(*unit, dispatch_result.instruction);
+        }
+    }
+}
+
+void OutOfOrderCPU::execute_instruction(ExecutionUnit& unit, const ReservationStationEntry& entry) {
+    try {
+        const auto& inst = entry.instruction;
+        
+        switch (inst.type) {
+            case InstructionType::R_TYPE:
+            case InstructionType::I_TYPE:
+                // ALU运算
+                unit.result = execute_alu_operation(inst, entry.src1_value, entry.src2_value);
+                break;
+                
+            case InstructionType::B_TYPE:
+                // 分支指令
+                if (execute_branch_operation(inst, entry.src1_value, entry.src2_value)) {
+                    // 分支预测错误，需要刷新流水线
+                    flush_pipeline();
+                    branch_mispredicts_++;
+                }
+                break;
+                
+            case InstructionType::S_TYPE:
+                // 存储指令
+                execute_store_operation(inst, entry.src1_value, entry.src2_value);
+                break;
+                
+            case InstructionType::U_TYPE:
+                // 立即数操作
+                if (inst.opcode == Opcode::LUI) {
+                    unit.result = static_cast<uint32_t>(inst.imm);
+                } else if (inst.opcode == Opcode::AUIPC) {
+                    unit.result = static_cast<uint32_t>(inst.imm) + entry.pc;
+                }
+                break;
+                
+            case InstructionType::J_TYPE:
+                // 跳转指令
+                unit.result = entry.pc + (inst.is_compressed ? 2 : 4);  // 返回地址
+                pc_ = entry.pc + inst.imm;  // 跳转目标
+                break;
+                
+            default:
+                unit.has_exception = true;
+                unit.exception_msg = "不支持的指令类型";
+                break;
+        }
+        
+    } catch (const SimulatorException& e) {
+        unit.has_exception = true;
+        unit.exception_msg = e.what();
+    }
+}
+
+uint32_t OutOfOrderCPU::execute_alu_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2) {
+    uint32_t result = 0;
+    
+    if (inst.type == InstructionType::I_TYPE && inst.opcode == Opcode::OP_IMM) {
+        // 立即数运算
+        switch (inst.funct3) {
+            case Funct3::ADD_SUB:
+                result = src1 + inst.imm;
+                break;
+            case Funct3::SLT:
+                result = (static_cast<int32_t>(src1) < inst.imm) ? 1 : 0;
+                break;
+            case Funct3::SLTU:
+                result = (src1 < static_cast<uint32_t>(inst.imm)) ? 1 : 0;
+                break;
+            case Funct3::XOR:
+                result = src1 ^ inst.imm;
+                break;
+            case Funct3::OR:
+                result = src1 | inst.imm;
+                break;
+            case Funct3::AND:
+                result = src1 & inst.imm;
+                break;
+            case Funct3::SLL:
+                result = src1 << (inst.imm & 0x1F);
+                break;
+            case Funct3::SRL_SRA:
+                if (inst.funct7 == Funct7::NORMAL) {
+                    result = src1 >> (inst.imm & 0x1F);
+                } else {
+                    result = static_cast<int32_t>(src1) >> (inst.imm & 0x1F);
+                }
+                break;
+            default:
+                throw IllegalInstructionException("不支持的立即数运算");
+        }
+    } else if (inst.type == InstructionType::R_TYPE) {
+        // 寄存器运算
+        switch (inst.funct3) {
+            case Funct3::ADD_SUB:
+                if (inst.funct7 == Funct7::NORMAL) {
+                    result = src1 + src2;
+                } else {
+                    result = src1 - src2;
+                }
+                break;
+            case Funct3::SLL:
+                result = src1 << (src2 & 0x1F);
+                break;
+            case Funct3::SLT:
+                result = (static_cast<int32_t>(src1) < static_cast<int32_t>(src2)) ? 1 : 0;
+                break;
+            case Funct3::SLTU:
+                result = (src1 < src2) ? 1 : 0;
+                break;
+            case Funct3::XOR:
+                result = src1 ^ src2;
+                break;
+            case Funct3::SRL_SRA:
+                if (inst.funct7 == Funct7::NORMAL) {
+                    result = src1 >> (src2 & 0x1F);
+                } else {
+                    result = static_cast<int32_t>(src1) >> (src2 & 0x1F);
+                }
+                break;
+            case Funct3::OR:
+                result = src1 | src2;
+                break;
+            case Funct3::AND:
+                result = src1 & src2;
+                break;
+            default:
+                throw IllegalInstructionException("不支持的寄存器运算");
+        }
+    } else if (inst.type == InstructionType::I_TYPE && inst.opcode == Opcode::LOAD) {
+        // 加载指令
+        uint32_t addr = src1 + inst.imm;
+        result = loadFromMemory(addr, inst.funct3);
+    } else if (inst.type == InstructionType::I_TYPE && inst.opcode == Opcode::SYSTEM) {
+        // 系统指令（ECALL/EBREAK）
+        if (inst.funct3 == Funct3::ADD_SUB && inst.imm == 0) {
+            // ECALL - 系统调用，不需要计算结果
+            result = 0;
+        } else if (inst.funct3 == Funct3::ADD_SUB && inst.imm == 1) {
+            // EBREAK - 断点，不需要计算结果
+            result = 0;
+        } else {
+            throw IllegalInstructionException("不支持的系统指令");
+        }
+    }
+    
+    return result;
+}
+
+bool OutOfOrderCPU::execute_branch_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2) {
+    bool should_branch = false;
+    
+    switch (inst.funct3) {
+        case Funct3::BEQ:
+            should_branch = (src1 == src2);
+            break;
+        case Funct3::BNE:
+            should_branch = (src1 != src2);
+            break;
+        case Funct3::BLT:
+            should_branch = (static_cast<int32_t>(src1) < static_cast<int32_t>(src2));
+            break;
+        case Funct3::BGE:
+            should_branch = (static_cast<int32_t>(src1) >= static_cast<int32_t>(src2));
+            break;
+        case Funct3::BLTU:
+            should_branch = (src1 < src2);
+            break;
+        case Funct3::BGEU:
+            should_branch = (src1 >= src2);
+            break;
+        default:
+            throw IllegalInstructionException("不支持的分支指令");
+    }
+    
+    // 简化的分支预测检查
+    bool predicted = predict_branch(pc_);
+    if (should_branch != predicted) {
+        // 分支预测错误
+        if (should_branch) {
+            pc_ = pc_ + inst.imm;
+        }
+        update_branch_predictor(pc_, should_branch);
+        return true;  // 需要刷新流水线
+    }
+    
+    return false;
+}
+
+void OutOfOrderCPU::execute_store_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2) {
+    uint32_t addr = src1 + inst.imm;
+    storeToMemory(addr, src2, inst.funct3);
+}
+
+void OutOfOrderCPU::writeback_stage() {
+    // 检查执行单元是否完成执行
+    update_execution_units();
+    
+    // 处理CDB队列中的写回请求
+    while (!cdb_queue_.empty()) {
+        CommonDataBusEntry cdb_entry = cdb_queue_.front();
+        cdb_queue_.pop();
+        
+        // 更新保留站中的操作数
+        reservation_station_->update_operands(cdb_entry);
+        
+        // 更新寄存器重命名映射
+        register_rename_->update_physical_register(cdb_entry.dest_reg, cdb_entry.value, cdb_entry.rob_entry);
+        
+        // 更新ROB表项
+        reorder_buffer_->update_entry(cdb_entry.rob_entry, cdb_entry.value);
+    }
+}
+
+void OutOfOrderCPU::commit_stage() {
+    print_stage_activity("COMMIT", "开始提交阶段");
+    
+    // 尝试提交指令
+    while (reorder_buffer_->can_commit()) {
+        auto commit_result = reorder_buffer_->commit_instruction();
+        if (!commit_result.success) {
+            break;
+        }
+        
+        const auto& committed_inst = commit_result.instruction;
+        
+        // 检查是否有异常
+        if (committed_inst.has_exception) {
+            handle_exception(committed_inst.exception_msg, committed_inst.pc);
+            break;
+        }
+        
+        // 提交到架构寄存器
+        if (committed_inst.instruction.rd != 0) {  // x0寄存器不能写入
+            arch_registers_[committed_inst.instruction.rd] = committed_inst.result;
+            print_stage_activity("COMMIT", "Inst#" + std::to_string(committed_inst.instruction_id) + 
+                                " x" + std::to_string(committed_inst.instruction.rd) + 
+                                " = 0x" + std::to_string(committed_inst.result));
+        } else {
+            print_stage_activity("COMMIT", "Inst#" + std::to_string(committed_inst.instruction_id) + 
+                                " (无目标寄存器)");
+        }
+        
+        // 释放物理寄存器
+        register_rename_->commit_instruction(committed_inst.logical_dest, committed_inst.physical_dest);
+        
+        instruction_count_++;
+        
+        // 处理系统调用
+        if (committed_inst.instruction.opcode == Opcode::SYSTEM) {
+            if (committed_inst.instruction.funct3 == Funct3::ADD_SUB && 
+                committed_inst.instruction.imm == 0) {
+                // ECALL
+                handleEcall();
+            } else if (committed_inst.instruction.funct3 == Funct3::ADD_SUB && 
+                      committed_inst.instruction.imm == 1) {
+                // EBREAK
+                handleEbreak();
+            }
+        }
+        
+        // 如果没有更多指令可提交，跳出循环
+        if (!commit_result.has_more) {
+            break;
+        }
+    }
+}
+
+void OutOfOrderCPU::update_execution_units() {
+    // 更新ALU单元
+    for (size_t i = 0; i < alu_units_.size(); ++i) {
+        auto& unit = alu_units_[i];
+        if (unit.busy) {
+            unit.remaining_cycles--;
+            if (unit.remaining_cycles <= 0) {
+                // 执行完成，发送到CDB
+                CommonDataBusEntry cdb_entry;
+                cdb_entry.dest_reg = unit.instruction.dest_reg;
+                cdb_entry.value = unit.result;
+                cdb_entry.rob_entry = unit.instruction.rob_entry;
+                cdb_entry.valid = true;
+                
+                cdb_queue_.push(cdb_entry);
+                
+                // 释放执行单元
+                unit.busy = false;
+                unit.has_exception = false;
+                unit.exception_msg.clear();
+                
+                // 释放保留站中的执行单元状态
+                reservation_station_->release_execution_unit(ExecutionUnitType::ALU, i);
+            }
+        }
+    }
+    
+    // 更新分支单元
+    for (size_t i = 0; i < branch_units_.size(); ++i) {
+        auto& unit = branch_units_[i];
+        if (unit.busy) {
+            unit.remaining_cycles--;
+            if (unit.remaining_cycles <= 0) {
+                // 分支指令通常不需要写回结果，但需要处理分支预测
+                if (unit.instruction.instruction.type == InstructionType::J_TYPE) {
+                    // 跳转指令需要写回返回地址
+                    CommonDataBusEntry cdb_entry;
+                    cdb_entry.dest_reg = unit.instruction.dest_reg;
+                    cdb_entry.value = unit.result;
+                    cdb_entry.rob_entry = unit.instruction.rob_entry;
+                    cdb_entry.valid = true;
+                    cdb_queue_.push(cdb_entry);
+                }
+                
+                // 释放执行单元
+                unit.busy = false;
+                unit.has_exception = false;
+                unit.exception_msg.clear();
+                
+                // 释放保留站中的执行单元状态
+                reservation_station_->release_execution_unit(ExecutionUnitType::BRANCH, i);
+            }
+        }
+    }
+    
+    // 更新加载单元
+    for (size_t i = 0; i < load_units_.size(); ++i) {
+        auto& unit = load_units_[i];
+        if (unit.busy) {
+            unit.remaining_cycles--;
+            if (unit.remaining_cycles <= 0) {
+                // 加载指令完成，发送到CDB
+                CommonDataBusEntry cdb_entry;
+                cdb_entry.dest_reg = unit.instruction.dest_reg;
+                cdb_entry.value = unit.result;
+                cdb_entry.rob_entry = unit.instruction.rob_entry;
+                cdb_entry.valid = true;
+                
+                cdb_queue_.push(cdb_entry);
+                
+                // 释放执行单元
+                unit.busy = false;
+                unit.has_exception = false;
+                unit.exception_msg.clear();
+                
+                // 释放保留站中的执行单元状态
+                reservation_station_->release_execution_unit(ExecutionUnitType::LOAD, i);
+            }
+        }
+    }
+    
+    // 更新存储单元
+    for (size_t i = 0; i < store_units_.size(); ++i) {
+        auto& unit = store_units_[i];
+        if (unit.busy) {
+            unit.remaining_cycles--;
+            if (unit.remaining_cycles <= 0) {
+                // 存储指令完成，不需要写回结果，但需要更新ROB状态
+                CommonDataBusEntry cdb_entry;
+                cdb_entry.dest_reg = 0; // 存储指令没有目标寄存器
+                cdb_entry.value = 0;
+                cdb_entry.rob_entry = unit.instruction.rob_entry;
+                cdb_entry.valid = true;
+                
+                cdb_queue_.push(cdb_entry);
+                
+                // 释放执行单元
+                unit.busy = false;
+                unit.has_exception = false;
+                unit.exception_msg.clear();
+                
+                // 释放保留站中的执行单元状态
+                reservation_station_->release_execution_unit(ExecutionUnitType::STORE, i);
+            }
+        }
+    }
+}
+
+OutOfOrderCPU::ExecutionUnit* OutOfOrderCPU::get_available_unit(ExecutionUnitType type) {
+    switch (type) {
+        case ExecutionUnitType::ALU:
+            for (auto& unit : alu_units_) {
+                if (!unit.busy) return &unit;
+            }
+            break;
+        case ExecutionUnitType::BRANCH:
+            for (auto& unit : branch_units_) {
+                if (!unit.busy) return &unit;
+            }
+            break;
+        case ExecutionUnitType::LOAD:
+            for (auto& unit : load_units_) {
+                if (!unit.busy) return &unit;
+            }
+            break;
+        case ExecutionUnitType::STORE:
+            for (auto& unit : store_units_) {
+                if (!unit.busy) return &unit;
+            }
+            break;
+    }
+    return nullptr;
+}
+
+uint32_t OutOfOrderCPU::get_physical_register_value(PhysRegNum reg) const {
+    if (reg < RegisterRenameUnit::NUM_PHYSICAL_REGS) {
+        return physical_registers_[reg];
+    }
+    return 0;
+}
+
+void OutOfOrderCPU::set_physical_register_value(PhysRegNum reg, uint32_t value) {
+    if (reg < RegisterRenameUnit::NUM_PHYSICAL_REGS) {
+        physical_registers_[reg] = value;
+    }
+}
+
+// 接口兼容性方法
+uint32_t OutOfOrderCPU::getRegister(RegNum reg) const {
+    if (reg >= NUM_REGISTERS) {
+        throw SimulatorException("无效的寄存器编号: " + std::to_string(reg));
+    }
+    return arch_registers_[reg];
+}
+
+void OutOfOrderCPU::setRegister(RegNum reg, uint32_t value) {
+    if (reg >= NUM_REGISTERS) {
+        throw SimulatorException("无效的寄存器编号: " + std::to_string(reg));
+    }
+    
+    // x0寄存器始终为0
+    if (reg != 0) {
+        arch_registers_[reg] = value;
+    }
+}
+
+uint32_t OutOfOrderCPU::getFPRegister(RegNum reg) const {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    return arch_fp_registers_[reg];
+}
+
+void OutOfOrderCPU::setFPRegister(RegNum reg, uint32_t value) {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    arch_fp_registers_[reg] = value;
+}
+
+float OutOfOrderCPU::getFPRegisterFloat(RegNum reg) const {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    return *reinterpret_cast<const float*>(&arch_fp_registers_[reg]);
+}
+
+void OutOfOrderCPU::setFPRegisterFloat(RegNum reg, float value) {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    arch_fp_registers_[reg] = *reinterpret_cast<const uint32_t*>(&value);
+}
+
+void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint32_t pc) {
+    std::cerr << "异常: " << exception_msg << ", PC=0x" << std::hex << pc << std::dec << std::endl;
+    flush_pipeline();
+    halted_ = true;
+}
+
+void OutOfOrderCPU::flush_pipeline() {
+    // 清空取指缓冲区
+    while (!fetch_buffer_.empty()) {
+        fetch_buffer_.pop();
+    }
+    
+    // 刷新保留站
+    reservation_station_->flush_pipeline();
+    
+    // 刷新ROB
+    reorder_buffer_->flush_pipeline();
+    
+    // 重新初始化寄存器重命名
+    register_rename_ = std::make_unique<RegisterRenameUnit>();
+    
+    // 清空CDB队列
+    while (!cdb_queue_.empty()) {
+        cdb_queue_.pop();
+    }
+    
+    // 重置执行单元
+    initialize_execution_units();
+    
+    std::cout << "流水线已刷新" << std::endl;
+}
+
+bool OutOfOrderCPU::predict_branch(uint32_t pc) {
+    // 简化的分支预测：总是预测不跳转
+    return false;
+}
+
+void OutOfOrderCPU::update_branch_predictor(uint32_t pc, bool taken) {
+    // 简化实现：不更新预测器
+}
+
+void OutOfOrderCPU::handleEcall() {
+    // 系统调用处理需要使用原始CPU接口
+    // 这里我们创建一个适配器或者修改syscall_handler接口
+    // 暂时简化处理
+    halted_ = true;
+    std::cout << "系统调用: 程序退出" << std::endl;
+}
+
+void OutOfOrderCPU::handleEbreak() {
+    std::cout << "遇到断点指令，停止执行" << std::endl;
+    halted_ = true;
+}
+
+uint32_t OutOfOrderCPU::loadFromMemory(Address addr, Funct3 funct3) {
+    switch (funct3) {
+        case Funct3::LB:
+            return static_cast<uint32_t>(static_cast<int8_t>(memory_->readByte(addr)));
+        case Funct3::LH:
+            return static_cast<uint32_t>(static_cast<int16_t>(memory_->readHalfWord(addr)));
+        case Funct3::LW:
+            return memory_->readWord(addr);
+        case Funct3::LBU:
+            return static_cast<uint32_t>(memory_->readByte(addr));
+        case Funct3::LHU:
+            return static_cast<uint32_t>(memory_->readHalfWord(addr));
+        default:
+            throw IllegalInstructionException("不支持的加载指令");
+    }
+}
+
+void OutOfOrderCPU::storeToMemory(Address addr, uint32_t value, Funct3 funct3) {
+    switch (funct3) {
+        case Funct3::SB:
+            memory_->writeByte(addr, static_cast<uint8_t>(value & 0xFF));
+            break;
+        case Funct3::SH:
+            memory_->writeHalfWord(addr, static_cast<uint16_t>(value & 0xFFFF));
+            break;
+        case Funct3::SW:
+            memory_->writeWord(addr, value);
+            break;
+        default:
+            throw IllegalInstructionException("不支持的存储指令");
+    }
+}
+
+int32_t OutOfOrderCPU::signExtend(uint32_t value, int bits) const {
+    int32_t mask = (1 << bits) - 1;
+    int32_t signBit = 1 << (bits - 1);
+    return (value & mask) | (((value & signBit) != 0) ? ~mask : 0);
+}
+
+void OutOfOrderCPU::getPerformanceStats(uint64_t& instructions, uint64_t& cycles, 
+                                       uint64_t& branch_mispredicts, uint64_t& stalls) const {
+    instructions = instruction_count_;
+    cycles = cycle_count_;
+    branch_mispredicts = branch_mispredicts_;
+    stalls = pipeline_stalls_;
+}
+
+void OutOfOrderCPU::dumpRegisters() const {
+    std::cout << "架构寄存器状态:" << std::endl;
+    for (int i = 0; i < NUM_REGISTERS; i += 4) {
+        for (int j = 0; j < 4 && i + j < NUM_REGISTERS; ++j) {
+            std::cout << "x" << std::setw(2) << (i + j) << ": 0x" 
+                      << std::hex << std::setfill('0') << std::setw(8) 
+                      << arch_registers_[i + j] << "  ";
+        }
+        std::cout << std::endl;
+    }
+    std::cout << std::dec;
+}
+
+void OutOfOrderCPU::dumpState() const {
+    std::cout << "乱序执行CPU状态:" << std::endl;
+    std::cout << "PC: 0x" << std::hex << pc_ << std::dec << std::endl;
+    std::cout << "指令计数: " << instruction_count_ << std::endl;
+    std::cout << "周期计数: " << cycle_count_ << std::endl;
+    std::cout << "停机状态: " << (halted_ ? "是" : "否") << std::endl;
+    std::cout << "分支预测错误: " << branch_mispredicts_ << std::endl;
+    std::cout << "流水线停顿: " << pipeline_stalls_ << std::endl;
+    
+    if (cycle_count_ > 0) {
+        double ipc = static_cast<double>(instruction_count_) / cycle_count_;
+        std::cout << "IPC: " << std::fixed << std::setprecision(2) << ipc << std::endl;
+    }
+    
+    dumpRegisters();
+}
+
+void OutOfOrderCPU::dumpPipelineState() const {
+    std::cout << "\\n=== 乱序执行流水线状态 ===" << std::endl;
+    
+    // 显示ROB状态
+    reorder_buffer_->dump_reorder_buffer();
+    
+    // 显示保留站状态
+    reservation_station_->dump_reservation_station();
+    
+    // 显示寄存器重命名状态
+    register_rename_->dump_rename_table();
+    
+    // 显示执行单元状态
+    reservation_station_->dump_execution_units();
+    
+    std::cout << "取指缓冲区大小: " << fetch_buffer_.size() << std::endl;
+    std::cout << "CDB队列大小: " << cdb_queue_.size() << std::endl;
+}
+
+// 调试辅助方法实现
+void OutOfOrderCPU::print_cycle_header() {
+    std::cout << std::endl;
+    std::cout << "=== 周期 " << cycle_count_ << " ===" << std::endl;
+    std::cout << "PC: 0x" << std::hex << pc_ << std::dec 
+              << ", 已提交指令: " << instruction_count_ << std::endl;
+    
+    // 打印ROB状态
+    if (!reorder_buffer_->is_empty()) {
+        std::cout << "ROB状态: 非空" << std::endl;
+    }
+    
+    // 打印保留站状态
+    if (!reservation_station_->has_free_entry()) {
+        std::cout << "保留站状态: 已满" << std::endl;
+    }
+    
+    // 打印执行单元状态
+    bool has_busy_units = false;
+    for (size_t i = 0; i < alu_units_.size(); ++i) {
+        if (alu_units_[i].busy) {
+            std::cout << "ALU" << i << " 忙碌, 剩余周期: " << alu_units_[i].remaining_cycles << std::endl;
+            has_busy_units = true;
+        }
+    }
+    
+    if (has_busy_units) {
+        std::cout << "有执行单元忙碌" << std::endl;
+    }
+}
+
+void OutOfOrderCPU::print_stage_activity(const std::string& stage, const std::string& activity) {
+    if (debug_enabled_) {
+        std::cout << "[" << stage << "] " << activity << std::endl;
+    }
+}
+
+std::string OutOfOrderCPU::get_instruction_debug_info(uint64_t inst_id, uint32_t pc, const std::string& mnemonic) {
+    return "Inst#" + std::to_string(inst_id) + " (PC=0x" + 
+           std::to_string(pc) + ", " + mnemonic + ")";
+}
+
+} // namespace riscv

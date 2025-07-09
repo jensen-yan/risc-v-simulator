@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cpu.h"
+#include "cpu_interface.h"
 #include "memory.h"
 #include "elf_loader.h"
 #include <string>
@@ -14,7 +14,7 @@ namespace riscv {
  */
 class Simulator {
 public:
-    explicit Simulator(size_t memorySize = Memory::DEFAULT_SIZE);
+    explicit Simulator(size_t memorySize = Memory::DEFAULT_SIZE, CpuType cpuType = CpuType::IN_ORDER);
     ~Simulator() = default;
     
     // 禁用拷贝构造和赋值
@@ -56,9 +56,16 @@ public:
     // 统计信息
     void printStatistics() const;
     
+    // 获取CPU类型
+    CpuType getCpuType() const { return cpuType_; }
+    
+    // 获取底层CPU实例（用于特定功能）
+    ICpuInterface* getCpu() { return cpu_.get(); }
+    
 private:
     std::shared_ptr<Memory> memory_;
-    std::unique_ptr<CPU> cpu_;
+    std::unique_ptr<ICpuInterface> cpu_;
+    CpuType cpuType_;
     
     // 辅助方法
     std::vector<uint8_t> loadBinaryFile(const std::string& filename);

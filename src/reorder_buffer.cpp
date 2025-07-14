@@ -1,6 +1,8 @@
 #include "reorder_buffer.h"
+#include "debug_types.h"
 #include <iostream>
 #include <iomanip>
+#include <sstream>
 #include <cassert>
 
 namespace riscv {
@@ -71,8 +73,8 @@ ReorderBuffer::AllocateResult ReorderBuffer::allocate_entry(
     result.rob_entry = rob_entry;
     allocated_count++;
     
-    std::cout << "分配ROB表项 " << rob_entry << ", PC=0x" 
-              << std::hex << pc << std::dec << std::endl;
+    // 使用新的dprintf宏 - 类似GEM5风格
+    dprintf(ROB, "分配ROB表项 %d, PC=0x%x", rob_entry, pc);
     
     return result;
 }
@@ -152,9 +154,7 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
         result.error_message = "提交异常指令: " + head_entry.exception_msg;
         
         // 异常指令提交后需要刷新流水线
-        std::cout << "提交异常指令 ROB" << index_to_entry(head_index) 
-                  << ", PC=0x" << std::hex << head_entry.pc << std::dec 
-                  << ", 异常: " << head_entry.exception_msg << std::endl;
+        dprintf(ROB, "提交异常指令 ROB%d, PC=0x%x, 异常: %s", index_to_entry(head_index), head_entry.pc, head_entry.exception_msg.c_str());
         
         // 释放头部表项
         release_entry(index_to_entry(head_index));
@@ -169,9 +169,7 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
     result.success = true;
     result.instruction = head_entry;
     
-    std::cout << "提交指令 ROB" << index_to_entry(head_index) 
-              << ", PC=0x" << std::hex << head_entry.pc << std::dec
-              << ", 结果=0x" << std::hex << head_entry.result << std::dec << std::endl;
+    dprintf(ROB, "提交指令 ROB%d, PC=0x%x, 结果=0x%x", index_to_entry(head_index), head_entry.pc, head_entry.result);
     
     // 更新状态
     head_entry.state = ReorderBufferEntry::State::RETIRED;
@@ -194,7 +192,7 @@ bool ReorderBuffer::can_commit() const {
 }
 
 void ReorderBuffer::flush_pipeline() {
-    std::cout << "刷新整个ROB，丢弃 " << entry_count << " 条指令" << std::endl;
+    dprintf(ROB, "刷新整个ROB，丢弃 %d 条指令", entry_count);
     
     flushed_count += entry_count;
     
@@ -210,7 +208,7 @@ void ReorderBuffer::flush_pipeline() {
 void ReorderBuffer::flush_after_entry(ROBEntry rob_entry) {
     int flush_index = entry_to_index(rob_entry);
     
-    std::cout << "刷新ROB从表项 " << rob_entry << " 之后" << std::endl;
+    dprintf(ROB, "刷新ROB从表项 %d 之后", rob_entry);
     
     // 从指定表项之后开始刷新
     int current = next_index(flush_index);
@@ -228,7 +226,7 @@ void ReorderBuffer::flush_after_entry(ROBEntry rob_entry) {
     tail_ptr = next_index(flush_index);
     flushed_count += flushed;
     
-    std::cout << "刷新了 " << flushed << " 条指令" << std::endl;
+    dprintf(ROB, "刷新了 %d 条指令", flushed);
 }
 
 bool ReorderBuffer::has_free_entry() const {
@@ -350,65 +348,61 @@ int ReorderBuffer::entry_to_index(ROBEntry rob_entry) const {
 }
 
 void ReorderBuffer::dump_reorder_buffer() const {
-    std::cout << "\n=== ROB状态 ===" << std::endl;
-    std::cout << "容量: " << entry_count << "/" << MAX_ROB_ENTRIES << std::endl;
-    std::cout << "头指针: " << head_ptr << ", 尾指针: " << tail_ptr << std::endl;
-    
-    if (is_empty()) {
-        std::cout << "ROB为空" << std::endl;
-        return;
-    }
-    
-    std::cout << "\n有效表项:" << std::endl;
-    std::cout << "ROB PC     指令  状态    结果      异常" << std::endl;
-    std::cout << "--- ------ ----- ------- --------- ----" << std::endl;
+    dprintf(ROB, "ROB状态");
+    dprintf(ROB, "容量: %d/%d", entry_count, MAX_ROB_ENTRIES);
+    dprintf(ROB, "头指针: %d, 尾指针: %d", head_ptr, tail_ptr);
+    dprintf(ROB, "ROB为空: %d", is_empty());
+    dprintf(ROB, "有效表项:");
+    dprintf(ROB, "ROB PC     指令  状态    结果      异常");
+    dprintf(ROB, "--- ------ ----- ------- --------- ----");
     
     int current = head_ptr;
     for (int i = 0; i < entry_count; ++i) {
         if (rob_entries[current].valid) {
             const auto& entry = rob_entries[current];
-            std::cout << std::setw(2) << current << "  "
-                      << "0x" << std::hex << std::setw(4) << entry.pc << std::dec << "  "
-                      << std::setw(4) << (int)entry.instruction.type << "  ";
+            std::stringstream ss;
+            ss << std::setw(2) << current << "  "
+               << "0x" << std::hex << std::setw(4) << entry.pc << std::dec << "  "
+               << std::setw(4) << (int)entry.instruction.type << "  ";
             
             // 状态
             switch (entry.state) {
-                case ReorderBufferEntry::State::ALLOCATED: std::cout << "已分配"; break;
-                case ReorderBufferEntry::State::ISSUED: std::cout << "已发射"; break;
-                case ReorderBufferEntry::State::EXECUTING: std::cout << "执行中"; break;
-                case ReorderBufferEntry::State::COMPLETED: std::cout << "已完成"; break;
-                case ReorderBufferEntry::State::RETIRED: std::cout << "已退休"; break;
+                case ReorderBufferEntry::State::ALLOCATED: ss << "已分配"; break;
+                case ReorderBufferEntry::State::ISSUED: ss << "已发射"; break;
+                case ReorderBufferEntry::State::EXECUTING: ss << "执行中"; break;
+                case ReorderBufferEntry::State::COMPLETED: ss << "已完成"; break;
+                case ReorderBufferEntry::State::RETIRED: ss << "已退休"; break;
             }
-            std::cout << "  ";
+            ss << "  ";
             
             // 结果
             if (entry.result_ready) {
-                std::cout << "0x" << std::hex << std::setw(8) << entry.result << std::dec;
+                ss << "0x" << std::hex << std::setw(8) << entry.result << std::dec;
             } else {
-                std::cout << "   等待   ";
+                ss << "   等待   ";
             }
-            std::cout << "  ";
+            ss << "  ";
             
             // 异常
             if (entry.has_exception) {
-                std::cout << "是";
+                ss << "是";
             } else {
-                std::cout << "否";
+                ss << "否";
             }
             
-            std::cout << std::endl;
+            dprintf(ROB, "%s", ss.str().c_str());
         }
         current = next_index(current);
     }
 }
 
 void ReorderBuffer::dump_rob_summary() const {
-    std::cout << "\n=== ROB统计信息 ===" << std::endl;
-    std::cout << "已分配: " << allocated_count << std::endl;
-    std::cout << "已提交: " << committed_count << std::endl; 
-    std::cout << "已刷新: " << flushed_count << std::endl;
-    std::cout << "异常数: " << exception_count << std::endl;
-    std::cout << "当前占用: " << entry_count << "/" << MAX_ROB_ENTRIES << std::endl;
+    dprintf(ROB, "ROB统计信息");
+    dprintf(ROB, "已分配: %llu", allocated_count);
+    dprintf(ROB, "已提交: %llu", committed_count);
+    dprintf(ROB, "已刷新: %llu", flushed_count);
+    dprintf(ROB, "异常数: %llu", exception_count); 
+    dprintf(ROB, "当前占用: %d/%d", entry_count, MAX_ROB_ENTRIES);
 }
 
 } // namespace riscv

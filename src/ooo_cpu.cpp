@@ -1,6 +1,8 @@
 #include "ooo_cpu.h"
 #include "syscall_handler.h"
 #include "instruction_executor.h"
+#include "debug_types.h"
+#include <cstdint>
 #include <iostream>
 #include <iomanip>
 
@@ -10,7 +12,7 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
     : memory_(memory), pc_(0), halted_(false), instruction_count_(0), cycle_count_(0),
       enabled_extensions_(static_cast<uint32_t>(Extension::I) | static_cast<uint32_t>(Extension::M) | 
                          static_cast<uint32_t>(Extension::F) | static_cast<uint32_t>(Extension::C)),
-      branch_mispredicts_(0), pipeline_stalls_(0), global_instruction_id_(0), debug_enabled_(true) {
+      branch_mispredicts_(0), pipeline_stalls_(0), global_instruction_id_(0) {
     
     initialize_components();
     initialize_registers();
@@ -83,10 +85,9 @@ void OutOfOrderCPU::step() {
     }
     
     try {
-        // 打印周期头部
-        if (debug_enabled_) {
-            print_cycle_header();
-        }
+        // 更新全局调试上下文
+        DebugContext::getInstance().setCycle(cycle_count_);
+
         
         // 乱序执行流水线各阶段
         commit_stage();      // 提交阶段（最先执行，维护程序顺序）
@@ -102,13 +103,9 @@ void OutOfOrderCPU::step() {
         update_execution_units();
         
         // 简单的停机条件检查
-        if (cycle_count_ > 1000000) {
-            std::cout << "警告: 执行周期数超过1000000，自动停止" << std::endl;
+        if (cycle_count_ > 10000) {
+            std::cout << "警告: 执行周期数超过10000，自动停止" << std::endl;
             halted_ = true;
-        }
-        
-        if (debug_enabled_) {
-            std::cout << "===========================================" << std::endl;
         }
         
     } catch (const MemoryException& e) {
@@ -156,7 +153,7 @@ void OutOfOrderCPU::reset() {
 }
 
 void OutOfOrderCPU::fetch_stage() {
-    print_stage_activity("FETCH", "开始取指阶段");
+    print_stage_activity("FETCH", "开始取指阶段，PC=0x" + std::to_string(pc_));
     
     // 如果已经停机，不再取指
     if (halted_) {
@@ -213,7 +210,7 @@ void OutOfOrderCPU::fetch_stage() {
             return;
         }
     } else {
-        print_stage_activity("FETCH", "取指缓冲区已满，跳过取指");
+        print_stage_activity("FETCH", "取指缓冲区已满(大小=" + std::to_string(fetch_buffer_.size()) + ")，跳过取指");
     }
     
     // 每个周期结束时检查是否应该停机
@@ -916,9 +913,8 @@ void OutOfOrderCPU::print_cycle_header() {
 }
 
 void OutOfOrderCPU::print_stage_activity(const std::string& stage, const std::string& activity) {
-    if (debug_enabled_) {
-        std::cout << "[" << stage << "] " << activity << std::endl;
-    }
+    auto& debugManager = DebugManager::getInstance();
+    debugManager.printf(stage, activity, cycle_count_, pc_);
 }
 
 std::string OutOfOrderCPU::get_instruction_debug_info(uint64_t inst_id, uint32_t pc, const std::string& mnemonic) {

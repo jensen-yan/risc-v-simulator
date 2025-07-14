@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "reservation_station.h"
 #include "decoder.h"
+#include "debug_types.h"
 #include <vector>
 
 namespace riscv {
@@ -12,6 +13,17 @@ protected:
     
     void SetUp() override {
         // 每个测试前的初始化
+        // 启用调试输出
+        auto& debugManager = DebugManager::getInstance();
+
+        // 设置回调函数
+        debugManager.setCallback([](const DebugInfo& info) {
+            std::cout << DebugFormatter::format(info, DebugFormatter::Mode::VERBOSE) << std::endl;
+        });
+        
+        // 启用相关分类
+        debugManager.enableCategory("RS");
+        debugManager.enableCategory("SYSTEM");
     }
     
     void TearDown() override {

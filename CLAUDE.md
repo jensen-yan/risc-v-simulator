@@ -282,3 +282,7 @@ riscv64-unknown-elf-objcopy -O binary test_simple.elf test_simple.bin
 - **内存使用**: 总占用<100MB
 - **指令限制**: 100,000条指令（安全限制）
 - **内存访问**: 针对顺序访问模式优化
+
+## 调试输出
+
+参考  ./risc-v-sim --help 来了解如何使用调试输出。

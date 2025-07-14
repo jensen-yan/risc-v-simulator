@@ -1,4 +1,5 @@
 #include "register_rename.h"
+#include "debug_types.h"
 #include <iostream>
 #include <iomanip>
 #include <cassert>
@@ -84,9 +85,8 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
         // 新分配的物理寄存器还没有值
         physical_registers[result.dest_reg].ready = false;
         
-        std::cout << "重命名: x" << (int)instruction.rd 
-                  << " 从 p" << (int)old_physical_reg 
-                  << " 重命名到 p" << (int)result.dest_reg << std::endl;
+        dprintf(RENAME, "重命名: x%d 从 p%d 重命名到 p%d", 
+                (int)instruction.rd, (int)old_physical_reg, (int)result.dest_reg);
     } else {
         result.dest_reg = 0;  // x0寄存器
     }
@@ -113,8 +113,7 @@ void RegisterRenameUnit::update_physical_register(PhysRegNum reg, uint32_t value
     physical_registers[reg].ready = true;
     physical_registers[reg].producer_rob = rob_entry;
     
-    std::cout << "更新物理寄存器 p" << (int)reg << " = 0x" 
-              << std::hex << value << std::dec << std::endl;
+    dprintf(RENAME, "更新物理寄存器 p%d = 0x%x", (int)reg, value);
 }
 
 void RegisterRenameUnit::release_physical_register(PhysRegNum reg) {
@@ -124,7 +123,7 @@ void RegisterRenameUnit::release_physical_register(PhysRegNum reg) {
     physical_registers[reg].value = 0;
     free_list.push(reg);
     
-    std::cout << "释放物理寄存器 p" << (int)reg << std::endl;
+    dprintf(RENAME, "释放物理寄存器 p%d", (int)reg);
 }
 
 uint32_t RegisterRenameUnit::get_physical_register_value(PhysRegNum reg) const {
@@ -147,7 +146,7 @@ void RegisterRenameUnit::flush_pipeline() {
     }
     initialize_free_list();
     
-    std::cout << "流水线刷新：重命名表恢复到架构状态" << std::endl;
+    dprintf(RENAME, "流水线刷新：重命名表恢复到架构状态");
 }
 
 void RegisterRenameUnit::commit_instruction(RegNum logical_reg, PhysRegNum physical_reg) {
@@ -161,8 +160,7 @@ void RegisterRenameUnit::commit_instruction(RegNum logical_reg, PhysRegNum physi
         release_physical_register(old_arch_reg);
     }
     
-    std::cout << "提交指令: x" << (int)logical_reg 
-              << " 架构状态更新为 p" << (int)physical_reg << std::endl;
+    dprintf(RENAME, "提交指令: x%d 架构状态更新为 p%d", (int)logical_reg, (int)physical_reg);
 }
 
 void RegisterRenameUnit::get_statistics(uint64_t& renames, uint64_t& stalls) const {
@@ -179,36 +177,30 @@ size_t RegisterRenameUnit::get_free_register_count() const {
 }
 
 void RegisterRenameUnit::dump_rename_table() const {
-    std::cout << "\n=== 重命名表 ===" << std::endl;
+    dprintf(RENAME, "重命名表");
     for (int i = 0; i < NUM_LOGICAL_REGS; ++i) {
-        std::cout << "x" << std::setw(2) << i << " -> p" 
-                  << std::setw(3) << (int)rename_table[i].physical_reg;
-        if (i % 4 == 3) std::cout << std::endl;
-        else std::cout << "  ";
+        dprintf(RENAME, "x%d -> p%d", i, (int)rename_table[i].physical_reg);
     }
-    std::cout << std::endl;
 }
 
 void RegisterRenameUnit::dump_physical_registers() const {
-    std::cout << "\n=== 物理寄存器状态 ===" << std::endl;
+    dprintf(RENAME, "物理寄存器状态");
     for (int i = 0; i < NUM_PHYSICAL_REGS && i < 64; ++i) {  // 只显示前64个
         if (physical_registers[i].ready) {
-            std::cout << "p" << std::setw(2) << i << ":0x" 
-                      << std::hex << std::setw(8) << std::setfill('0') 
-                      << physical_registers[i].value << std::dec << std::setfill(' ');
+            dprintf(RENAME, "p%d:0x%x", i, physical_registers[i].value);
         } else {
-            std::cout << "p" << std::setw(2) << i << ":  等待中  ";
+            dprintf(RENAME, "p%d:  等待中  ", i);
         }
         
-        if (i % 4 == 3) std::cout << std::endl;
-        else std::cout << "  ";
+        if (i % 4 == 3) dprintf(RENAME, "");
+        else dprintf(RENAME, "  ");
     }
-    std::cout << std::endl;
+    dprintf(RENAME, "");
 }
 
 void RegisterRenameUnit::dump_free_list() const {
-    std::cout << "\n=== 空闲寄存器列表 ===" << std::endl;
-    std::cout << "空闲寄存器数量: " << free_list.size() << std::endl;
+    dprintf(RENAME, "空闲寄存器列表");
+    dprintf(RENAME, "空闲寄存器数量: %zu", free_list.size());
 }
 
 } // namespace riscv

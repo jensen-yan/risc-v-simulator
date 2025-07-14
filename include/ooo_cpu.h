@@ -136,7 +136,6 @@ private:
     
     // 调试支持
     uint64_t global_instruction_id_;     // 全局指令序号
-    bool debug_enabled_;                 // 是否启用调试输出
     
     // 调试辅助方法
     void print_cycle_header();          // 打印周期头部信息

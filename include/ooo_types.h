@@ -100,12 +100,16 @@ struct ReorderBufferEntry {
     // 指令地址
     uint32_t pc;
     
+    // 跳转指令相关（is_jump=true表示此指令提交时需要改变PC）
+    bool is_jump;           // 是否需要跳转（包括条件分支taken和无条件跳转）
+    uint32_t jump_target;   // 跳转目标地址
+    
     // 是否有效
     bool valid;
     
     ReorderBufferEntry() : instruction_id(0), state(State::ALLOCATED), result(0), result_ready(false),
                           logical_dest(0), physical_dest(0), has_exception(false),
-                          pc(0), valid(false) {}
+                          pc(0), is_jump(false), jump_target(0), valid(false) {}
 };
 
 // 执行单元类型
@@ -122,8 +126,12 @@ struct CommonDataBusEntry {
     uint32_t value;
     ROBEntry rob_entry;
     bool valid;
+    // 跳转指令相关（从执行单元传递到ROB的控制流信息）
+    bool is_jump;           // 是否需要跳转
+    uint32_t jump_target;   // 跳转目标地址
     
-    CommonDataBusEntry() : dest_reg(0), value(0), rob_entry(0), valid(false) {}
+    CommonDataBusEntry() : dest_reg(0), value(0), rob_entry(0), valid(false), 
+                          is_jump(false), jump_target(0) {}
 };
 
 // 分支预测结果

@@ -15,7 +15,8 @@ LDFLAGS = -T link.ld -nostdlib -static
 RUNTIME_OBJS = start.o minilib.o
 
 # 测试程序源文件（不带.elf后缀）
-TEST_NAMES = test_printf test_simple test_debug test_simple_debug
+# 从programs目录下获取所有.c文件
+TEST_NAMES = $(shell ls ../programs/*.c | sed 's/\.\.\/programs\///' | sed 's/\.c//')
 TEST_PROGRAMS = $(addsuffix .elf, $(TEST_NAMES))
 
 .PHONY: all clean
@@ -40,6 +41,12 @@ clean:
 # 生成二进制文件（可选）
 %.bin: %.elf
 	$(OBJCOPY) -O binary $< $@
+
+# 生成所有反汇编文件
+all_dis: $(TEST_PROGRAMS)
+	for elf in $(TEST_PROGRAMS); do \
+		riscv64-unknown-elf-objdump -d $$elf > $$elf.dis; \
+	done
 
 # 反汇编（调试用）
 %.dis: %.elf

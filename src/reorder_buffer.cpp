@@ -106,7 +106,8 @@ void ReorderBuffer::mark_as_dispatched(ROBEntry rob_entry) {
 }
 
 void ReorderBuffer::update_entry(ROBEntry rob_entry, uint32_t result, 
-                                bool has_exception, const std::string& exception_msg) {
+                                bool has_exception, const std::string& exception_msg,
+                                bool is_jump, uint32_t jump_target) {
     
     int index = entry_to_index(rob_entry);
     assert(is_valid_index(index) && rob_entries[index].valid && "ROB表项无效");
@@ -115,6 +116,8 @@ void ReorderBuffer::update_entry(ROBEntry rob_entry, uint32_t result,
     rob_entries[index].result_ready = true;
     rob_entries[index].has_exception = has_exception;
     rob_entries[index].exception_msg = exception_msg;
+    rob_entries[index].is_jump = is_jump;
+    rob_entries[index].jump_target = jump_target;
     rob_entries[index].state = ReorderBufferEntry::State::COMPLETED;
     
     if (has_exception) {

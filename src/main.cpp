@@ -23,7 +23,7 @@ void printUsage(const char* programName) {
     std::cout << "  --debug-simple               简洁输出模式\n";
     std::cout << "  --debug-verbose              详细输出模式（默认）\n";
     std::cout << "  --debug-with-pc              带PC信息的输出模式\n";
-    std::cout << "  --debug-log-file=<file>      调试日志输出到文件\n";
+    std::cout << "  --debug-file=<file>      调试日志输出到文件\n";
     std::cout << "  --debug-no-console           禁用控制台输出（仅文件输出）\n";
     std::cout << "\n";
     std::cout << "可用的调试预设:\n";
@@ -108,11 +108,12 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--debug-with-pc") {
             debugWithPC = true;
             debugMode = true;  // 自动启用调试模式
-        } else if (arg.find("--debug-log-file=") == 0) {
-            std::string logFile = arg.substr(17); // 去掉 "--debug-log-file=" 前缀
+        } else if (arg.find("--debug-file=") == 0) {
+            std::string logFile = arg.substr(13); // 去掉 "--debug-file=" 前缀
             DebugManager::getInstance().setLogFile(logFile);
             DebugManager::getInstance().setOutputToFile(true);
             debugMode = true; // 自动启用调试模式
+            DebugManager::getInstance().setOutputToConsole(false); // 禁用控制台输出
             std::cout << "调试日志将输出到文件: " << logFile << "\n";
         } else if (arg == "--debug-no-console") {
             DebugManager::getInstance().setOutputToConsole(false);

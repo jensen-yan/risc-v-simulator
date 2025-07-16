@@ -63,7 +63,8 @@ public:
     
     // 更新ROB表项执行结果
     void update_entry(ROBEntry rob_entry, uint32_t result, bool has_exception = false, 
-                     const std::string& exception_msg = "");
+                     const std::string& exception_msg = "", bool is_jump = false, 
+                     uint32_t jump_target = 0);
     
     // 设置指令序号
     void set_instruction_id(ROBEntry rob_entry, uint64_t instruction_id);

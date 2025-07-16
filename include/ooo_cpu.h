@@ -120,6 +120,9 @@ private:
         uint32_t result;
         bool has_exception;
         std::string exception_msg;
+        // 跳转指令相关字段
+        uint32_t jump_target;
+        bool is_jump;
     };
     
     std::array<ExecutionUnit, 2> alu_units_;

@@ -37,7 +37,7 @@ class TestRunner:
         
         return sorted(files)
     
-    def run_single_test(self, test_file: str, timeout: int = 10) -> Tuple[str, str, int]:
+    def run_single_test(self, test_file: str, timeout: int = 10, ooo: bool = False) -> Tuple[str, str, int]:
         """运行单个测试文件"""
         test_name = os.path.basename(test_file)
         print(f"运行测试: {test_name}...", end=' ', flush=True)
@@ -50,6 +50,9 @@ class TestRunner:
                 "-m", "2164260864",  # 2GB 内存
                 test_file
             ]
+            if ooo:
+                print("测试OOO CPU")
+                cmd.append("--ooo")
             
             # 运行测试
             start_time = time.time()
@@ -83,7 +86,7 @@ class TestRunner:
             print(f"💥 ERROR")
             return "error", f"执行错误: {str(e)}", -1
     
-    def run_test_suite(self, test_pattern: str = "rv32ui-p-*", timeout: int = 10) -> Dict:
+    def run_test_suite(self, test_pattern: str = "rv32ui-p-*", timeout: int = 10, ooo: bool = False) -> Dict:
         """运行测试套件"""
         print(f"查找测试文件: {test_pattern}")
         test_files = self.find_test_files(test_pattern)
@@ -97,7 +100,7 @@ class TestRunner:
         # 运行每个测试
         for test_file in test_files:
             test_name = os.path.basename(test_file)
-            status, output, returncode = self.run_single_test(test_file, timeout)
+            status, output, returncode = self.run_single_test(test_file, timeout, ooo)
             
             self.results[status].append({
                 'name': test_name,
@@ -201,6 +204,9 @@ def main():
     parser.add_argument('--verbose', '-v',
                        action='store_true',
                        help='详细输出')
+    parser.add_argument('--ooo',
+                       action='store_true',
+                       help='测试OOO CPU')
     
     args = parser.parse_args()
     
@@ -225,7 +231,7 @@ def main():
     
     # 运行测试
     runner = TestRunner(args.simulator, args.tests_dir)
-    results = runner.run_test_suite(args.pattern, args.timeout)
+    results = runner.run_test_suite(args.pattern, args.timeout, args.ooo)
     
     # 打印摘要
     runner.print_summary()

@@ -7,6 +7,8 @@
 #include "cpu/ooo/reservation_station.h"
 #include "cpu/ooo/reorder_buffer.h"
 #include "cpu/ooo/ooo_types.h"
+#include "cpu/ooo/cpu_state.h"
+#include "cpu/ooo/pipeline_stage.h"
 #include "common/cpu_interface.h"
 #include <array>
 #include <memory>
@@ -15,6 +17,12 @@
 namespace riscv {
 
 class SyscallHandler;
+class FetchStage;
+class DecodeStage;
+class IssueStage;
+class ExecuteStage;
+class WritebackStage;
+class CommitStage;
 
 /**
  * 乱序执行RISC-V CPU核心类
@@ -55,17 +63,17 @@ public:
     void setFPRegisterFloat(RegNum reg, float value) override;
     
     // 程序计数器
-    uint32_t getPC() const override { return pc_; }
-    void setPC(uint32_t pc) override { pc_ = pc; }
+    uint32_t getPC() const override { return cpu_state_.pc; }
+    void setPC(uint32_t pc) override { cpu_state_.pc = pc; }
     
     // 状态查询
-    bool isHalted() const override { return halted_; }
-    uint64_t getInstructionCount() const override { return instruction_count_; }
-    uint64_t getCycleCount() const { return cycle_count_; }
+    bool isHalted() const override { return cpu_state_.halted; }
+    uint64_t getInstructionCount() const override { return cpu_state_.instruction_count; }
+    uint64_t getCycleCount() const { return cpu_state_.cycle_count; }
     
     // 扩展支持
-    void setEnabledExtensions(uint32_t extensions) override { enabled_extensions_ = extensions; }
-    uint32_t getEnabledExtensions() const override { return enabled_extensions_; }
+    void setEnabledExtensions(uint32_t extensions) override { cpu_state_.enabled_extensions = extensions; }
+    uint32_t getEnabledExtensions() const override { return cpu_state_.enabled_extensions; }
     
     // 性能统计
     void getPerformanceStats(uint64_t& instructions, uint64_t& cycles, 
@@ -77,86 +85,21 @@ public:
     void dumpPipelineState() const;
     
 private:
-    // 内存和基础组件
+    // 新的流水线设计
+    CPUState cpu_state_;                            // CPU共享状态
+    std::unique_ptr<FetchStage> fetch_stage_;       // 取指阶段
+    std::unique_ptr<DecodeStage> decode_stage_;     // 译码阶段
+    std::unique_ptr<IssueStage> issue_stage_;       // 发射阶段
+    std::unique_ptr<ExecuteStage> execute_stage_;   // 执行阶段
+    std::unique_ptr<WritebackStage> writeback_stage_; // 写回阶段
+    std::unique_ptr<CommitStage> commit_stage_;     // 提交阶段
+    
+    // 向后兼容：保留必要的接口变量  
     std::shared_ptr<Memory> memory_;
-    Decoder decoder_;
     std::unique_ptr<SyscallHandler> syscall_handler_;
     
-    // 乱序执行组件
-    std::unique_ptr<RegisterRenameUnit> register_rename_;
-    std::unique_ptr<ReservationStation> reservation_station_;
-    std::unique_ptr<ReorderBuffer> reorder_buffer_;
-    
-    // 物理寄存器文件
-    std::array<uint32_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_registers_;
-    std::array<uint32_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_fp_registers_;
-    
-    // 架构寄存器文件（用于提交阶段）
-    std::array<uint32_t, NUM_REGISTERS> arch_registers_;
-    std::array<uint32_t, NUM_FP_REGISTERS> arch_fp_registers_;
-    
-    // CPU状态
-    uint32_t pc_;                   // 程序计数器
-    bool halted_;                   // 停机标志
-    uint64_t instruction_count_;    // 指令计数器
-    uint64_t cycle_count_;          // 周期计数器
-    uint32_t enabled_extensions_;   // 启用的扩展
-    
-    // 取指相关
-    struct FetchedInstruction {
-        uint32_t pc;
-        Instruction instruction;
-        bool is_compressed;
-    };
-
-    // 取指缓冲区
-    std::queue<FetchedInstruction> fetch_buffer_;
-    
-    // 执行单元状态
-    struct ExecutionUnit {
-        bool busy;
-        int remaining_cycles;
-        ReservationStationEntry instruction;
-        uint32_t result;
-        bool has_exception;
-        std::string exception_msg;
-        // 跳转指令相关字段
-        uint32_t jump_target;
-        bool is_jump;
-    };
-    
-    std::array<ExecutionUnit, 2> alu_units_;
-    std::array<ExecutionUnit, 1> branch_units_;
-    std::array<ExecutionUnit, 1> load_units_;
-    std::array<ExecutionUnit, 1> store_units_;
-    
-    // 通用数据总线
-    std::queue<CommonDataBusEntry> cdb_queue_;
-    
-    // 性能统计
-    uint64_t branch_mispredicts_;
-    uint64_t pipeline_stalls_;
-    
-    // 调试支持
-    uint64_t global_instruction_id_;     // 全局指令序号
-    
     // 调试辅助方法
-    void print_cycle_header();          // 打印周期头部信息
     void print_stage_activity(const std::string& stage, const std::string& activity);
-    std::string get_instruction_debug_info(uint64_t inst_id, uint32_t pc, const std::string& mnemonic);
-    
-    // 流水线阶段
-    void fetch_stage();                    // 取指阶段
-    void decode_stage();                   // 译码阶段
-    void issue_stage();                    // 发射阶段
-    void execute_stage();                  // 执行阶段
-    void writeback_stage();                // 写回阶段
-    void commit_stage();                   // 提交阶段
-    
-    // 指令执行
-    void execute_instruction(ExecutionUnit& unit, const ReservationStationEntry& entry);
-    bool execute_branch_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2);
-    void execute_store_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2);
     
     // 异常处理
     void handle_exception(const std::string& exception_msg, uint32_t pc);
@@ -176,21 +119,12 @@ private:
     uint32_t get_physical_fp_register_value(PhysRegNum reg) const;
     void set_physical_fp_register_value(PhysRegNum reg, uint32_t value);
     
-    // 执行单元管理
-    void initialize_execution_units();
-    ExecutionUnit* get_available_unit(ExecutionUnitType type);
-    void update_execution_units();
-    
     // 内存访问辅助方法
     uint32_t loadFromMemory(Address addr, Funct3 funct3);
     void storeToMemory(Address addr, uint32_t value, Funct3 funct3);
     
     // 立即数符号扩展
     int32_t signExtend(uint32_t value, int bits) const;
-    
-    // 初始化方法
-    void initialize_components();
-    void initialize_registers();
 };
 
 } // namespace riscv

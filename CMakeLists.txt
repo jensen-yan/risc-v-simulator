@@ -42,6 +42,12 @@ set(CPU_OOO_SOURCES
     src/cpu/ooo/register_rename.cpp
     src/cpu/ooo/reorder_buffer.cpp
     src/cpu/ooo/reservation_station.cpp
+    src/cpu/ooo/stages/fetch_stage.cpp
+    src/cpu/ooo/stages/decode_stage.cpp
+    src/cpu/ooo/stages/issue_stage.cpp
+    src/cpu/ooo/stages/execute_stage.cpp
+    src/cpu/ooo/stages/writeback_stage.cpp
+    src/cpu/ooo/stages/commit_stage.cpp
 )
 
 set(CPU_SOURCES
@@ -80,6 +86,7 @@ if(GTest_FOUND)
     
     add_executable(risc-v-tests
         ${TEST_SOURCES}
+        ${LIB_SOURCES}
     )
     
     target_include_directories(risc-v-tests PRIVATE include)

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(risc-v-simulator 
     VERSION 1.0.0
-    DESCRIPTION "A simple RISC-V CPU simulator"
+    DESCRIPTION "A modular RISC-V CPU simulator"
     LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -17,18 +17,57 @@ endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
+# 设置包含目录
 include_directories(include)
 
-# 自动读取 src 目录下所有 .cpp 文件，但排除 main.cpp
-file(GLOB SOURCES "src/*.cpp")
-list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
+# 定义源文件组
+set(COMMON_SOURCES
+    src/common/types.cpp
+    src/common/debug_types.cpp
+)
 
-# 自动读取 include 目录下所有 .h 文件
-file(GLOB HEADERS "include/*.h")
+set(CORE_SOURCES
+    src/core/memory.cpp
+    src/core/alu.cpp
+    src/core/decoder.cpp
+    src/core/instruction_executor.cpp
+)
 
+set(CPU_INORDER_SOURCES
+    src/cpu/inorder/cpu.cpp
+)
+
+set(CPU_OOO_SOURCES
+    src/cpu/ooo/ooo_cpu.cpp
+    src/cpu/ooo/register_rename.cpp
+    src/cpu/ooo/reorder_buffer.cpp
+    src/cpu/ooo/reservation_station.cpp
+)
+
+set(CPU_SOURCES
+    src/cpu/cpu_factory.cpp
+    ${CPU_INORDER_SOURCES}
+    ${CPU_OOO_SOURCES}
+)
+
+set(SYSTEM_SOURCES
+    src/system/simulator.cpp
+    src/system/elf_loader.cpp
+    src/system/syscall_handler.cpp
+)
+
+# 所有库源文件
+set(LIB_SOURCES
+    ${COMMON_SOURCES}
+    ${CORE_SOURCES}
+    ${CPU_SOURCES}
+    ${SYSTEM_SOURCES}
+)
+
+# 主可执行文件
 add_executable(risc-v-sim
     src/main.cpp
-    ${SOURCES}
+    ${LIB_SOURCES}
 )
 
 target_include_directories(risc-v-sim PRIVATE include)
@@ -41,7 +80,6 @@ if(GTest_FOUND)
     
     add_executable(risc-v-tests
         ${TEST_SOURCES}
-        ${SOURCES}
     )
     
     target_include_directories(risc-v-tests PRIVATE include)

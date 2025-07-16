@@ -69,30 +69,67 @@ riscv64-unknown-elf-objcopy -O binary test_simple.elf test_simple.bin
 
 ## 核心架构
 
-模拟器采用模块化设计，组件职责清晰分离：
+模拟器采用分层模块化设计，组件职责清晰分离：
 
-**Simulator 类**: 主要接口，协调所有组件
+### 目录结构
+
+```
+include/
+├── common/          # 通用类型和接口定义
+│   ├── types.h              # 基础数据类型  
+│   ├── debug_types.h        # 调试相关类型
+│   └── cpu_interface.h      # CPU通用接口
+├── core/            # 核心组件
+│   ├── memory.h             # 内存管理
+│   ├── alu.h               # 算术逻辑单元
+│   ├── decoder.h           # 指令解码器
+│   └── instruction_executor.h  # 指令执行器
+├── cpu/             # CPU实现
+│   ├── inorder/            # 顺序执行CPU
+│   │   └── cpu.h           # 基础CPU实现
+│   └── ooo/                # 乱序执行CPU
+│       ├── ooo_cpu.h       # 乱序CPU主控制器
+│       ├── ooo_types.h     # 乱序CPU专用类型
+│       ├── register_rename.h    # 寄存器重命名
+│       ├── reorder_buffer.h     # 重排序缓冲区
+│       └── reservation_station.h   # 保留站
+├── system/          # 系统级组件
+│   ├── simulator.h         # 模拟器控制器
+│   ├── elf_loader.h        # ELF文件加载器
+│   └── syscall_handler.h   # 系统调用处理
+└── utils/           # 工具类（可扩展）
+```
+
+### 核心组件
+
+**Simulator 类** (`system/simulator.h`): 主要接口，协调所有组件
 - 处理程序加载（二进制文件和ELF）
 - 提供执行控制（单步/运行模式）
 - 管理调试和状态检查
+- 支持不同CPU实现的切换
 
-**CPU 类**: 实现取指-译码-执行循环
+**CPU 类** (`cpu/inorder/cpu.h`): 顺序执行CPU实现
 - 管理32个通用寄存器（x0-x31，其中x0始终为零）
 - 处理程序计数器和指令分发
 - 实现所有RV32I指令类型（R、I、S、B、U、J）
 
-**Memory 类**: 线性内存管理
+**OOO_CPU 类** (`cpu/ooo/ooo_cpu.h`): 乱序执行CPU实现
+- 支持指令级并行（ILP）
+- 实现动态调度和推测执行
+- 包含寄存器重命名、重排序缓冲区、保留站等组件
+
+**Memory 类** (`core/memory.h`): 线性内存管理
 - 默认4KB内存（可用-m标志配置）
 - 小端字节序
 - 支持字节、半字、字访问
 - 所有内存操作都进行边界检查
 
-**Decoder 类**: 指令解析和验证
+**Decoder 类** (`core/decoder.h`): 指令解析和验证
 - 将32位机器码解码为结构化格式
 - 提取操作码、寄存器、立即数和功能码
 - 支持所有RISC-V指令格式
 
-**ALU 类**: 算术和逻辑运算
+**ALU 类** (`core/alu.h`): 算术和逻辑运算
 - 处理所有计算操作
 - 实现分支条件评估
 - 支持有符号/无符号比较

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "memory.h"
+#include "core/memory.h"
 
 using namespace riscv;
 

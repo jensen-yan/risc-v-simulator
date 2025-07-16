@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "register_rename.h"
-#include "decoder.h"
+#include "cpu/ooo/register_rename.h"
+#include "core/decoder.h"
 #include <vector>
 
 namespace riscv {

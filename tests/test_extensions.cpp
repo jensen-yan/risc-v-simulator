@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "simulator.h"
-#include "cpu.h"
-#include "decoder.h"
+#include "system/simulator.h"
+#include "cpu/inorder/cpu.h"
+#include "core/decoder.h"
 
 namespace riscv {
 

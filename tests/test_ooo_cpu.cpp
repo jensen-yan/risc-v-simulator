@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "ooo_cpu.h"
-#include "memory.h"
+#include "cpu/ooo/ooo_cpu.h"
+#include "core/memory.h"
 #include <memory>
 
 namespace riscv {

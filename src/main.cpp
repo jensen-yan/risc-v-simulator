@@ -1,5 +1,5 @@
-#include "simulator.h"
-#include "debug_types.h"
+#include "system/simulator.h"
+#include "common/debug_types.h"
 #include <iostream>
 #include <string>
 

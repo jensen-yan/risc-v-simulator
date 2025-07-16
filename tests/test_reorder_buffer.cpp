@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "reorder_buffer.h"
-#include "decoder.h"
+#include "cpu/ooo/reorder_buffer.h"
+#include "core/decoder.h"
 #include <vector>
 
 namespace riscv {

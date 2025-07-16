@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "reservation_station.h"
-#include "decoder.h"
-#include "debug_types.h"
+#include "cpu/ooo/reservation_station.h"
+#include "core/decoder.h"
+#include "common/debug_types.h"
 #include <vector>
 
 namespace riscv {

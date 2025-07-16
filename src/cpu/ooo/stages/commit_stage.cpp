@@ -14,6 +14,16 @@ CommitStage::CommitStage() {
 void CommitStage::execute(CPUState& state) {
     print_stage_activity("开始提交阶段", state.cycle_count, state.pc);
     
+    // 添加ROB状态调试信息
+    size_t free_entries = state.reorder_buffer->get_free_entry_count();
+    size_t used_entries = ReorderBuffer::MAX_ROB_ENTRIES - free_entries;
+    print_stage_activity(
+        std::string("ROB状态: used=") + std::to_string(used_entries) + 
+        "/" + std::to_string(ReorderBuffer::MAX_ROB_ENTRIES) + 
+        ", empty=" + (state.reorder_buffer->is_empty() ? "是" : "否") + 
+        ", full=" + (state.reorder_buffer->is_full() ? "是" : "否"),
+        state.cycle_count, state.pc);
+    
     // 添加ROB状态检查
     if (state.reorder_buffer->is_empty()) {
         print_stage_activity("ROB为空，无法提交", state.cycle_count, state.pc);
@@ -98,7 +108,7 @@ void CommitStage::execute(CPUState& state) {
         if (committed_inst.instruction.opcode == Opcode::SYSTEM) {
             if (InstructionExecutor::isSystemCall(committed_inst.instruction)) {
                 // ECALL
-                handle_ecall(state);
+                handle_ecall(state, committed_inst.pc);
             } else if (InstructionExecutor::isBreakpoint(committed_inst.instruction)) {
                 // EBREAK
                 handle_ebreak(state);
@@ -123,15 +133,35 @@ void CommitStage::reset() {
     print_stage_activity("提交阶段已重置", 0, 0);
 }
 
-void CommitStage::handle_ecall(CPUState& state) {
+void CommitStage::handle_ecall(CPUState& state, uint32_t instruction_pc) {
     // 处理系统调用
-    // TODO: 需要设计更好的接口来传递CPU引用
-    // 暂时简化处理：只是标记需要处理系统调用，由主控制器处理
-    print_stage_activity("检测到ECALL系统调用，标记待处理", state.cycle_count, state.pc);
+    std::stringstream ss;
+    ss << "检测到ECALL系统调用，指令PC=0x" << std::hex << instruction_pc;
+    print_stage_activity(ss.str(), state.cycle_count, instruction_pc);
     
-    // 简化处理：假设是exit系统调用
-    state.halted = true;
-    print_stage_activity("系统调用导致程序终止", state.cycle_count, state.pc);
+    // 添加调试：显示关键寄存器值
+    std::stringstream debug_ss;
+    debug_ss << "ECALL调试: a7(x17)=" << std::dec << state.arch_registers[17] 
+             << ", a0(x10)=" << state.arch_registers[10] 
+             << ", a1(x11)=" << state.arch_registers[11] 
+             << ", 指令PC=0x" << std::hex << instruction_pc;
+    print_stage_activity(debug_ss.str(), state.cycle_count, instruction_pc);
+    
+    // 调用系统调用处理器
+    if (state.syscall_handler && state.cpu_interface) {
+        print_stage_activity("调用系统调用处理器", state.cycle_count, instruction_pc);
+        bool should_halt = state.syscall_handler->handleSyscall(state.cpu_interface);
+        if (should_halt) {
+            state.halted = true;
+            print_stage_activity("系统调用处理完成，程序停机", state.cycle_count, instruction_pc);
+        } else {
+            print_stage_activity("系统调用处理完成，继续执行", state.cycle_count, instruction_pc);
+        }
+    } else {
+        // 降级处理：如果没有系统调用处理器，直接停机
+        print_stage_activity("警告：缺少系统调用处理器，直接停机", state.cycle_count, instruction_pc);
+        state.halted = true;
+    }
 }
 
 void CommitStage::handle_ebreak(CPUState& state) {

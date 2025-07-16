@@ -22,7 +22,7 @@ public:
 
 private:
     // 处理系统调用
-    void handle_ecall(CPUState& state);
+    void handle_ecall(CPUState& state, uint32_t instruction_pc);
     void handle_ebreak(CPUState& state);
     
     // 异常处理

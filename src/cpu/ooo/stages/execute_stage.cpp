@@ -2,6 +2,7 @@
 #include "common/debug_types.h"
 #include "core/instruction_executor.h"
 #include <iostream>
+#include <sstream>
 
 namespace riscv {
 
@@ -103,23 +104,43 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                     // 设置分支结果（分支指令通常不写回寄存器，但需要完成执行）
                     unit.result = 0;  // 分支指令没有写回值
                     
+                    // 简单的分支预测：静态预测不跳转
+                    bool predicted_taken = false;  // 总是预测不跳转
+                    
                     if (should_branch) {
                         // 分支taken：条件成立，需要跳转
                         unit.jump_target = entry.pc + inst.imm;
                         unit.is_jump = true;  // 标记需要改变PC
                         
-                        // 简单的分支预测检查（总是预测不跳转）
-                        // 分支预测错误，需要刷新流水线
-                        print_stage_activity("分支指令 taken，目标地址: 0x" + 
-                                            std::to_string(unit.jump_target) + " (分支预测错误)", 
-                                            state.cycle_count, state.pc);
-                        flush_pipeline(state);
-                        state.branch_mispredicts++;
+                        if (!predicted_taken) {
+                            // 预测不跳转，但实际跳转 -> 预测错误
+                            std::stringstream ss;
+                            ss << "分支指令 taken，目标地址: 0x" << std::hex << unit.jump_target 
+                               << " (PC=0x" << std::hex << entry.pc << " + IMM=" << std::dec << inst.imm << ") (分支预测错误)";
+                            print_stage_activity(ss.str(), state.cycle_count, state.pc);
+                            flush_pipeline(state);
+                            state.branch_mispredicts++;
+                        } else {
+                            // 预测跳转，实际跳转 -> 预测正确
+                            std::stringstream ss;
+                            ss << "分支指令 taken，目标地址: 0x" << std::hex << unit.jump_target 
+                               << " (分支预测正确)";
+                            print_stage_activity(ss.str(), state.cycle_count, state.pc);
+                        }
                     } else {
                         // 分支not taken：条件不成立，继续顺序执行
                         unit.is_jump = false;  // 不需要改变PC
                         unit.jump_target = 0;
-                        print_stage_activity("分支指令 not taken (分支预测正确)", state.cycle_count, state.pc);
+                        
+                        if (predicted_taken) {
+                            // 预测跳转，但实际不跳转 -> 预测错误
+                            print_stage_activity("分支指令 not taken (分支预测错误)", state.cycle_count, state.pc);
+                            flush_pipeline(state);
+                            state.branch_mispredicts++;
+                        } else {
+                            // 预测不跳转，实际不跳转 -> 预测正确
+                            print_stage_activity("分支指令 not taken (分支预测正确)", state.cycle_count, state.pc);
+                        }
                     }
                 }
                 break;

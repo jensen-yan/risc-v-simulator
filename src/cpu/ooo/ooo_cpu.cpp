@@ -17,6 +17,7 @@ namespace riscv {
 OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory) {
     // 初始化CPUState
     cpu_state_.memory = memory_;
+    cpu_state_.cpu_interface = this;  // 设置CPU接口引用，让Stage可以调用CPU方法
     cpu_state_.enabled_extensions = static_cast<uint32_t>(Extension::I) | 
                                    static_cast<uint32_t>(Extension::M) | 
                                    static_cast<uint32_t>(Extension::F) | 

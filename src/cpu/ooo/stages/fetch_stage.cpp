@@ -48,14 +48,14 @@ void FetchStage::execute(CPUState& state) {
                 fetched.is_compressed = true;
                 state.pc += 2;
                 std::stringstream ss;
-                ss << "取指令 0x" << std::hex << raw_inst << " (压缩指令，PC+2)";
-                print_stage_activity(ss.str(), state.cycle_count, state.pc);
+                ss << "取指令: pc = 0x" << std::hex << fetched.pc << " data = 0x" << std::hex << raw_inst << " (压缩指令，PC+2)";
+                print_stage_activity(ss.str(), state.cycle_count, fetched.pc);
             } else {
                 fetched.is_compressed = false;
                 state.pc += 4;
                 std::stringstream ss;
-                ss << "取指令 0x" << std::hex << raw_inst << " (正常指令，PC+4)";
-                print_stage_activity(ss.str(), state.cycle_count, state.pc);
+                ss << "取指令: pc = 0x" << std::hex << fetched.pc << " data = 0x" << std::hex << raw_inst << " (正常指令，PC+4)";
+                print_stage_activity(ss.str(), state.cycle_count, fetched.pc);
             }
             
             state.fetch_buffer.push(fetched);

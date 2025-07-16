@@ -8,6 +8,7 @@
 #include "cpu/ooo/reorder_buffer.h"
 #include "cpu/ooo/ooo_types.h"
 #include "system/syscall_handler.h"
+#include "common/cpu_interface.h"
 #include <array>
 #include <memory>
 #include <queue>
@@ -68,6 +69,9 @@ struct CPUState {
     Decoder decoder;
     std::unique_ptr<SyscallHandler> syscall_handler;
     
+    // CPU接口引用，用于Stage中调用CPU方法
+    ICpuInterface* cpu_interface;
+    
     // 乱序执行组件
     std::unique_ptr<RegisterRenameUnit> register_rename;
     std::unique_ptr<ReservationStation> reservation_station;
@@ -93,6 +97,7 @@ struct CPUState {
                           static_cast<uint32_t>(Extension::M) | 
                           static_cast<uint32_t>(Extension::F) | 
                           static_cast<uint32_t>(Extension::C)),
+        cpu_interface(nullptr),
         branch_mispredicts(0), pipeline_stalls(0), global_instruction_id(0) {
         
         // 批量初始化所有寄存器为0

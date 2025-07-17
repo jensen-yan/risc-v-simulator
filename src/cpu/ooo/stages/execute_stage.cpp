@@ -116,9 +116,9 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                             // 预测不跳转，但实际跳转 -> 预测错误
                             std::stringstream ss;
                             ss << "分支指令 taken，目标地址: 0x" << std::hex << unit.jump_target 
-                               << " (PC=0x" << std::hex << entry.pc << " + IMM=" << std::dec << inst.imm << ") (分支预测错误)";
+                               << " (PC=0x" << std::hex << entry.pc << " + IMM=" << std::dec << inst.imm << ") (将在提交阶段刷新)";
                             print_stage_activity(ss.str(), state.cycle_count, state.pc);
-                            flush_pipeline(state);
+                            // 注意：不在执行阶段刷新，让指令正常完成并提交
                             state.branch_mispredicts++;
                         } else {
                             // 预测跳转，实际跳转 -> 预测正确
@@ -134,8 +134,8 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                         
                         if (predicted_taken) {
                             // 预测跳转，但实际不跳转 -> 预测错误
-                            print_stage_activity("分支指令 not taken (分支预测错误)", state.cycle_count, state.pc);
-                            flush_pipeline(state);
+                            print_stage_activity("分支指令 not taken (将在提交阶段刷新)", state.cycle_count, state.pc);
+                            // 注意：不在执行阶段刷新，让指令正常完成并提交
                             state.branch_mispredicts++;
                         } else {
                             // 预测不跳转，实际不跳转 -> 预测正确
@@ -159,12 +159,22 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                 break;
                 
             case InstructionType::J_TYPE:
-                // 跳转指令（JAL, JALR）- 无条件跳转
-                unit.result = entry.pc + (inst.is_compressed ? 2 : 4);  // 返回地址
-                // 在乱序执行中，不在执行阶段修改PC，而是在提交阶段修改
-                // 将跳转目标保存到额外的字段中
-                unit.jump_target = InstructionExecutor::calculateJumpTarget(inst, entry.pc);
-                unit.is_jump = true;  // 无条件跳转总是需要改变PC
+                {
+                    // 跳转指令（JAL, JALR）- 无条件跳转
+                    unit.result = entry.pc + (inst.is_compressed ? 2 : 4);  // 返回地址
+                    unit.jump_target = InstructionExecutor::calculateJumpTarget(inst, entry.pc);
+                    unit.is_jump = true;  // 无条件跳转总是需要改变PC
+                    
+                    // 无条件跳转指令：记录预测错误但不在执行阶段刷新
+                    std::stringstream ss;
+                    ss << "无条件跳转指令，目标地址: 0x" << std::hex << unit.jump_target 
+                       << " (PC=0x" << std::hex << entry.pc << ") (将在提交阶段刷新流水线)";
+                    print_stage_activity(ss.str(), state.cycle_count, state.pc);
+                    
+                    // 注意：不在执行阶段刷新，让指令正常完成并提交
+                    // 流水线刷新将在提交阶段进行
+                    state.branch_mispredicts++;  // 统计预测错误
+                }
                 break;
                 
             default:
@@ -393,6 +403,9 @@ void ExecuteStage::update_branch_predictor(uint32_t pc, bool taken) {
 }
 
 void ExecuteStage::flush_pipeline(CPUState& state) {
+    // 传统的全刷新方法（用于异常处理等场景）
+    print_stage_activity("执行全流水线刷新", state.cycle_count, state.pc);
+    
     // 清空取指缓冲区
     while (!state.fetch_buffer.empty()) {
         state.fetch_buffer.pop();
@@ -413,6 +426,11 @@ void ExecuteStage::flush_pipeline(CPUState& state) {
     }
     
     // 重置执行单元
+    reset_execution_units(state);
+}
+
+void ExecuteStage::reset_execution_units(CPUState& state) {
+    // 重置所有执行单元
     for (auto& unit : state.alu_units) {
         unit.busy = false;
         unit.remaining_cycles = 0;

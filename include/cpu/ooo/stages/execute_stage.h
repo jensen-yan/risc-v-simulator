@@ -33,6 +33,7 @@ private:
     bool predict_branch(uint32_t pc);
     void update_branch_predictor(uint32_t pc, bool taken);
     void flush_pipeline(CPUState& state);
+    void reset_execution_units(CPUState& state);
     
     // 调试辅助方法
     void print_stage_activity(const std::string& activity, uint64_t cycle, uint32_t pc);

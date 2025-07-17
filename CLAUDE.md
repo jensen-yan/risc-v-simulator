@@ -323,3 +323,48 @@ include/
 ## 调试输出
 
 参考  ./risc-v-sim --help 来了解如何使用调试输出。
+```
+./risc-v-sim --help                                                                             
+RISC-V CPU 模拟器 v1.0
+===========================
+
+用法: ./risc-v-sim [选项] [程序文件]
+选项:
+  -h, --help                   显示此帮助信息
+  -s, --step                   单步执行模式
+  -d, --debug                  调试模式
+  -m SIZE                      设置内存大小（字节）
+  -e, --elf                    加载ELF文件（自动检测）
+  --ooo                        使用乱序执行CPU
+  --in-order                   使用顺序执行CPU（默认）
+
+增强调试选项:
+  --debug-categories=<cats>    指定调试分类（用逗号分隔）
+  --debug-cycles=<start>-<end> 指定调试周期范围
+  --debug-preset=<preset>      使用预设调试配置
+  --debug-simple               简洁输出模式
+  --debug-verbose              详细输出模式（默认）
+  --debug-with-pc              带PC信息的输出模式
+  --debug-file=<file>      调试日志输出到文件
+  --debug-no-console           禁用控制台输出（仅文件输出）
+
+可用的调试预设:
+  basic      基础流水线 (fetch, decode, commit)
+  ooo        乱序执行 (fetch, decode, issue, execute, writeback, commit, rob, rename, rs)
+  pipeline   完整流水线 (fetch, decode, issue, execute, writeback, commit)
+  performance 性能分析 (execute, commit, rob, rs, branch, stall)
+  detailed   所有调试信息
+  memory     内存访问 (fetch, memory, execute, commit)
+  branch     分支预测 (fetch, decode, execute, commit, branch)
+  minimal    最小调试 (fetch, commit)
+
+示例:
+  ./risc-v-sim program.bin                              # 二进制文件
+  ./risc-v-sim program.elf                              # ELF文件
+  ./risc-v-sim -s -d program.elf                        # 单步调试
+  ./risc-v-sim --ooo program.elf                        # 乱序执行CPU
+  ./risc-v-sim --debug-preset=basic program.elf         # 基础调试
+  ./risc-v-sim --debug-preset=ooo --debug-simple program.elf  # 乱序调试简洁模式
+  ./risc-v-sim --debug-categories=fetch,decode,commit program.elf  # 自定义分类
+  ./risc-v-sim --debug-cycles=100-200 program.elf       # 指定周期范围    
+```

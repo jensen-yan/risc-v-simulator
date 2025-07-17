@@ -6,6 +6,7 @@
 #include "cpu/ooo/stages/writeback_stage.h"
 #include "cpu/ooo/stages/commit_stage.h"
 #include "system/syscall_handler.h"
+#include "system/difftest.h"
 #include "core/instruction_executor.h"
 #include "common/debug_types.h"
 #include <cstdint>
@@ -29,6 +30,9 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory) {
     cpu_state_.reorder_buffer = std::make_unique<ReorderBuffer>();
     cpu_state_.syscall_handler = std::make_unique<SyscallHandler>(memory_);
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
+    
+    // 初始化DiffTest组件
+    difftest_ = std::make_unique<DiffTest>(memory_);
     
     // 创建流水线阶段
     fetch_stage_ = std::make_unique<FetchStage>();
@@ -87,6 +91,7 @@ void OutOfOrderCPU::run() {
 void OutOfOrderCPU::reset() {
     // 重置CPU状态
     cpu_state_.pc = 0;
+    cpu_state_.last_committed_pc = 0;
     cpu_state_.halted = false;
     cpu_state_.instruction_count = 0;
     cpu_state_.cycle_count = 0;
@@ -123,6 +128,11 @@ void OutOfOrderCPU::reset() {
     }
     while (!cpu_state_.cdb_queue.empty()) {
         cpu_state_.cdb_queue.pop();
+    }
+    
+    // 重置DiffTest组件
+    if (difftest_) {
+        difftest_->reset();
     }
     
     std::cout << "乱序执行CPU重置完成" << std::endl;
@@ -309,6 +319,46 @@ void OutOfOrderCPU::dumpPipelineState() const {
 void OutOfOrderCPU::print_stage_activity(const std::string& stage, const std::string& activity) {
     auto& debugManager = DebugManager::getInstance();
     debugManager.printf(stage, activity, cpu_state_.cycle_count, cpu_state_.pc);
+}
+
+void OutOfOrderCPU::enableDiffTest(bool enable) {
+    if (difftest_) {
+        difftest_->setEnabled(enable);
+        std::cout << "[OutOfOrderCPU] DiffTest " << (enable ? "启用" : "禁用") << std::endl;
+    }
+}
+
+bool OutOfOrderCPU::isDiffTestEnabled() const {
+    return difftest_ && difftest_->isEnabled();
+}
+
+void OutOfOrderCPU::performDiffTest() {
+    if (difftest_ && difftest_->isEnabled()) {
+        // 第一次调用时，同步参考CPU的完整状态
+        static bool first_call = true;
+        if (first_call) {
+            difftest_->syncReferenceState(this);
+            first_call = false;
+        }
+        
+        // 执行参考CPU一步并比较状态
+        bool match = difftest_->stepAndCompare(this);
+        if (!match) {
+            dprintf(DIFFTEST, "DiffTest检测到状态不一致！");
+            exit(1);
+        }
+    }
+}
+
+void OutOfOrderCPU::getDiffTestStats(uint64_t& comparisons, uint64_t& mismatches) const {
+    if (difftest_) {
+        auto stats = difftest_->getStatistics();
+        comparisons = stats.comparison_count;
+        mismatches = stats.mismatch_count;
+    } else {
+        comparisons = 0;
+        mismatches = 0;
+    }
 }
 
 } // namespace riscv

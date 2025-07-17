@@ -1,6 +1,7 @@
 #include "cpu/ooo/stages/commit_stage.h"
 #include "core/instruction_executor.h"
 #include "system/syscall_handler.h"
+#include "system/difftest.h"
 #include "common/debug_types.h"
 #include <iostream>
 #include <sstream>
@@ -95,6 +96,16 @@ void CommitStage::execute(CPUState& state) {
         
         state.instruction_count++;
         
+        // 更新最近提交指令的PC
+        state.last_committed_pc = committed_inst.pc;
+        
+        // DiffTest: 当乱序CPU提交一条指令时，同步执行参考CPU并比较状态
+        if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
+            dprintf(DIFFTEST, "提交指令PC=0x%x, 当前架构PC=0x%x", committed_inst.pc, state.pc);
+            state.cpu_interface->performDiffTest();
+            print_stage_activity("执行DiffTest状态比较", state.cycle_count, committed_inst.pc);
+        }
+        
         // 处理跳转指令：只有is_jump=true的指令才会改变PC
         if (committed_inst.is_jump) {
             state.pc = committed_inst.jump_target;
@@ -102,6 +113,9 @@ void CommitStage::execute(CPUState& state) {
             ss << "Inst#" << committed_inst.instruction_id << " 跳转到 0x" 
                << std::hex << committed_inst.jump_target;
             print_stage_activity(ss.str(), state.cycle_count, state.pc);
+            
+            // 跳转指令提交后，刷新流水线中错误推测的指令
+            flush_pipeline_after_commit(state);
         }
         
         // 处理系统调用
@@ -173,6 +187,69 @@ void CommitStage::handle_exception(CPUState& state, const std::string& exception
     std::cerr << "异常: " << exception_msg << ", PC=0x" << std::hex << pc << std::dec << std::endl;
     // 异常处理会导致流水线刷新，这需要在主控制器中处理
     state.halted = true;
+}
+
+void CommitStage::flush_pipeline_after_commit(CPUState& state) {
+    print_stage_activity("跳转指令已提交，开始刷新流水线", state.cycle_count, state.pc);
+    
+    // 1. 清空取指缓冲区（错误推测的指令）
+    while (!state.fetch_buffer.empty()) {
+        state.fetch_buffer.pop();
+    }
+    
+    // 2. 刷新保留站中所有未执行的指令
+    state.reservation_station->flush_pipeline();
+    
+    // 3. 刷新ROB中所有未提交的指令
+    state.reorder_buffer->flush_pipeline();
+    
+    // 4. 重新初始化寄存器重命名（后续指令的重命名已失效）
+    state.register_rename = std::make_unique<RegisterRenameUnit>();
+    
+    // 5. 清空CDB队列（安全，因为当前指令已提交）
+    while (!state.cdb_queue.empty()) {
+        state.cdb_queue.pop();
+    }
+    
+    // 6. 重置所有执行单元（安全，因为当前指令已提交）
+    reset_execution_units(state);
+    
+    print_stage_activity("流水线刷新完成，重新开始取指", state.cycle_count, state.pc);
+}
+
+void CommitStage::reset_execution_units(CPUState& state) {
+    // 重置所有执行单元
+    for (auto& unit : state.alu_units) {
+        unit.busy = false;
+        unit.remaining_cycles = 0;
+        unit.has_exception = false;
+        unit.is_jump = false;
+        unit.jump_target = 0;
+    }
+    
+    for (auto& unit : state.branch_units) {
+        unit.busy = false;
+        unit.remaining_cycles = 0;
+        unit.has_exception = false;
+        unit.is_jump = false;
+        unit.jump_target = 0;
+    }
+    
+    for (auto& unit : state.load_units) {
+        unit.busy = false;
+        unit.remaining_cycles = 0;
+        unit.has_exception = false;
+        unit.is_jump = false;
+        unit.jump_target = 0;
+    }
+    
+    for (auto& unit : state.store_units) {
+        unit.busy = false;
+        unit.remaining_cycles = 0;
+        unit.has_exception = false;
+        unit.is_jump = false;
+        unit.jump_target = 0;
+    }
 }
 
 void CommitStage::print_stage_activity(const std::string& activity, uint64_t cycle, uint32_t pc) {

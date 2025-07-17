@@ -44,6 +44,11 @@ const std::unordered_map<std::string, std::vector<std::string>> LogPresets::pres
     // 最小预设：最基本的调试信息
     {"minimal", {
         "FETCH", "COMMIT"
+    }},
+
+    // difftest预设：difftest调试相关
+    {"difftest", {
+        "DIFFTEST"
     }}
 };
 

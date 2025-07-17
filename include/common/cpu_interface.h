@@ -46,6 +46,10 @@ public:
     // 调试功能
     virtual void dumpRegisters() const = 0;
     virtual void dumpState() const = 0;
+    
+    // DiffTest功能（默认实现为空，只有OOO CPU需要实现）
+    virtual void performDiffTest() {}
+    virtual bool isDiffTestEnabled() const { return false; }
 };
 
 /**

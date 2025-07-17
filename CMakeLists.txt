@@ -60,6 +60,7 @@ set(SYSTEM_SOURCES
     src/system/simulator.cpp
     src/system/elf_loader.cpp
     src/system/syscall_handler.cpp
+    src/system/difftest.cpp
 )
 
 # 所有库源文件
@@ -70,13 +71,23 @@ set(LIB_SOURCES
     ${SYSTEM_SOURCES}
 )
 
-# 主可执行文件
-add_executable(risc-v-sim
-    src/main.cpp
+# 创建静态库
+add_library(risc-v-sim-lib STATIC
     ${LIB_SOURCES}
 )
 
+target_include_directories(risc-v-sim-lib PUBLIC include)
+
+# 设置库的输出名称
+set_target_properties(risc-v-sim-lib PROPERTIES OUTPUT_NAME risc-v-sim)
+
+# 主可执行文件
+add_executable(risc-v-sim
+    src/main.cpp
+)
+
 target_include_directories(risc-v-sim PRIVATE include)
+target_link_libraries(risc-v-sim risc-v-sim-lib)
 
 find_package(GTest QUIET)
 if(GTest_FOUND)
@@ -86,11 +97,10 @@ if(GTest_FOUND)
     
     add_executable(risc-v-tests
         ${TEST_SOURCES}
-        ${LIB_SOURCES}
     )
     
     target_include_directories(risc-v-tests PRIVATE include)
-    target_link_libraries(risc-v-tests GTest::gtest_main)
+    target_link_libraries(risc-v-tests risc-v-sim-lib GTest::gtest_main)
     
     include(GoogleTest)
     gtest_discover_tests(risc-v-tests)

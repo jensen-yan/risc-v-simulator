@@ -1,5 +1,6 @@
 #include "cpu/ooo/stages/writeback_stage.h"
 #include "common/debug_types.h"
+#include <sstream>
 
 namespace riscv {
 
@@ -15,10 +16,9 @@ void WritebackStage::execute(CPUState& state) {
         CommonDataBusEntry cdb_entry = state.cdb_queue.front();
         state.cdb_queue.pop();
         
-        print_stage_activity("CDB写回: ROB[" + std::to_string(cdb_entry.rob_entry) + 
-                            "] p" + std::to_string(cdb_entry.dest_reg) + 
-                            " = 0x" + std::to_string(cdb_entry.value), 
-                            state.cycle_count, state.pc);
+        std::stringstream ss;
+        ss << "CDB写回: ROB[" << cdb_entry.rob_entry << "] p" << cdb_entry.dest_reg << " = 0x" << std::hex << cdb_entry.value;
+        print_stage_activity(ss.str(), state.cycle_count, state.pc);
         
         // 更新保留站中的操作数
         state.reservation_station->update_operands(cdb_entry);

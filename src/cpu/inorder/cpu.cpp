@@ -294,21 +294,27 @@ void CPU::executeJType(const DecodedInstruction& inst) {
 
 void CPU::executeSystem(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::SYSTEM) {
-        // CSR指令通过funct3区分，特权指令通过立即数区分
+        // 使用更精确的指令判断函数
         if (InstructionExecutor::isSystemCall(inst)) {
             // ECALL - 环境调用
             handleEcall();
         } else if (InstructionExecutor::isBreakpoint(inst)) {
             // EBREAK - 断点
             handleEbreak();
-        } else if (inst.funct3 == Funct3::ECALL_EBREAK && inst.imm == 0x302) {
-            // MRET - 机器模式返回（简化实现：直接跳转到mepc）
+        } else if (InstructionExecutor::isMachineReturn(inst)) {
+            // MRET - 机器模式返回, 暂时不实现
+            incrementPC();
+        } else if (InstructionExecutor::isSupervisorReturn(inst)) {
+            // SRET - 监管模式返回（可选实现）
+            incrementPC();
+        } else if (InstructionExecutor::isUserReturn(inst)) {
+            // URET - 用户模式返回（可选实现）
             incrementPC();
         } else if (inst.funct3 != Funct3::ECALL_EBREAK) {
             // CSR指令 - 暂时不实现，直接跳过
             incrementPC();
         } else {
-            throw IllegalInstructionException("不支持的系统指令");
+            throw IllegalInstructionException("不支持的系统指令: imm=" + std::to_string(inst.imm));
         }
     } else {
         throw IllegalInstructionException("不支持的系统指令");

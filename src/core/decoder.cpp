@@ -32,6 +32,10 @@ DecodedInstruction Decoder::decode(Instruction instruction, uint32_t enabled_ext
         case InstructionType::J_TYPE:
             decoded.imm = extractImmediateJ(instruction);
             break;
+        case InstructionType::SYSTEM_TYPE:
+            // 系统指令的立即数解码：类似 I 型指令但需要特殊处理
+            decoded.imm = extractImmediateI(instruction);
+            break;
         default:
             decoded.imm = 0;
             break;
@@ -39,6 +43,14 @@ DecodedInstruction Decoder::decode(Instruction instruction, uint32_t enabled_ext
     
     // 验证指令合法性
     validateInstruction(decoded, enabled_extensions);
+    
+    // CSR指令和系统指令特殊处理：与顺序CPU保持一致，不写回寄存器
+    if (decoded.opcode == Opcode::SYSTEM) {
+        // 对于ECALL/EBREAK/mret等系统指令，不应写回寄存器
+        // 对于CSRRW/CSRRS/CSRRC等CSR指令，需要根据具体指令决定是否写回
+        // 简化处理：所有SYSTEM指令都不写回寄存器
+        decoded.rd = 0;  // SYSTEM指令不写回寄存器
+    }
     
     return decoded;
 }

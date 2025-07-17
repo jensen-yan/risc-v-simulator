@@ -260,11 +260,33 @@ int32_t InstructionExecutor::signExtend(uint32_t value, int bits) {
 }
 
 bool InstructionExecutor::isSystemCall(const DecodedInstruction& inst) {
-    return inst.opcode == Opcode::SYSTEM && inst.funct3 == Funct3::ECALL_EBREAK && inst.imm == 0;
+    return inst.opcode == Opcode::SYSTEM && 
+           inst.funct3 == Funct3::ECALL_EBREAK && 
+           inst.imm == SystemInst::ECALL;
 }
 
 bool InstructionExecutor::isBreakpoint(const DecodedInstruction& inst) {
-    return inst.opcode == Opcode::SYSTEM && inst.funct3 == Funct3::ECALL_EBREAK && inst.imm == 1;
+    return inst.opcode == Opcode::SYSTEM && 
+           inst.funct3 == Funct3::ECALL_EBREAK && 
+           inst.imm == SystemInst::EBREAK;
+}
+
+bool InstructionExecutor::isMachineReturn(const DecodedInstruction& inst) {
+    return inst.opcode == Opcode::SYSTEM && 
+           inst.funct3 == Funct3::ECALL_EBREAK && 
+           inst.imm == SystemInst::MRET;
+}
+
+bool InstructionExecutor::isSupervisorReturn(const DecodedInstruction& inst) {
+    return inst.opcode == Opcode::SYSTEM && 
+           inst.funct3 == Funct3::ECALL_EBREAK && 
+           inst.imm == SystemInst::SRET;
+}
+
+bool InstructionExecutor::isUserReturn(const DecodedInstruction& inst) {
+    return inst.opcode == Opcode::SYSTEM && 
+           inst.funct3 == Funct3::ECALL_EBREAK && 
+           inst.imm == SystemInst::URET;
 }
 
 // 私有辅助方法实现

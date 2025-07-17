@@ -45,6 +45,9 @@ public:
     // 系统调用辅助
     static bool isSystemCall(const DecodedInstruction& inst);
     static bool isBreakpoint(const DecodedInstruction& inst);
+    static bool isMachineReturn(const DecodedInstruction& inst);
+    static bool isSupervisorReturn(const DecodedInstruction& inst);
+    static bool isUserReturn(const DecodedInstruction& inst);
     
 private:
     // 私有辅助方法

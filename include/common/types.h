@@ -151,6 +151,16 @@ enum class Extension : uint32_t {
     C    = 0x20     // 压缩指令扩展
 };
 
+// 系统指令立即数常量
+namespace SystemInst {
+    constexpr uint32_t ECALL  = 0x000;  // 环境调用
+    constexpr uint32_t EBREAK = 0x001;  // 环境断点
+    constexpr uint32_t MRET   = 0x302;  // 机器模式返回
+    constexpr uint32_t SRET   = 0x102;  // 监管模式返回 (可选)
+    constexpr uint32_t URET   = 0x002;  // 用户模式返回 (可选)
+    constexpr uint32_t WFI    = 0x105;  // 等待中断 (可选)
+}
+
 // 浮点舍入模式
 enum class FPRoundingMode : uint8_t {
     RNE = 0b000,    // Round to Nearest, ties to Even

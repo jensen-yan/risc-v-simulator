@@ -50,9 +50,6 @@ void DiffTest::syncReferenceState(ICpuInterface* ooo_cpu) {
     // 同步PC - 使用提交PC而不是架构PC
     uint32_t committed_pc = static_cast<OutOfOrderCPU*>(ooo_cpu)->getCommittedPC();
     reference_cpu_->setPC(committed_pc);
-    
-    dprintf(DIFFTEST, "同步PC: 架构PC=0x%x, 提交PC=0x%x", ooo_cpu->getPC(), committed_pc);
-    dprintf(DIFFTEST, "已同步参考CPU状态与乱序CPU一致");
 }
 
 bool DiffTest::stepAndCompare(ICpuInterface* ooo_cpu) {
@@ -66,9 +63,6 @@ bool DiffTest::stepAndCompare(ICpuInterface* ooo_cpu) {
     uint32_t ref_pc = reference_cpu_->getPC();
     uint32_t ooo_committed_pc = static_cast<OutOfOrderCPU*>(ooo_cpu)->getCommittedPC();
     
-    dprintf(DIFFTEST, "比较 #%llu", comparison_count_);
-    dprintf(DIFFTEST, "步骤1 - PC预检查: 参考CPU=0x%x, 乱序CPU提交PC=0x%x", ref_pc, ooo_committed_pc);
-    
     if (ref_pc != ooo_committed_pc) {
         dprintf(DIFFTEST, "PC预检查失败！提交PC不一致，跳过此次比较");
         mismatch_count_++;
@@ -77,11 +71,9 @@ bool DiffTest::stepAndCompare(ICpuInterface* ooo_cpu) {
     }
     
     // 步骤2: PC一致，让参考CPU执行一条指令
-    dprintf(DIFFTEST, "步骤2 - PC一致，执行参考CPU指令");
     reference_cpu_->step();
     
     // 步骤3: 比较执行后的寄存器状态（不比较PC，因为执行后PC会不同）
-    dprintf(DIFFTEST, "步骤3 - 比较寄存器状态");
     bool all_match = true;
     
     // 比较通用寄存器
@@ -173,8 +165,6 @@ bool DiffTest::compareFPRegisters(ICpuInterface* ooo_cpu) {
 }
 
 void DiffTest::dumpState(ICpuInterface* ref_cpu, ICpuInterface* ooo_cpu) {
-    dprintf(DIFFTEST, "状态转储");
-    
     // 转储PC
     dprintf(DIFFTEST, "PC: 参考CPU=0x%x, 乱序CPU=0x%x", ref_cpu->getPC(), ooo_cpu->getPC());
     

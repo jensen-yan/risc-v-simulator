@@ -1,5 +1,6 @@
 #include "cpu/ooo/stages/execute_stage.h"
 #include "common/debug_types.h"
+#include "common/types.h"
 #include "core/instruction_executor.h"
 #include <iostream>
 #include <sstream>
@@ -87,13 +88,15 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                     // 加载指令
                     uint32_t addr = entry.src1_value + inst.imm;
                     unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
-                } else if (inst.opcode == Opcode::SYSTEM) {
-                    // 系统调用 - 不需要计算结果
-                    unit.result = 0;
                 } else {
                     unit.has_exception = true;
                     unit.exception_msg = "不支持的I-type指令";
                 }
+                break;
+
+            case InstructionType::SYSTEM_TYPE:
+                // 系统调用 - 不需要计算结果
+                unit.result = 0;
                 break;
                 
             case InstructionType::B_TYPE:
@@ -180,6 +183,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
             default:
                 unit.has_exception = true;
                 unit.exception_msg = "不支持的指令类型";
+                print_stage_activity("不支持的指令类型: " + std::to_string(static_cast<int>(inst.type)), state.cycle_count, state.pc);
                 break;
         }
         

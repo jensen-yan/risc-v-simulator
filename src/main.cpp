@@ -13,8 +13,8 @@ void printUsage(const char* programName) {
     std::cout << "  -d, --debug                  调试模式\n";
     std::cout << "  -m SIZE                      设置内存大小（字节）\n";
     std::cout << "  -e, --elf                    加载ELF文件（自动检测）\n";
-    std::cout << "  --ooo                        使用乱序执行CPU\n";
-    std::cout << "  --in-order                   使用顺序执行CPU（默认）\n";
+    std::cout << "  --ooo                        使用乱序执行CPU（默认）\n";
+    std::cout << "  --in-order                   使用顺序执行CPU\n";
     std::cout << "\n";
     std::cout << "增强调试选项:\n";
     std::cout << "  --debug-categories=<cats>    指定调试分类（用逗号分隔）\n";
@@ -62,7 +62,7 @@ int main(int argc, char* argv[]) {
     bool debugMode = false;
     bool forceElf = false;
     size_t memorySize = Memory::DEFAULT_SIZE;
-    CpuType cpuType = CpuType::IN_ORDER;  // 默认使用顺序执行CPU
+    CpuType cpuType = CpuType::OUT_OF_ORDER;  // 默认使用乱序执行CPU
     
     // 增强调试参数
     std::string debugCategories;

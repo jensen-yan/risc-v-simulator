@@ -180,7 +180,8 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
     result.success = true;
     result.instruction = head_entry;
     
-    dprintf(ROB, "提交指令 ROB%d, PC=0x%x, 结果=0x%x", index_to_entry(head_index), head_entry.pc, head_entry.result);
+    dprintf(ROB, "提交指令 ROB%d, PC=0x%x, 结果=0x%x, 指令ID=%llu", 
+            index_to_entry(head_index), head_entry.pc, head_entry.result, head_entry.instruction_id);
     
     // 更新状态
     head_entry.state = ReorderBufferEntry::State::RETIRED;

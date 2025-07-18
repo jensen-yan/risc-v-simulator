@@ -3,6 +3,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cassert>
+#include <set> // Added for std::set
 
 namespace riscv {
 
@@ -87,6 +88,24 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
         
         // 新分配的物理寄存器还没有值
         physical_registers[result.dest_reg].ready = false;
+        // 关键修复：处理自依赖情况（源寄存器和目标寄存器相同）
+        // 需要确保源寄存器仍然指向旧的物理寄存器
+        if (instruction.rs1 == instruction.rd && instruction.rs1 < NUM_LOGICAL_REGS) {
+            result.src1_reg = old_physical_reg;
+            result.src1_ready = physical_registers[old_physical_reg].ready;
+            result.src1_value = physical_registers[old_physical_reg].value;
+            dprintf(RENAME, "修复自依赖: x%d rs1源使用 p%d (旧值), 目标使用 p%d (新值)", 
+                    (int)instruction.rd, (int)old_physical_reg, (int)result.dest_reg);
+        }
+        
+        // 同样处理rs2的自依赖情况（例如某些R-type指令可能有rs2 == rd）
+        if (instruction.rs2 == instruction.rd && instruction.rs2 < NUM_LOGICAL_REGS) {
+            result.src2_reg = old_physical_reg;
+            result.src2_ready = physical_registers[old_physical_reg].ready;
+            result.src2_value = physical_registers[old_physical_reg].value;
+            dprintf(RENAME, "修复自依赖: x%d rs2源使用 p%d (旧值), 目标使用 p%d (新值)", 
+                    (int)instruction.rd, (int)old_physical_reg, (int)result.dest_reg);
+        }
         
         dprintf(RENAME, "重命名: x%d 从 p%d 重命名到 p%d", 
                 (int)instruction.rd, (int)old_physical_reg, (int)result.dest_reg);
@@ -138,18 +157,33 @@ bool RegisterRenameUnit::is_physical_register_ready(PhysRegNum reg) const {
 }
 
 void RegisterRenameUnit::flush_pipeline() {
-    // 恢复重命名表到架构状态
+    // 关键修复：流水线刷新应该只清除推测性状态，保留已提交的架构状态
+    // 将rename_table恢复到与arch_map一致的状态，而不是重置到初始状态
+    
     for (int i = 0; i < NUM_LOGICAL_REGS; ++i) {
+        // 将重命名表恢复到已提交的架构状态
         rename_table[i].physical_reg = arch_map[i];
+        rename_table[i].valid = true;
     }
     
-    // 重新初始化空闲列表
+    // 释放所有未提交的物理寄存器
+    // 保留arch_map中已提交的物理寄存器
+    std::set<PhysRegNum> committed_regs;
+    for (int i = 0; i < NUM_LOGICAL_REGS; ++i) {
+        committed_regs.insert(arch_map[i]);
+    }
+    
+    // 重新初始化空闲列表，排除已提交的寄存器
     while (!free_list.empty()) {
         free_list.pop();
     }
-    initialize_free_list();
+    for (int i = NUM_LOGICAL_REGS; i < NUM_PHYSICAL_REGS; ++i) {
+        if (committed_regs.find(i) == committed_regs.end()) {
+            free_list.push(i);
+        }
+    }
     
-    dprintf(RENAME, "流水线刷新：重命名表恢复到架构状态");
+    dprintf(RENAME, "流水线刷新：重命名表恢复到架构状态，保留已提交状态");
 }
 
 void RegisterRenameUnit::commit_instruction(RegNum logical_reg, PhysRegNum physical_reg) {
@@ -157,6 +191,15 @@ void RegisterRenameUnit::commit_instruction(RegNum logical_reg, PhysRegNum physi
     
     PhysRegNum old_arch_reg = arch_map[logical_reg];
     arch_map[logical_reg] = physical_reg;
+    
+    // 关键修复：如果rename_table中的映射与即将提交的物理寄存器相同，
+    // 或者rename_table指向的是旧的架构寄存器，则更新rename_table
+    if (rename_table[logical_reg].physical_reg == physical_reg ||
+        rename_table[logical_reg].physical_reg == old_arch_reg) {
+        rename_table[logical_reg].physical_reg = physical_reg;
+        rename_table[logical_reg].valid = true;
+        dprintf(RENAME, "提交时更新rename_table[%d]为p%d", (int)logical_reg, (int)physical_reg);
+    }
     
     // 释放旧的架构寄存器
     if (old_arch_reg >= NUM_LOGICAL_REGS) {
@@ -169,6 +212,20 @@ void RegisterRenameUnit::commit_instruction(RegNum logical_reg, PhysRegNum physi
 void RegisterRenameUnit::get_statistics(uint64_t& renames, uint64_t& stalls) const {
     renames = rename_count;
     stalls = stall_count;
+}
+
+void RegisterRenameUnit::update_architecture_register(RegNum logical_reg, uint32_t value) {
+    if (logical_reg == 0) return;  // x0寄存器不更新
+    
+    // 直接更新架构寄存器映射中的值
+    // 这确保DiffTest比较时状态一致
+    PhysRegNum current_arch_reg = arch_map[logical_reg];
+    if (current_arch_reg < NUM_LOGICAL_REGS) {
+        // 如果是初始寄存器，直接更新其值
+        physical_registers[current_arch_reg].value = value;
+    }
+    
+    dprintf(RENAME, "更新架构寄存器 x%d = 0x%x", (int)logical_reg, value);
 }
 
 bool RegisterRenameUnit::has_free_register() const {

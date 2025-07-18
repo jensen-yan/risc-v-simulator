@@ -76,6 +76,9 @@ public:
     // 获取统计信息
     void get_statistics(uint64_t& renames, uint64_t& stalls) const;
     
+    // 更新架构寄存器值（用于DiffTest同步）
+    void update_architecture_register(RegNum logical_reg, uint32_t value);
+    
     // 调试输出
     void dump_rename_table() const;
     void dump_physical_registers() const;

@@ -53,8 +53,9 @@ void DecodeStage::execute(CPUState& state) {
     // 设置指令序号
     state.reorder_buffer->set_instruction_id(rob_result.rob_entry, instruction_id);
     
-    print_stage_activity("分配到ROB[" + std::to_string(rob_result.rob_entry) + "]", 
-                       state.cycle_count, state.pc);
+    std::string msg = std::format("分配到ROB[{}] PC=0x{:x} 指令ID={}", 
+        rob_result.rob_entry, fetched.pc, instruction_id);
+    print_stage_activity(msg, state.cycle_count, state.pc);
     
     // 继续到发射阶段的处理将在issue_stage中完成
     // 这里我们需要一个中间缓冲区来存储译码后的指令

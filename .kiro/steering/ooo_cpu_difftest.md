@@ -171,7 +171,7 @@ private:
     
 public:
     // 执行指令
-    uint32_t executeInstruction(const DecodedInstruction& inst, 
+    uint32_t execute_instruction(const DecodedInstruction& inst, 
                               uint32_t src1_value, 
                               uint32_t src2_value,
                               uint32_t pc);

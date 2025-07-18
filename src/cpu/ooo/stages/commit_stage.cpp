@@ -1,7 +1,6 @@
 #include "cpu/ooo/stages/commit_stage.h"
 #include "core/instruction_executor.h"
 #include "system/syscall_handler.h"
-#include "system/difftest.h"
 #include "common/debug_types.h"
 #include <iostream>
 #include <sstream>
@@ -81,20 +80,26 @@ void CommitStage::execute(CPUState& state) {
         // 提交到架构寄存器
         if (committed_inst.instruction.rd != 0) {  // x0寄存器不能写入
             state.arch_registers[committed_inst.instruction.rd] = committed_inst.result;
-            print_stage_activity("Inst#" + std::to_string(committed_inst.instruction_id) + 
-                                " PC=0x" + std::to_string(committed_inst.pc) +
-                                " x" + std::to_string(committed_inst.instruction.rd) + 
-                                " = 0x" + std::to_string(committed_inst.result), 
-                                state.cycle_count, state.pc);
+            std::string msg = std::format("Inst#{} PC=0x{:x} x{} = 0x{:x}", 
+                committed_inst.instruction_id, committed_inst.pc, 
+                committed_inst.instruction.rd, committed_inst.result);
+            print_stage_activity(msg, state.cycle_count, state.pc);
         } else {
-            print_stage_activity("Inst#" + std::to_string(committed_inst.instruction_id) + 
-                                " PC=0x" + std::to_string(committed_inst.pc) +
-                                " (无目标寄存器)", state.cycle_count, state.pc);
+            std::string msg = std::format("Inst#{} PC=0x{:x} (无目标寄存器)", 
+                committed_inst.instruction_id, committed_inst.pc);
+            print_stage_activity(msg, state.cycle_count, state.pc);
         }
         
         // 释放物理寄存器
         state.register_rename->commit_instruction(committed_inst.logical_dest, 
                                                  committed_inst.physical_dest);
+        
+        // 确保架构寄存器状态与寄存器重命名模块同步
+        // 这是为了确保DiffTest比较时状态一致
+        if (committed_inst.instruction.rd != 0) {
+            state.register_rename->update_architecture_register(committed_inst.instruction.rd, 
+                                                              committed_inst.result);
+        }
         
         state.instruction_count++;
         
@@ -103,7 +108,8 @@ void CommitStage::execute(CPUState& state) {
         
         // DiffTest: 当乱序CPU提交一条指令时，同步执行参考CPU并比较状态
         if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
-            dprintf(DIFFTEST, "提交指令PC=0x%x, 当前架构PC=0x%x", committed_inst.pc, state.pc);
+            dprintf(DIFFTEST, "[COMMIT_TRACK] 提交指令: PC=0x%x, 指令ID=%llu, 指令计数=%llu", 
+                    committed_inst.pc, committed_inst.instruction_id, state.instruction_count);
             state.cpu_interface->performDiffTest();
             print_stage_activity("执行DiffTest状态比较", state.cycle_count, committed_inst.pc);
         }
@@ -205,8 +211,9 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state) {
     // 3. 刷新ROB中所有未提交的指令
     state.reorder_buffer->flush_pipeline();
     
-    // 4. 重新初始化寄存器重命名（后续指令的重命名已失效）
-    state.register_rename = std::make_unique<RegisterRenameUnit>();
+    // 4. 关键修复：调用flush_pipeline方法而不是重新创建对象
+    // 这样可以保留已提交的架构状态，只清除推测性重命名
+    state.register_rename->flush_pipeline();
     
     // 5. 清空CDB队列（安全，因为当前指令已提交）
     while (!state.cdb_queue.empty()) {

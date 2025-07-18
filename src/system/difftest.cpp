@@ -2,8 +2,6 @@
 #include "common/cpu_interface.h"
 #include "cpu/ooo/ooo_cpu.h"
 #include "common/debug_types.h"
-#include <iostream>
-#include <iomanip>
 
 namespace riscv {
 
@@ -64,7 +62,9 @@ bool DiffTest::stepAndCompare(ICpuInterface* ooo_cpu) {
     uint32_t ooo_committed_pc = static_cast<OutOfOrderCPU*>(ooo_cpu)->getCommittedPC();
     
     if (ref_pc != ooo_committed_pc) {
-        dprintf(DIFFTEST, "PC预检查失败！提交PC不一致，跳过此次比较");
+        dprintf(DIFFTEST, "[PC_MISMATCH] PC预检查失败！提交PC不一致: 参考CPU=0x%x, 乱序CPU=0x%x", 
+                ref_pc, ooo_committed_pc);
+        
         mismatch_count_++;
         dumpState(reference_cpu_.get(), ooo_cpu);
         return false;
@@ -136,18 +136,6 @@ bool DiffTest::compareRegisters(ICpuInterface* ooo_cpu) {
     return all_match;
 }
 
-bool DiffTest::comparePC(ICpuInterface* ooo_cpu) {
-    uint32_t ref_pc = reference_cpu_->getPC();
-    uint32_t ooo_pc = ooo_cpu->getPC();
-    
-    if (ref_pc != ooo_pc) {
-        dprintf(DIFFTEST, "PC不一致: 参考CPU=0x%x, 乱序CPU=0x%x", ref_pc, ooo_pc);
-        return false;
-    }
-    
-    return true;
-}
-
 bool DiffTest::compareFPRegisters(ICpuInterface* ooo_cpu) {
     bool all_match = true;
     
@@ -166,21 +154,25 @@ bool DiffTest::compareFPRegisters(ICpuInterface* ooo_cpu) {
 
 void DiffTest::dumpState(ICpuInterface* ref_cpu, ICpuInterface* ooo_cpu) {
     // 转储PC
-    dprintf(DIFFTEST, "PC: 参考CPU=0x%x, 乱序CPU=0x%x", ref_cpu->getPC(), ooo_cpu->getPC());
+    uint32_t ref_pc = ref_cpu->getPC();
+    uint32_t ooo_committed_pc = static_cast<OutOfOrderCPU*>(ooo_cpu)->getCommittedPC();
+    
+    dprintf(DIFFTEST, "[STATE_DUMP] PC状态: 参考CPU=0x%x, 乱序提交PC=0x%x", 
+            ref_pc, ooo_committed_pc);
     
     // 转储部分关键寄存器
-    dprintf(DIFFTEST, "寄存器状态 (只显示非零寄存器):");
+    dprintf(DIFFTEST, "[STATE_DUMP] 寄存器状态 (只显示非零寄存器):");
     
     for (RegNum reg = 1; reg < 32; reg++) {
         uint32_t ref_value = ref_cpu->getRegister(reg);
         uint32_t ooo_value = ooo_cpu->getRegister(reg);
         
         if (ref_value != 0 || ooo_value != 0) {
-            dprintf(DIFFTEST, "x%u\t0x%x\t0x%x", reg, ref_value, ooo_value);
+            dprintf(DIFFTEST, "[STATE_DUMP] x%u\t0x%x\t0x%x", reg, ref_value, ooo_value);
         }
     }
     
-    dprintf(DIFFTEST, "================================\n");
+    dprintf(DIFFTEST, "[STATE_DUMP] ================================================\n");
 }
 
 } // namespace riscv 

@@ -156,8 +156,12 @@ public:
         if (log_file_.is_open()) {
             log_file_.close();
         }
+        // 强制使用文本模式，设置UTF-8编码
         log_file_.open(filename, std::ios::out | std::ios::trunc);
-        if (!log_file_.is_open()) {
+        if (log_file_.is_open()) {
+            // 确保使用UTF-8编码
+            log_file_.imbue(std::locale(""));
+        } else {
             std::cerr << "Warning: Cannot open log file: " << filename << std::endl;
         }
     }

@@ -417,4 +417,30 @@ void ReorderBuffer::dump_rob_summary() const {
     dprintf(ROB, "当前占用: %d/%d", entry_count, MAX_ROB_ENTRIES);
 }
 
+bool ReorderBuffer::has_earlier_store_pending(uint64_t current_instruction_id) const {
+    if (entry_count == 0) {
+        return false;
+    }
+    
+    // 遍历ROB中的所有有效条目
+    int current = head_ptr;
+    for (int i = 0; i < entry_count; ++i) {
+        const ReorderBufferEntry& entry = rob_entries[current];
+        
+        if (entry.valid && 
+            entry.instruction_id < current_instruction_id &&  // 更早的指令
+            entry.instruction.type == InstructionType::S_TYPE &&  // Store指令
+            entry.state != ReorderBufferEntry::State::COMPLETED) {  // 未完成
+            
+            dprintf(ROB, "发现更早的未完成Store指令: Inst#%llu PC=0x%x (当前Load Inst#%llu)", 
+                    entry.instruction_id, entry.pc, current_instruction_id);
+            return true;
+        }
+        
+        current = next_index(current);
+    }
+    
+    return false;
+}
+
 } // namespace riscv

@@ -75,6 +75,15 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
     const auto& entry = rs_entries[ready_rs];
     ExecutionUnitType unit_type = get_required_execution_unit(entry.instruction);
     
+    // 为load/store指令添加详细的调度日志
+    if (unit_type == ExecutionUnitType::LOAD || unit_type == ExecutionUnitType::STORE) {
+        const char* inst_type = (unit_type == ExecutionUnitType::LOAD) ? "LOAD" : "STORE";
+        dprintf(RS, "%s指令调度详情: RS%d PC=0x%x src1_ready=%d src1_val=0x%x src2_ready=%d src2_val=0x%x", 
+                inst_type, (int)ready_rs, entry.pc, 
+                entry.src1_ready, entry.src1_value, 
+                entry.src2_ready, entry.src2_value);
+    }
+    
     // 检查执行单元是否可用
     if (!is_execution_unit_available(unit_type)) {
         // 执行单元忙碌
@@ -124,6 +133,14 @@ void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry) {
             rs_entries[i].src1_ready = true;
             rs_entries[i].src1_value = cdb_entry.value;
             updated_count++;
+            
+            // 为load/store指令添加操作数更新日志
+            ExecutionUnitType unit_type = get_required_execution_unit(rs_entries[i].instruction);
+            if (unit_type == ExecutionUnitType::LOAD || unit_type == ExecutionUnitType::STORE) {
+                const char* inst_type = (unit_type == ExecutionUnitType::LOAD) ? "LOAD" : "STORE";
+                dprintf(RS, "%s指令操作数更新: RS%d PC=0x%x src1更新 p%d -> 0x%x", 
+                        inst_type, i, rs_entries[i].pc, (int)cdb_entry.dest_reg, cdb_entry.value);
+            }
         }
         
         // 更新源操作数2
@@ -131,6 +148,14 @@ void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry) {
             rs_entries[i].src2_ready = true;
             rs_entries[i].src2_value = cdb_entry.value;
             updated_count++;
+            
+            // 为load/store指令添加操作数更新日志
+            ExecutionUnitType unit_type = get_required_execution_unit(rs_entries[i].instruction);
+            if (unit_type == ExecutionUnitType::LOAD || unit_type == ExecutionUnitType::STORE) {
+                const char* inst_type = (unit_type == ExecutionUnitType::LOAD) ? "LOAD" : "STORE";
+                dprintf(RS, "%s指令操作数更新: RS%d PC=0x%x src2更新 p%d -> 0x%x", 
+                        inst_type, i, rs_entries[i].pc, (int)cdb_entry.dest_reg, cdb_entry.value);
+            }
         }
     }
     

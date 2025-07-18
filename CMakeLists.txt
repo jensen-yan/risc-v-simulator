@@ -42,6 +42,7 @@ set(CPU_OOO_SOURCES
     src/cpu/ooo/register_rename.cpp
     src/cpu/ooo/reorder_buffer.cpp
     src/cpu/ooo/reservation_station.cpp
+    src/cpu/ooo/store_buffer.cpp
     src/cpu/ooo/stages/fetch_stage.cpp
     src/cpu/ooo/stages/decode_stage.cpp
     src/cpu/ooo/stages/issue_stage.cpp

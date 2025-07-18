@@ -87,7 +87,30 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                 } else if (inst.opcode == Opcode::LOAD) {
                     // 加载指令
                     uint32_t addr = entry.src1_value + inst.imm;
-                    unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
+                    
+                    // 确定访问大小
+                    uint8_t access_size = 1; // 默认字节访问
+                    switch (inst.funct3) {
+                        case static_cast<Funct3>(0): // LB
+                        case static_cast<Funct3>(4): // LBU
+                            access_size = 1;
+                            break;
+                        case static_cast<Funct3>(1): // LH
+                        case static_cast<Funct3>(5): // LHU
+                            access_size = 2;
+                            break;
+                        case static_cast<Funct3>(2): // LW
+                            access_size = 4;
+                            break;
+                    }
+                    
+                    // 在execute_instruction中，Load指令只计算地址，实际的转发和内存访问在update_execution_units中进行
+                    unit.load_address = addr;
+                    unit.load_size = access_size;
+                    std::stringstream addr_ss;
+                    addr_ss << "Load指令开始执行，地址=0x" << std::hex << addr;
+                    print_stage_activity(addr_ss.str(), state.cycle_count, state.pc);
+                    
                 } else if (inst.opcode == Opcode::JALR) {
                     // JALR 指令 - I-type 跳转指令
                     unit.result = entry.pc + (inst.is_compressed ? 2 : 4);
@@ -159,7 +182,32 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                 // 存储指令
                 {
                     uint32_t addr = entry.src1_value + inst.imm;
+                    
+                    // 确定访问大小
+                    uint8_t access_size = 1; // 默认字节访问
+                    switch (inst.funct3) {
+                        case static_cast<Funct3>(0): // SB
+                            access_size = 1;
+                            break;
+                        case static_cast<Funct3>(1): // SH
+                            access_size = 2;
+                            break;
+                        case static_cast<Funct3>(2): // SW
+                            access_size = 4;
+                            break;
+                    }
+                    
+                    std::stringstream store_ss;
+                    store_ss << "Store指令执行：地址=0x" << std::hex << addr 
+                           << " 值=0x" << std::hex << entry.src2_value;
+                    print_stage_activity(store_ss.str(), state.cycle_count, state.pc);
+                    
+                    // 执行Store到内存
                     InstructionExecutor::storeToMemory(state.memory, addr, entry.src2_value, inst.funct3);
+                    
+                    // 同时添加到Store Buffer用于Store-to-Load Forwarding
+                    state.store_buffer->add_store(addr, entry.src2_value, access_size, 
+                                                 entry.instruction_id, entry.pc);
                 }
                 break;
                 
@@ -294,6 +342,21 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                                 std::to_string(unit.remaining_cycles), state.cycle_count, state.pc);
             
             if (unit.remaining_cycles <= 0) {
+                // 在Load指令完成前，再次检查Store依赖
+                bool should_wait = state.reorder_buffer->has_earlier_store_pending(unit.instruction.instruction_id);
+                
+                if (should_wait) {
+                    // 仍然有未完成的Store依赖，延迟完成
+                    unit.remaining_cycles = 1; // 延迟一个周期
+                    print_stage_activity("LOAD" + std::to_string(i) + " 检测到Store依赖，延迟完成", 
+                                        state.cycle_count, state.pc);
+                    continue; // 跳过完成处理
+                }
+                
+                // 没有Store依赖，可以完成
+                // 尝试Store-to-Load Forwarding
+                bool used_forwarding = perform_load_execution(unit, state);
+                
                 // 加载指令完成，发送到CDB
                 CommonDataBusEntry cdb_entry;
                 cdb_entry.dest_reg = unit.instruction.dest_reg;
@@ -303,9 +366,15 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 
                 state.cdb_queue.push(cdb_entry);
                 
-                print_stage_activity("LOAD" + std::to_string(i) + " 执行完成，" +
-                                    "Inst#" + std::to_string(unit.instruction.instruction_id) + 
-                                    " 结果发送到CDB", state.cycle_count, state.pc);
+                std::string completion_msg = "LOAD" + std::to_string(i) + " 执行完成，Inst#" + 
+                                           std::to_string(unit.instruction.instruction_id);
+                if (used_forwarding) {
+                    completion_msg += " (使用Store转发)";
+                } else {
+                    completion_msg += " (从内存读取)";
+                }
+                completion_msg += " 结果=0x" + std::to_string(unit.result) + " 发送到CDB";
+                print_stage_activity(completion_msg, state.cycle_count, state.pc);
                 
                 // 释放执行单元
                 unit.busy = false;
@@ -481,6 +550,57 @@ void ExecuteStage::flush() {
 
 void ExecuteStage::reset() {
     print_stage_activity("执行阶段已重置", 0, 0);
+}
+
+bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) {
+    const auto& inst = unit.instruction.instruction;
+    uint32_t addr = unit.load_address;
+    uint8_t access_size = unit.load_size;
+    
+    // 尝试Store-to-Load Forwarding
+    uint32_t forwarded_value;
+    bool forwarded = state.store_buffer->forward_load(addr, access_size, forwarded_value);
+    
+    if (forwarded) {
+        // 从Store Buffer获得转发数据，还需要进行符号扩展处理
+        switch (inst.funct3) {
+            case static_cast<Funct3>(0): // LB - 符号扩展字节
+                unit.result = static_cast<uint32_t>(static_cast<int8_t>(forwarded_value & 0xFF));
+                break;
+            case static_cast<Funct3>(1): // LH - 符号扩展半字
+                unit.result = static_cast<uint32_t>(static_cast<int16_t>(forwarded_value & 0xFFFF));
+                break;
+            case static_cast<Funct3>(2): // LW - 字
+                unit.result = forwarded_value;
+                break;
+            case static_cast<Funct3>(4): // LBU - 零扩展字节
+                unit.result = forwarded_value & 0xFF;
+                break;
+            case static_cast<Funct3>(5): // LHU - 零扩展半字
+                unit.result = forwarded_value & 0xFFFF;
+                break;
+            default:
+                unit.result = forwarded_value;
+                break;
+        }
+        
+        std::stringstream forward_ss;
+        forward_ss << "Store-to-Load Forwarding成功: 地址=0x" << std::hex << addr 
+                   << " 转发值=0x" << std::hex << unit.result;
+        print_stage_activity(forward_ss.str(), state.cycle_count, state.pc);
+        return true; // 使用了转发
+    } else {
+        // 没有转发，从内存读取
+        print_stage_activity("没有Store转发，从内存读取", state.cycle_count, state.pc);
+        
+        unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
+        
+        std::stringstream result_ss;
+        result_ss << "内存Load完成：地址=0x" << std::hex << addr 
+                 << " 结果=0x" << std::hex << unit.result;
+        print_stage_activity(result_ss.str(), state.cycle_count, state.pc);
+        return false; // 没有使用转发
+    }
 }
 
 void ExecuteStage::print_stage_activity(const std::string& activity, uint64_t cycle, uint32_t pc) {

@@ -37,6 +37,9 @@ struct ExecutionUnit {
     // 跳转指令相关字段
     uint32_t jump_target;
     bool is_jump;
+    // Load指令相关字段
+    uint32_t load_address;
+    uint8_t load_size;
 };
 
 /**
@@ -77,6 +80,7 @@ struct CPUState {
     std::unique_ptr<RegisterRenameUnit> register_rename;
     std::unique_ptr<ReservationStation> reservation_station;
     std::unique_ptr<ReorderBuffer> reorder_buffer;
+    std::unique_ptr<StoreBuffer> store_buffer;  // Store Buffer用于Store-to-Load Forwarding
     
     // 执行单元
     std::array<ExecutionUnit, 2> alu_units;      // 2个ALU单元

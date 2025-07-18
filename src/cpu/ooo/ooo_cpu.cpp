@@ -28,6 +28,7 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory) {
     cpu_state_.register_rename = std::make_unique<RegisterRenameUnit>();
     cpu_state_.reservation_station = std::make_unique<ReservationStation>();
     cpu_state_.reorder_buffer = std::make_unique<ReorderBuffer>();
+    cpu_state_.store_buffer = std::make_unique<StoreBuffer>();
     cpu_state_.syscall_handler = std::make_unique<SyscallHandler>(memory_);
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
     

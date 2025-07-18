@@ -134,6 +134,9 @@ public:
     };
     ExceptionInfo get_oldest_exception() const;
     
+    // 检查是否有更早的未完成Store指令（用于Load-Store依赖检查）
+    bool has_earlier_store_pending(uint64_t current_instruction_id) const;
+    
 private:
     // 分配ROB表项ID
     ROBEntry allocate_rob_entry();

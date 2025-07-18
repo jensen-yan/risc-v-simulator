@@ -106,6 +106,10 @@ void CommitStage::execute(CPUState& state) {
         // 更新最近提交指令的PC
         state.last_committed_pc = committed_inst.pc;
         
+        // Store Buffer清理：提交指令时，清除该指令及之前的Store条目
+        // 这确保Store指令提交到内存后，相应的Store Buffer条目被清除
+        state.store_buffer->retire_stores_before(committed_inst.instruction_id);
+        
         // DiffTest: 当乱序CPU提交一条指令时，同步执行参考CPU并比较状态
         if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
             dprintf(DIFFTEST, "[COMMIT_TRACK] 提交指令: PC=0x%x, 指令ID=%llu, 指令计数=%llu", 
@@ -220,7 +224,10 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state) {
         state.cdb_queue.pop();
     }
     
-    // 6. 重置所有执行单元（安全，因为当前指令已提交）
+    // 6. 清空Store Buffer（刷新时清除所有推测性Store）
+    state.store_buffer->flush();
+    
+    // 7. 重置所有执行单元（安全，因为当前指令已提交）
     reset_execution_units(state);
     
     print_stage_activity("流水线刷新完成，重新开始取指", state.cycle_count, state.pc);

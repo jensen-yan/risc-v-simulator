@@ -28,6 +28,7 @@ private:
     ExecutionUnit* get_available_unit(ExecutionUnitType type, CPUState& state);
     bool execute_branch_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2, CPUState& state);
     void execute_store_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2, CPUState& state);
+    bool perform_load_execution(ExecutionUnit& unit, CPUState& state);
     
     // 分支预测相关
     bool predict_branch(uint32_t pc);

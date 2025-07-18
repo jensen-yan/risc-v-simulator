@@ -82,11 +82,13 @@ void CommitStage::execute(CPUState& state) {
         if (committed_inst.instruction.rd != 0) {  // x0寄存器不能写入
             state.arch_registers[committed_inst.instruction.rd] = committed_inst.result;
             print_stage_activity("Inst#" + std::to_string(committed_inst.instruction_id) + 
+                                " PC=0x" + std::to_string(committed_inst.pc) +
                                 " x" + std::to_string(committed_inst.instruction.rd) + 
                                 " = 0x" + std::to_string(committed_inst.result), 
                                 state.cycle_count, state.pc);
         } else {
             print_stage_activity("Inst#" + std::to_string(committed_inst.instruction_id) + 
+                                " PC=0x" + std::to_string(committed_inst.pc) +
                                 " (无目标寄存器)", state.cycle_count, state.pc);
         }
         

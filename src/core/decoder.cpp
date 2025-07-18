@@ -44,8 +44,11 @@ DecodedInstruction Decoder::decode(Instruction instruction, uint32_t enabled_ext
     // 验证指令合法性
     validateInstruction(decoded, enabled_extensions);
     
-    // CSR指令和系统指令特殊处理：与顺序CPU保持一致，不写回寄存器
-    if (decoded.opcode == Opcode::SYSTEM) {
+    // 特殊指令类型处理：不包含rd字段的指令类型
+    if (decoded.opcode == Opcode::BRANCH || decoded.opcode == Opcode::STORE) {
+        // BRANCH和STORE指令（B_TYPE和S_TYPE）没有rd字段，bit[11:7]是立即数的一部分
+        decoded.rd = 0;  // 这些指令不写回寄存器
+    } else if (decoded.opcode == Opcode::SYSTEM) {
         // 对于ECALL/EBREAK/mret等系统指令，不应写回寄存器
         // 对于CSRRW/CSRRS/CSRRC等CSR指令，需要根据具体指令决定是否写回
         // 简化处理：所有SYSTEM指令都不写回寄存器

@@ -69,6 +69,9 @@ public:
     // 设置指令序号
     void set_instruction_id(ROBEntry rob_entry, uint64_t instruction_id);
     
+    // 设置物理寄存器
+    void set_physical_register(ROBEntry rob_entry, PhysRegNum physical_reg);
+    
     // 获取可以发射的指令
     ROBEntry get_dispatchable_entry() const;
     

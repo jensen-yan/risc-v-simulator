@@ -70,6 +70,9 @@ void IssueStage::execute(CPUState& state) {
     rs_entry.src1_value = rename_result.src1_value;
     rs_entry.src2_value = rename_result.src2_value;
     
+    // 将重命名结果更新到ROB表项
+    state.reorder_buffer->set_physical_register(dispatchable_entry, rename_result.dest_reg);
+    
     // 发射到保留站
     auto issue_result = state.reservation_station->issue_instruction(rs_entry);
     if (!issue_result.success) {

@@ -58,6 +58,9 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
     if (needs_dest_reg && free_list.empty()) {
         // 没有空闲的物理寄存器，发生停顿
         stall_count++;
+        dprintf(RENAME, "寄存器重命名失败: 需要目标寄存器x%d，但没有空闲物理寄存器", 
+                (int)instruction.rd);
+        dprintf(RENAME, "空闲寄存器数量: %zu/%d", free_list.size(), NUM_PHYSICAL_REGS);
         return result;
     }
     

@@ -67,7 +67,7 @@ ReorderBuffer::AllocateResult ReorderBuffer::allocate_entry(
     rob_entries[index].has_exception = false;
     rob_entries[index].result = 0;
     rob_entries[index].logical_dest = instruction.rd;
-    rob_entries[index].physical_dest = 0;  // 需要从重命名单元获取
+    rob_entries[index].physical_dest = 0;  // 将在issue阶段设置
     
     result.success = true;
     result.rob_entry = rob_entry;
@@ -84,6 +84,14 @@ void ReorderBuffer::set_instruction_id(ROBEntry rob_entry, uint64_t instruction_
     assert(is_valid_index(index) && rob_entries[index].valid && "ROB表项无效");
     
     rob_entries[index].instruction_id = instruction_id;
+}
+
+void ReorderBuffer::set_physical_register(ROBEntry rob_entry, PhysRegNum physical_reg) {
+    int index = entry_to_index(rob_entry);
+    assert(is_valid_index(index) && rob_entries[index].valid && "ROB表项无效");
+    
+    rob_entries[index].physical_dest = physical_reg;
+    dprintf(ROB, "设置ROB[%d]的物理寄存器为p%d", rob_entry, (int)physical_reg);
 }
 
 ROBEntry ReorderBuffer::get_dispatchable_entry() const {

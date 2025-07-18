@@ -88,6 +88,13 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                     // 加载指令
                     uint32_t addr = entry.src1_value + inst.imm;
                     unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
+                } else if (inst.opcode == Opcode::JALR) {
+                    // JALR 指令 - I-type 跳转指令
+                    unit.result = entry.pc + (inst.is_compressed ? 2 : 4);
+                    
+                    // JALR 指令：跳转目标地址 = rs1 + imm，并清除最低位
+                    unit.jump_target = InstructionExecutor::calculateJumpAndLinkTarget(inst, entry.pc, entry.src1_value);
+                    unit.is_jump = true;  // 标记为跳转指令
                 } else {
                     unit.has_exception = true;
                     unit.exception_msg = "不支持的I-type指令";
@@ -163,8 +170,8 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                 
             case InstructionType::J_TYPE:
                 {
-                    // 跳转指令（JAL, JALR）- 无条件跳转
-                    unit.result = entry.pc + (inst.is_compressed ? 2 : 4);  // 返回地址
+                    // JAL 指令 - J-type 无条件跳转
+                    unit.result = entry.pc + (inst.is_compressed ? 2 : 4);
                     unit.jump_target = InstructionExecutor::calculateJumpTarget(inst, entry.pc);
                     unit.is_jump = true;  // 无条件跳转总是需要改变PC
                     

@@ -1,5 +1,6 @@
 #include "cpu/ooo/reservation_station.h"
 #include "common/debug_types.h"
+#include <climits>
 #include <iostream>
 #include <iomanip>
 #include <algorithm>

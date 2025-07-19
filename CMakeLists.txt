@@ -5,7 +5,7 @@ project(risc-v-simulator
     DESCRIPTION "A modular RISC-V CPU simulator"
     LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -19,6 +19,19 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g")
 
 # 设置包含目录
 include_directories(include)
+
+# 查找fmt库
+find_package(fmt QUIET)
+if(NOT fmt_FOUND)
+    # 如果系统没有fmt，尝试使用FetchContent下载
+    include(FetchContent)
+    FetchContent_Declare(
+        fmt
+        GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+        GIT_TAG        10.1.1  # 使用稳定版本
+    )
+    FetchContent_MakeAvailable(fmt)
+endif()
 
 # 定义源文件组
 set(COMMON_SOURCES
@@ -78,6 +91,9 @@ add_library(risc-v-sim-lib STATIC
 )
 
 target_include_directories(risc-v-sim-lib PUBLIC include)
+
+# 链接fmt库到静态库
+target_link_libraries(risc-v-sim-lib PUBLIC fmt::fmt)
 
 # 设置库的输出名称
 set_target_properties(risc-v-sim-lib PROPERTIES OUTPUT_NAME risc-v-sim)

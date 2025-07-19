@@ -1,6 +1,6 @@
 #include "cpu/ooo/stages/writeback_stage.h"
 #include "common/debug_types.h"
-#include <format>
+#include <fmt/format.h>
 
 namespace riscv {
 
@@ -16,10 +16,10 @@ void WritebackStage::execute(CPUState& state) {
         CommonDataBusEntry cdb_entry = state.cdb_queue.front();
         state.cdb_queue.pop();
         
-        std::string msg = std::format("CDB writeback: ROB[{}] p{} = 0x{:x}", 
-                                       cdb_entry.rob_entry, 
-                                       static_cast<int>(cdb_entry.dest_reg), 
-                                       cdb_entry.value);
+        std::string msg = fmt::format("CDB writeback: ROB[{}] p{} = 0x{:x}",
+                                        cdb_entry.rob_entry, 
+                                        static_cast<int>(cdb_entry.dest_reg), 
+                                        cdb_entry.value);
         print_stage_activity(msg, state.cycle_count, state.pc);
         
         // 更新保留站中的操作数
@@ -32,7 +32,7 @@ void WritebackStage::execute(CPUState& state) {
         state.reorder_buffer->update_entry(cdb_entry.rob_entry, cdb_entry.value, false, "",
                                      cdb_entry.is_jump, cdb_entry.jump_target);
         
-        print_stage_activity(std::format("ROB[{}] status updated to COMPLETED", cdb_entry.rob_entry), 
+        print_stage_activity(fmt::format("ROB[{}] status updated to COMPLETED", cdb_entry.rob_entry), 
                             state.cycle_count, state.pc);
     }
     

@@ -9,6 +9,7 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
+#include <fmt/format.h>
 
 namespace riscv {
 

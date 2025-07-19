@@ -1,5 +1,6 @@
 #include "cpu/ooo/stages/fetch_stage.h"
 #include "common/debug_types.h"
+#include <fmt/format.h>
 
 namespace riscv {
 
@@ -45,13 +46,13 @@ void FetchStage::execute(CPUState& state) {
             if ((raw_inst & 0x03) != 0x03) {
                 fetched.is_compressed = true;
                 state.pc += 2;
-                std::string msg = std::format("取指令: pc = 0x{:x} data = 0x{:x} (压缩指令，PC+2)", 
+                std::string msg = fmt::format("取指令: pc = 0x{:x} data = 0x{:x} (压缩指令，PC+2)", 
                     fetched.pc, raw_inst);
                 print_stage_activity(msg, state.cycle_count, fetched.pc);
             } else {
                 fetched.is_compressed = false;
                 state.pc += 4;
-                std::string msg = std::format("取指令: pc = 0x{:x} data = 0x{:x} (正常指令，PC+4)", 
+                std::string msg = fmt::format("取指令: pc = 0x{:x} data = 0x{:x} (正常指令，PC+4)", 
                     fetched.pc, raw_inst);
                 print_stage_activity(msg, state.cycle_count, fetched.pc);
             }

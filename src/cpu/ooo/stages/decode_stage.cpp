@@ -1,5 +1,7 @@
 #include "cpu/ooo/stages/decode_stage.h"
 #include "common/debug_types.h"
+#include "core/decoder.h"
+#include <fmt/format.h>
 
 namespace riscv {
 
@@ -53,7 +55,7 @@ void DecodeStage::execute(CPUState& state) {
     // 设置指令序号
     state.reorder_buffer->set_instruction_id(rob_result.rob_entry, instruction_id);
     
-    std::string msg = std::format("分配到ROB[{}] PC=0x{:x} 指令ID={}", 
+    std::string msg = fmt::format("分配到ROB[{}] PC=0x{:x} 指令ID={}", 
         rob_result.rob_entry, fetched.pc, instruction_id);
     print_stage_activity(msg, state.cycle_count, state.pc);
     

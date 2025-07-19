@@ -4,6 +4,7 @@
 #include "common/debug_types.h"
 #include <iostream>
 #include <sstream>
+#include <fmt/format.h>
 
 namespace riscv {
 
@@ -80,12 +81,12 @@ void CommitStage::execute(CPUState& state) {
         // 提交到架构寄存器
         if (committed_inst.instruction.rd != 0) {  // x0寄存器不能写入
             state.arch_registers[committed_inst.instruction.rd] = committed_inst.result;
-            std::string msg = std::format("Inst#{} PC=0x{:x} x{} = 0x{:x}", 
+            std::string msg = fmt::format("Inst#{} PC=0x{:x} x{} = 0x{:x}", 
                 committed_inst.instruction_id, committed_inst.pc, 
                 committed_inst.instruction.rd, committed_inst.result);
             print_stage_activity(msg, state.cycle_count, state.pc);
         } else {
-            std::string msg = std::format("Inst#{} PC=0x{:x} (无目标寄存器)", 
+            std::string msg = fmt::format("Inst#{} PC=0x{:x} (无目标寄存器)", 
                 committed_inst.instruction_id, committed_inst.pc);
             print_stage_activity(msg, state.cycle_count, state.pc);
         }

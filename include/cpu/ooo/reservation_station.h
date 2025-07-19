@@ -1,43 +1,16 @@
 #pragma once
 
 #include "cpu/ooo/ooo_types.h"
+#include "cpu/ooo/dynamic_inst.h"
 #include <vector>
 #include <queue>
+#include <string>
 
 namespace riscv {
 
-// 保留站表项
-struct ReservationStationEntry {
-    DecodedInstruction instruction;
-    
-    // 指令跟踪
-    uint64_t instruction_id;    // 全局指令序号
-    
-    // 操作数信息
-    bool src1_ready;
-    bool src2_ready;
-    uint32_t src1_value;
-    uint32_t src2_value;
-    PhysRegNum src1_reg;
-    PhysRegNum src2_reg;
-    
-    // 目标寄存器
-    PhysRegNum dest_reg;
-    
-    // 关联的ROB表项
-    ROBEntry rob_entry;
-    
-    // 是否有效
-    bool valid;
-    
-    // 指令地址
-    uint32_t pc;
-    
-    ReservationStationEntry() : instruction_id(0), src1_ready(false), src2_ready(false), 
-                               src1_value(0), src2_value(0), 
-                               src1_reg(0), src2_reg(0), dest_reg(0),
-                               rob_entry(0), valid(false), pc(0) {}
-};
+// 注意：原来的 ReservationStationEntry 已被 DynamicInst 替代
+// 保留这个别名以便于向后兼容和渐进式迁移
+using ReservationStationEntry = DynamicInst;
 
 /**
  * 保留站调度单元
@@ -58,7 +31,7 @@ private:
     static const int MAX_STORE_UNITS = 1;        // 存储执行单元数量
     
     // 保留站表项
-    std::vector<ReservationStationEntry> rs_entries;
+    std::vector<DynamicInstPtr> rs_entries;
     
     // 空闲保留站表项队列
     std::queue<RSEntry> free_entries;
@@ -90,11 +63,12 @@ public:
         RSEntry rs_entry;
         ExecutionUnitType unit_type;
         int unit_id;
-        ReservationStationEntry instruction;
+        DynamicInstPtr instruction;
+        std::string error_message;
     };
     
-    // 发射指令到保留站
-    IssueResult issue_instruction(const ReservationStationEntry& entry);
+    // 发射指令到保留站（使用DynamicInst）
+    IssueResult issue_instruction(DynamicInstPtr dynamic_inst);
     
     // 尝试调度一条准备好的指令
     DispatchResult dispatch_instruction();
@@ -131,7 +105,7 @@ public:
     void dump_execution_units() const;
     
     // 获取指定表项的详细信息
-    const ReservationStationEntry& get_entry(RSEntry rs_entry) const;
+    DynamicInstPtr get_entry(RSEntry rs_entry) const;
     
     // 检查表项是否准备好执行
     bool is_entry_ready(RSEntry rs_entry) const;
@@ -146,17 +120,14 @@ private:
     // 初始化执行单元
     void initialize_execution_units();
     
-    // 获取指令需要的执行单元类型
-    ExecutionUnitType get_required_execution_unit(const DecodedInstruction& instruction) const;
-    
     // 检查指令是否准备好执行
-    bool is_instruction_ready(const ReservationStationEntry& entry) const;
+    bool is_instruction_ready(DynamicInstPtr instruction) const;
     
     // 选择优先级最高的准备好的指令
     RSEntry select_ready_instruction() const;
     
     // 计算指令优先级（越小优先级越高）
-    int calculate_priority(const ReservationStationEntry& entry) const;
+    int calculate_priority(DynamicInstPtr instruction) const;
 };
 
 } // namespace riscv

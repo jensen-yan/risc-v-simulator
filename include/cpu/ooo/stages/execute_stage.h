@@ -23,7 +23,7 @@ public:
 
 private:
     // 辅助方法
-    void execute_instruction(ExecutionUnit& unit, const ReservationStationEntry& entry, CPUState& state);
+    void execute_instruction(ExecutionUnit& unit, DynamicInstPtr instruction, CPUState& state);
     void update_execution_units(CPUState& state);
     ExecutionUnit* get_available_unit(ExecutionUnitType type, CPUState& state);
     bool execute_branch_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2, CPUState& state);

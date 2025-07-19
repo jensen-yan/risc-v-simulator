@@ -52,6 +52,7 @@ set(CPU_INORDER_SOURCES
 
 set(CPU_OOO_SOURCES
     src/cpu/ooo/ooo_cpu.cpp
+    src/cpu/ooo/dynamic_inst.cpp
     src/cpu/ooo/register_rename.cpp
     src/cpu/ooo/reorder_buffer.cpp
     src/cpu/ooo/reservation_station.cpp

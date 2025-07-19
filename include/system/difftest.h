@@ -47,11 +47,12 @@ public:
     void syncReferenceState(ICpuInterface* ooo_cpu);
     
     /**
-     * 执行参考CPU一条指令并比较状态
+     * 执行参考CPU一条指令并比较状态，使用指定的提交PC
      * @param ooo_cpu 乱序CPU接口
+     * @param committed_pc 提交指令的PC
      * @return true如果状态一致，false如果发现不一致
      */
-    bool stepAndCompare(ICpuInterface* ooo_cpu);
+    bool stepAndCompareWithCommittedPC(ICpuInterface* ooo_cpu, uint32_t committed_pc);
     
     /**
      * 重置difftest状态

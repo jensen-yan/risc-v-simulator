@@ -7,6 +7,9 @@
 
 namespace riscv {
 
+// 定义静态常量
+const int ReorderBuffer::MAX_ROB_ENTRIES;
+
 ReorderBuffer::ReorderBuffer() 
     : rob_entries(MAX_ROB_ENTRIES),
       head_ptr(0),
@@ -21,19 +24,17 @@ ReorderBuffer::ReorderBuffer()
 }
 
 void ReorderBuffer::initialize_rob() {
-    // 初始化所有ROB表项
+    // 初始化所有ROB表项为空指针
     for (int i = 0; i < MAX_ROB_ENTRIES; ++i) {
-        rob_entries[i].valid = false;
-        rob_entries[i].state = ReorderBufferEntry::State::ALLOCATED;
-        rob_entries[i].result_ready = false;
-        rob_entries[i].has_exception = false;
-        rob_entries[i].pc = 0;
-        rob_entries[i].result = 0;
-        rob_entries[i].logical_dest = 0;
-        rob_entries[i].physical_dest = 0;
+        rob_entries[i] = nullptr;
     }
     
-    // 初始化空闲列表
+    // 清空现有的空闲列表（这很重要！）
+    while (!free_entries.empty()) {
+        free_entries.pop();
+    }
+    
+    // 重新初始化空闲列表
     for (int i = 0; i < MAX_ROB_ENTRIES; ++i) {
         free_entries.push(i);
     }
@@ -43,94 +44,84 @@ void ReorderBuffer::initialize_rob() {
     entry_count = 0;
 }
 
-ReorderBuffer::AllocateResult ReorderBuffer::allocate_entry(
-    const DecodedInstruction& instruction, uint32_t pc) {
-    
-    AllocateResult result;
-    result.success = false;
+DynamicInstPtr ReorderBuffer::allocate_entry(
+    const DecodedInstruction& instruction, uint32_t pc, uint64_t instruction_id) {
     
     if (is_full()) {
-        result.error_message = "ROB已满，无法分配表项";
-        return result;
+        dprintf(ROB, "ROB已满，无法分配表项");
+        return nullptr;
     }
     
     // 分配表项
     ROBEntry rob_entry = allocate_rob_entry();
     int index = entry_to_index(rob_entry);
     
-    // 初始化表项
-    rob_entries[index].instruction = instruction;
-    rob_entries[index].pc = pc;
-    rob_entries[index].valid = true;
-    rob_entries[index].state = ReorderBufferEntry::State::ALLOCATED;
-    rob_entries[index].result_ready = false;
-    rob_entries[index].has_exception = false;
-    rob_entries[index].result = 0;
-    rob_entries[index].logical_dest = instruction.rd;
-    rob_entries[index].physical_dest = 0;  // 将在issue阶段设置
+    // 创建新的DynamicInst对象
+    DynamicInstPtr dynamic_inst = create_dynamic_inst(instruction, pc, instruction_id);
+    dynamic_inst->set_rob_entry(rob_entry);
+    dynamic_inst->set_status(DynamicInst::Status::ALLOCATED);
     
-    result.success = true;
-    result.rob_entry = rob_entry;
+    // 将指令存储在ROB中
+    rob_entries[index] = dynamic_inst;
     allocated_count++;
     
     // 使用新的dprintf宏 - 类似GEM5风格
-    dprintf(ROB, "分配ROB表项 %d, PC=0x%x", rob_entry, pc);
+    dprintf(ROB, "分配ROB表项 %d, PC=0x%x, InstID=%lu", rob_entry, pc, instruction_id);
     
-    return result;
+    return dynamic_inst;
 }
 
-void ReorderBuffer::set_instruction_id(ROBEntry rob_entry, uint64_t instruction_id) {
-    int index = entry_to_index(rob_entry);
-    assert(is_valid_index(index) && rob_entries[index].valid && "ROB表项无效");
-    
-    rob_entries[index].instruction_id = instruction_id;
-}
-
-void ReorderBuffer::set_physical_register(ROBEntry rob_entry, PhysRegNum physical_reg) {
-    int index = entry_to_index(rob_entry);
-    assert(is_valid_index(index) && rob_entries[index].valid && "ROB表项无效");
-    
-    rob_entries[index].physical_dest = physical_reg;
-    dprintf(ROB, "设置ROB[%d]的物理寄存器为p%d", rob_entry, (int)physical_reg);
-}
-
-ROBEntry ReorderBuffer::get_dispatchable_entry() const {
-    // 遍历ROB，找到第一条状态为ALLOCATED的指令
-    for (int i = 0; i < MAX_ROB_ENTRIES; ++i) {
-        int index = (head_ptr + i) % MAX_ROB_ENTRIES;
-        if (rob_entries[index].valid && rob_entries[index].state == ReorderBufferEntry::State::ALLOCATED) {
-            return index_to_entry(index);
-        }
+void ReorderBuffer::update_entry(DynamicInstPtr inst, uint32_t result, bool has_exception, 
+                                const std::string& exception_msg, bool is_jump, 
+                                uint32_t jump_target) {
+    if (!inst) {
+        dprintf(ROB, "无效的DynamicInst指针");
+        return;
     }
-    return 32;  // 没有可发射的指令
-}
-
-void ReorderBuffer::mark_as_dispatched(ROBEntry rob_entry) {
-    int index = entry_to_index(rob_entry);
-    assert(is_valid_index(index) && rob_entries[index].valid && "ROB表项无效");
-    assert(rob_entries[index].state == ReorderBufferEntry::State::ALLOCATED && "指令状态错误");
     
-    rob_entries[index].state = ReorderBufferEntry::State::ISSUED;
-}
-
-void ReorderBuffer::update_entry(ROBEntry rob_entry, uint32_t result, 
-                                bool has_exception, const std::string& exception_msg,
-                                bool is_jump, uint32_t jump_target) {
+    // 更新指令结果
+    inst->set_result(result);
     
-    int index = entry_to_index(rob_entry);
-    assert(is_valid_index(index) && rob_entries[index].valid && "ROB表项无效");
-    
-    rob_entries[index].result = result;
-    rob_entries[index].result_ready = true;
-    rob_entries[index].has_exception = has_exception;
-    rob_entries[index].exception_msg = exception_msg;
-    rob_entries[index].is_jump = is_jump;
-    rob_entries[index].jump_target = jump_target;
-    rob_entries[index].state = ReorderBufferEntry::State::COMPLETED;
-    
+    // 更新异常信息
     if (has_exception) {
+        inst->set_exception(exception_msg);
         exception_count++;
     }
+    
+    // 更新跳转信息
+    inst->set_jump_info(is_jump, jump_target);
+    
+    // 标记为执行完成
+    inst->set_status(DynamicInst::Status::COMPLETED);
+    
+    dprintf(ROB, "更新ROB表项 %d 执行结果: 0x%x", inst->get_rob_entry(), result);
+}
+
+void ReorderBuffer::update_entry_by_index(ROBEntry rob_entry, uint32_t result, bool has_exception, 
+                                         const std::string& exception_msg, bool is_jump, 
+                                         uint32_t jump_target) {
+    DynamicInstPtr inst = get_entry(rob_entry);
+    if (inst) {
+        update_entry(inst, result, has_exception, exception_msg, is_jump, jump_target);
+    }
+}
+
+DynamicInstPtr ReorderBuffer::get_dispatchable_entry() const {
+    // 遍历ROB，找到第一条状态为ALLOCATED的指令
+    for (int i = 0; i < entry_count; ++i) {
+        int index = (head_ptr + i) % MAX_ROB_ENTRIES;
+        if (rob_entries[index] && rob_entries[index]->is_allocated()) {
+            return rob_entries[index];
+        }
+    }
+    return nullptr;
+}
+
+void ReorderBuffer::mark_as_dispatched(DynamicInstPtr inst) {
+    if (!inst) return;
+    
+    inst->set_status(DynamicInst::Status::ISSUED);
+    dprintf(ROB, "标记指令 %lu 已发射到保留站", inst->get_instruction_id());
 }
 
 ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
@@ -139,59 +130,62 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
     result.has_more = false;
     
     if (is_empty()) {
-        result.error_message = "ROB为空，无法提交";
+        result.error_message = "ROB为空，没有指令可提交";
         return result;
     }
     
-    // 检查头部表项
+    // 检查头部指令是否可以提交
     int head_index = head_ptr;
-    ReorderBufferEntry& head_entry = rob_entries[head_index];
+    DynamicInstPtr head_inst = rob_entries[head_index];
     
-    if (!head_entry.valid) {
-        result.error_message = "头部表项无效";
+    if (!head_inst) {
+        result.error_message = "头部指令为空";
         return result;
     }
     
-    // 检查是否可以提交
-    if (head_entry.state != ReorderBufferEntry::State::COMPLETED) {
-        result.error_message = "头部指令尚未完成";
+    if (!head_inst->is_completed()) {
+        result.error_message = "头部指令尚未完成执行";
         return result;
     }
     
     // 检查是否有异常
-    if (head_entry.has_exception) {
+    if (head_inst->has_exception()) {
         result.success = true;
-        result.instruction = head_entry;
-        result.error_message = "提交异常指令: " + head_entry.exception_msg;
+        result.instruction = head_inst;
+        result.error_message = head_inst->get_exception_message();
         
-        // 异常指令提交后需要刷新流水线
-        dprintf(ROB, "提交异常指令 ROB%d, PC=0x%x, 异常: %s", index_to_entry(head_index), head_entry.pc, head_entry.exception_msg.c_str());
-        
-        // 释放头部表项
-        release_entry(index_to_entry(head_index));
+        // 异常指令也需要提交（用于异常处理）
+        head_inst->set_status(DynamicInst::Status::RETIRED);
         committed_count++;
         
-        // 检查是否还有更多可提交的指令
-        result.has_more = can_commit();
+        // 释放表项
+        rob_entries[head_index] = nullptr;
+        free_entries.push(head_index);
+        head_ptr = next_index(head_ptr);
+        entry_count--;
+        
+        dprintf(ROB, "提交异常指令 %lu, PC=0x%x", 
+               head_inst->get_instruction_id(), head_inst->get_pc());
+        
         return result;
     }
     
-    // 正常提交
-    result.success = true;
-    result.instruction = head_entry;
-    
-    dprintf(ROB, "提交指令 ROB%d, PC=0x%x, 结果=0x%x, 指令ID=%lu", 
-            index_to_entry(head_index), head_entry.pc, head_entry.result, head_entry.instruction_id);
-    
-    // 更新状态
-    head_entry.state = ReorderBufferEntry::State::RETIRED;
-    
-    // 释放头部表项
-    release_entry(index_to_entry(head_index));
+    // 正常指令提交
+    head_inst->set_status(DynamicInst::Status::RETIRED);
     committed_count++;
     
-    // 检查是否还有更多可提交的指令
-    result.has_more = can_commit();
+    result.success = true;
+    result.instruction = head_inst;
+    result.has_more = (entry_count > 1);
+    
+    // 释放表项
+    rob_entries[head_index] = nullptr;
+    free_entries.push(head_index);
+    head_ptr = next_index(head_ptr);
+    entry_count--;
+    
+    dprintf(ROB, "提交指令 %lu, PC=0x%x, 结果=0x%x", 
+           head_inst->get_instruction_id(), head_inst->get_pc(), head_inst->get_result());
     
     return result;
 }
@@ -199,18 +193,18 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
 bool ReorderBuffer::can_commit() const {
     if (is_empty()) return false;
     
-    const ReorderBufferEntry& head_entry = rob_entries[head_ptr];
-    return head_entry.valid && head_entry.state == ReorderBufferEntry::State::COMPLETED;
+    DynamicInstPtr head_inst = rob_entries[head_ptr];
+    return head_inst && head_inst->is_completed();
 }
 
 void ReorderBuffer::flush_pipeline() {
-    dprintf(ROB, "刷新整个ROB，丢弃 %d 条指令", entry_count);
+    dprintf(ROB, "刷新整个ROB流水线");
     
     flushed_count += entry_count;
     
     // 清空所有表项
     for (int i = 0; i < MAX_ROB_ENTRIES; ++i) {
-        rob_entries[i].valid = false;
+        rob_entries[i] = nullptr;
     }
     
     // 重新初始化
@@ -218,31 +212,31 @@ void ReorderBuffer::flush_pipeline() {
 }
 
 void ReorderBuffer::flush_after_entry(ROBEntry rob_entry) {
-    int flush_index = entry_to_index(rob_entry);
-    
-    dprintf(ROB, "刷新ROB从表项 %d 之后", rob_entry);
-    
-    // 从指定表项之后开始刷新
-    int current = next_index(flush_index);
+    int target_index = entry_to_index(rob_entry);
     int flushed = 0;
     
-    while (current != tail_ptr && rob_entries[current].valid) {
-        rob_entries[current].valid = false;
-        free_entries.push(current);
-        current = next_index(current);
-        flushed++;
-        entry_count--;
+    // 从目标位置后的第一个位置开始刷新到尾部
+    int start_index = next_index(target_index);
+    
+    while (start_index != tail_ptr) {
+        if (rob_entries[start_index]) {
+            rob_entries[start_index] = nullptr;
+            free_entries.push(start_index);
+            flushed++;
+        }
+        start_index = next_index(start_index);
     }
     
-    // 更新尾指针
-    tail_ptr = next_index(flush_index);
+    // 更新尾指针和计数
+    tail_ptr = next_index(target_index);
+    entry_count -= flushed;
     flushed_count += flushed;
     
-    dprintf(ROB, "刷新了 %d 条指令", flushed);
+    dprintf(ROB, "部分刷新ROB，从表项 %d 之后刷新了 %d 条指令", rob_entry, flushed);
 }
 
 bool ReorderBuffer::has_free_entry() const {
-    return !is_full();
+    return entry_count < MAX_ROB_ENTRIES;
 }
 
 size_t ReorderBuffer::get_free_entry_count() const {
@@ -257,23 +251,27 @@ bool ReorderBuffer::is_full() const {
     return entry_count >= MAX_ROB_ENTRIES;
 }
 
-const ReorderBufferEntry& ReorderBuffer::get_entry(ROBEntry rob_entry) const {
+DynamicInstPtr ReorderBuffer::get_entry(ROBEntry rob_entry) const {
     int index = entry_to_index(rob_entry);
-    assert(is_valid_index(index) && "ROB表项索引无效");
+    if (!is_valid_index(index)) {
+        return nullptr;
+    }
     return rob_entries[index];
 }
 
 bool ReorderBuffer::is_entry_valid(ROBEntry rob_entry) const {
     int index = entry_to_index(rob_entry);
-    return is_valid_index(index) && rob_entries[index].valid;
+    return is_valid_index(index) && rob_entries[index] != nullptr;
 }
 
 ROBEntry ReorderBuffer::get_head_entry() const {
-    return is_empty() ? MAX_ROB_ENTRIES : index_to_entry(head_ptr);
+    if (is_empty()) return 0;
+    return index_to_entry(head_ptr);
 }
 
 ROBEntry ReorderBuffer::get_tail_entry() const {
-    return is_empty() ? MAX_ROB_ENTRIES : index_to_entry(prev_index(tail_ptr));
+    if (is_empty()) return 0;
+    return index_to_entry(prev_index(tail_ptr));
 }
 
 void ReorderBuffer::get_statistics(uint64_t& allocated, uint64_t& committed, 
@@ -284,14 +282,34 @@ void ReorderBuffer::get_statistics(uint64_t& allocated, uint64_t& committed,
     exceptions = exception_count;
 }
 
+void ReorderBuffer::dump_reorder_buffer() const {
+    std::cout << "=== ROB状态转储 ===" << std::endl;
+    std::cout << "头指针: " << head_ptr << ", 尾指针: " << tail_ptr 
+              << ", 表项数: " << entry_count << std::endl;
+    
+    for (int i = 0; i < MAX_ROB_ENTRIES; ++i) {
+        if (rob_entries[i]) {
+            std::cout << "[" << std::setw(2) << i << "] " 
+                     << rob_entries[i]->to_string() << std::endl;
+        }
+    }
+    std::cout << "=================" << std::endl;
+}
+
+void ReorderBuffer::dump_rob_summary() const {
+    std::cout << "ROB统计: 分配=" << allocated_count 
+              << ", 提交=" << committed_count 
+              << ", 刷新=" << flushed_count 
+              << ", 异常=" << exception_count 
+              << ", 当前=" << entry_count << "/" << MAX_ROB_ENTRIES << std::endl;
+}
+
 bool ReorderBuffer::has_pending_exception() const {
-    // 检查从头部到尾部是否有异常
-    int current = head_ptr;
     for (int i = 0; i < entry_count; ++i) {
-        if (rob_entries[current].valid && rob_entries[current].has_exception) {
+        int index = (head_ptr + i) % MAX_ROB_ENTRIES;
+        if (rob_entries[index] && rob_entries[index]->has_exception()) {
             return true;
         }
-        current = next_index(current);
     }
     return false;
 }
@@ -300,26 +318,48 @@ ReorderBuffer::ExceptionInfo ReorderBuffer::get_oldest_exception() const {
     ExceptionInfo info;
     info.has_exception = false;
     
-    // 从头部开始查找最老的异常
-    int current = head_ptr;
     for (int i = 0; i < entry_count; ++i) {
-        if (rob_entries[current].valid && rob_entries[current].has_exception) {
+        int index = (head_ptr + i) % MAX_ROB_ENTRIES;
+        if (rob_entries[index] && rob_entries[index]->has_exception()) {
             info.has_exception = true;
-            info.rob_entry = index_to_entry(current);
-            info.exception_message = rob_entries[current].exception_msg;
-            info.pc = rob_entries[current].pc;
+            info.instruction = rob_entries[index];
+            info.exception_message = rob_entries[index]->get_exception_message();
+            info.pc = rob_entries[index]->get_pc();
             break;
         }
-        current = next_index(current);
     }
     
     return info;
 }
 
+bool ReorderBuffer::has_earlier_store_pending(uint64_t current_instruction_id) const {
+    for (int i = 0; i < entry_count; ++i) {
+        int index = (head_ptr + i) % MAX_ROB_ENTRIES;
+        if (rob_entries[index]) {
+            DynamicInstPtr inst = rob_entries[index];
+            if (inst->get_instruction_id() >= current_instruction_id) {
+                break;  // 已经检查到当前指令或之后的指令
+            }
+            if (inst->is_store_instruction() && !inst->is_completed()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// ========== 私有方法实现 ==========
 ROBEntry ReorderBuffer::allocate_rob_entry() {
-    assert(!is_full() && "ROB已满");
+    if (free_entries.empty()) {
+        return 0;  // 错误情况，调用者应该先检查 is_full()
+    }
     
-    ROBEntry entry = index_to_entry(tail_ptr);
+    ROBEntry entry = free_entries.front();
+    free_entries.pop();
+    
+    dprintf(ROB, "[ALLOC_DEBUG] 分配表项%d, 头部指针=%d, 尾部指针=%d->%d", 
+            entry, head_ptr, tail_ptr, next_index(tail_ptr));
+    
     tail_ptr = next_index(tail_ptr);
     entry_count++;
     
@@ -328,14 +368,9 @@ ROBEntry ReorderBuffer::allocate_rob_entry() {
 
 void ReorderBuffer::release_entry(ROBEntry rob_entry) {
     int index = entry_to_index(rob_entry);
-    assert(is_valid_index(index) && rob_entries[index].valid && "释放无效的ROB表项");
-    
-    rob_entries[index].valid = false;
-    
-    // 如果是头部表项，更新头指针
-    if (index == head_ptr) {
-        head_ptr = next_index(head_ptr);
-        entry_count--;
+    if (is_valid_index(index)) {
+        rob_entries[index] = nullptr;
+        free_entries.push(rob_entry);
     }
 }
 
@@ -357,90 +392,6 @@ ROBEntry ReorderBuffer::index_to_entry(int index) const {
 
 int ReorderBuffer::entry_to_index(ROBEntry rob_entry) const {
     return static_cast<int>(rob_entry);
-}
-
-void ReorderBuffer::dump_reorder_buffer() const {
-    dprintf(ROB, "ROB状态");
-    dprintf(ROB, "容量: %d/%d", entry_count, MAX_ROB_ENTRIES);
-    dprintf(ROB, "头指针: %d, 尾指针: %d", head_ptr, tail_ptr);
-    dprintf(ROB, "ROB为空: %d", is_empty());
-    dprintf(ROB, "有效表项:");
-    dprintf(ROB, "ROB PC     指令  状态    结果      异常");
-    dprintf(ROB, "--- ------ ----- ------- --------- ----");
-    
-    int current = head_ptr;
-    for (int i = 0; i < entry_count; ++i) {
-        if (rob_entries[current].valid) {
-            const auto& entry = rob_entries[current];
-            std::stringstream ss;
-            ss << std::setw(2) << current << "  "
-               << "0x" << std::hex << std::setw(4) << entry.pc << std::dec << "  "
-               << std::setw(4) << (int)entry.instruction.type << "  ";
-            
-            // 状态
-            switch (entry.state) {
-                case ReorderBufferEntry::State::ALLOCATED: ss << "已分配"; break;
-                case ReorderBufferEntry::State::ISSUED: ss << "已发射"; break;
-                case ReorderBufferEntry::State::EXECUTING: ss << "执行中"; break;
-                case ReorderBufferEntry::State::COMPLETED: ss << "已完成"; break;
-                case ReorderBufferEntry::State::RETIRED: ss << "已退休"; break;
-            }
-            ss << "  ";
-            
-            // 结果
-            if (entry.result_ready) {
-                ss << "0x" << std::hex << std::setw(8) << entry.result << std::dec;
-            } else {
-                ss << "   等待   ";
-            }
-            ss << "  ";
-            
-            // 异常
-            if (entry.has_exception) {
-                ss << "是";
-            } else {
-                ss << "否";
-            }
-            
-            dprintf(ROB, "%s", ss.str().c_str());
-        }
-        current = next_index(current);
-    }
-}
-
-void ReorderBuffer::dump_rob_summary() const {
-    dprintf(ROB, "ROB统计信息");
-    dprintf(ROB, "已分配: %lu", allocated_count);
-    dprintf(ROB, "已提交: %lu", committed_count);
-    dprintf(ROB, "已刷新: %lu", flushed_count);
-    dprintf(ROB, "异常数: %lu", exception_count); 
-    dprintf(ROB, "当前占用: %d/%d", entry_count, MAX_ROB_ENTRIES);
-}
-
-bool ReorderBuffer::has_earlier_store_pending(uint64_t current_instruction_id) const {
-    if (entry_count == 0) {
-        return false;
-    }
-    
-    // 遍历ROB中的所有有效条目
-    int current = head_ptr;
-    for (int i = 0; i < entry_count; ++i) {
-        const ReorderBufferEntry& entry = rob_entries[current];
-        
-        if (entry.valid && 
-            entry.instruction_id < current_instruction_id &&  // 更早的指令
-            entry.instruction.type == InstructionType::S_TYPE &&  // Store指令
-            entry.state != ReorderBufferEntry::State::COMPLETED) {  // 未完成
-            
-            dprintf(ROB, "发现更早的未完成Store指令: Inst#%lu PC=0x%x (当前Load Inst#%lu)", 
-                    entry.instruction_id, entry.pc, current_instruction_id);
-            return true;
-        }
-        
-        current = next_index(current);
-    }
-    
-    return false;
 }
 
 } // namespace riscv

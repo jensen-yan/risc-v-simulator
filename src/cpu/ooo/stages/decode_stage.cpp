@@ -1,4 +1,5 @@
 #include "cpu/ooo/stages/decode_stage.h"
+#include "cpu/ooo/dynamic_inst.h"
 #include "common/debug_types.h"
 #include "core/decoder.h"
 #include <fmt/format.h>
@@ -40,9 +41,9 @@ void DecodeStage::execute(CPUState& state) {
         dprintf(DECODE, "普通指令译码完成");
     }
     
-    // 分配ROB表项
-    auto rob_result = state.reorder_buffer->allocate_entry(decoded, fetched.pc);
-    if (!rob_result.success) {
+    // 分配ROB表项 (使用新的DynamicInst接口)
+    DynamicInstPtr dynamic_inst = state.reorder_buffer->allocate_entry(decoded, fetched.pc, instruction_id);
+    if (!dynamic_inst) {
         // ROB分配失败，放回取指缓冲区
         state.fetch_buffer.push(fetched);
         dprintf(DECODE, "ROB分配失败，指令放回缓冲区");
@@ -50,11 +51,8 @@ void DecodeStage::execute(CPUState& state) {
         return;
     }
     
-    // 设置指令序号
-    state.reorder_buffer->set_instruction_id(rob_result.rob_entry, instruction_id);
-    
     dprintf(DECODE, "分配到ROB[%d] PC=0x%x 指令ID=%lu", 
-        rob_result.rob_entry, fetched.pc, instruction_id);
+        dynamic_inst->get_rob_entry(), fetched.pc, instruction_id);
     
     // 继续到发射阶段的处理将在issue_stage中完成
     // 这里我们需要一个中间缓冲区来存储译码后的指令

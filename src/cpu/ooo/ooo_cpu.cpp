@@ -330,17 +330,19 @@ bool OutOfOrderCPU::isDiffTestEnabled() const {
     return difftest_ && difftest_->isEnabled();
 }
 
-void OutOfOrderCPU::performDiffTest() {
+void OutOfOrderCPU::performDiffTestWithCommittedPC(uint32_t committed_pc) {
     if (difftest_ && difftest_->isEnabled()) {
         // 第一次调用时，同步参考CPU的完整状态
         static bool first_call = true;
         if (first_call) {
+            // 对于第一次同步，使用提交的PC来同步参考CPU
+            difftest_->setReferencePC(committed_pc);
             difftest_->syncReferenceState(this);
             first_call = false;
         }
         
-        // 执行参考CPU一步并比较状态
-        bool match = difftest_->stepAndCompare(this);
+        // 执行参考CPU一步并比较状态，使用提交指令的PC
+        bool match = difftest_->stepAndCompareWithCommittedPC(this, committed_pc);
         if (!match) {
             dprintf(DIFFTEST, "DiffTest检测到状态不一致！");
             exit(1);

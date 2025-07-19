@@ -90,7 +90,7 @@ public:
     // DiffTest控制接口
     void enableDiffTest(bool enable);
     bool isDiffTestEnabled() const override;
-    void performDiffTest() override;
+    void performDiffTestWithCommittedPC(uint32_t committed_pc) override;
     void getDiffTestStats(uint64_t& comparisons, uint64_t& mismatches) const;
     
 private:

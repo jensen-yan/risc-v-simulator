@@ -1,54 +1,16 @@
 #pragma once
 
 #include "cpu/ooo/ooo_types.h"
+#include "cpu/ooo/dynamic_inst.h"
 #include <vector>
 #include <queue>
 #include <deque>
 
 namespace riscv {
 
-// 重排序缓冲表项
-struct ReorderBufferEntry {
-    DecodedInstruction instruction;
-    
-    // 指令跟踪
-    uint64_t instruction_id;    // 全局指令序号
-    
-    // 指令状态
-    enum class State {
-        ALLOCATED,   // 已分配到ROB，等待发射
-        ISSUED,      // 已发射到保留站，等待调度
-        EXECUTING,   // 正在执行
-        COMPLETED,   // 执行完成
-        RETIRED      // 已退休
-    } state;
-    
-    // 结果信息
-    uint32_t result;
-    bool result_ready;
-    
-    // 目标寄存器
-    RegNum logical_dest;    // 逻辑寄存器
-    PhysRegNum physical_dest;  // 物理寄存器
-    
-    // 异常信息
-    bool has_exception;
-    std::string exception_msg;
-    
-    // 指令地址
-    uint32_t pc;
-    
-    // 跳转指令相关（is_jump=true表示此指令提交时需要改变PC）
-    bool is_jump;           // 是否需要跳转（包括条件分支taken和无条件跳转）
-    uint32_t jump_target;   // 跳转目标地址
-    
-    // 是否有效
-    bool valid;
-    
-    ReorderBufferEntry() : instruction_id(0), state(State::ALLOCATED), result(0), result_ready(false),
-                          logical_dest(0), physical_dest(0), has_exception(false),
-                          pc(0), is_jump(false), jump_target(0), valid(false) {}
-};
+// 注意：原来的 ReorderBufferEntry 已被 DynamicInst 替代
+// 保留这个别名以便于向后兼容和渐进式迁移
+using ReorderBufferEntry = DynamicInst;
 
 /**
  * 重排序缓冲单元(Reorder Buffer)
@@ -67,7 +29,7 @@ public:
 
 private:
     // ROB表项存储（使用循环队列）
-    std::vector<ReorderBufferEntry> rob_entries;
+    std::vector<DynamicInstPtr> rob_entries;
     
     // 循环队列管理
     int head_ptr;           // 头指针（最老的未提交指令）
@@ -97,29 +59,28 @@ public:
     struct CommitResult {
         bool success;
         bool has_more;          // 是否还有更多可提交的指令
-        ReorderBufferEntry instruction;
+        DynamicInstPtr instruction;
         std::string error_message;
     };
     
-    // 分配ROB表项
-    AllocateResult allocate_entry(const DecodedInstruction& instruction, uint32_t pc);
+    // 分配ROB表项（返回DynamicInst指针）
+    DynamicInstPtr allocate_entry(const DecodedInstruction& instruction, uint32_t pc, uint64_t instruction_id);
     
-    // 更新ROB表项执行结果
-    void update_entry(ROBEntry rob_entry, uint32_t result, bool has_exception = false, 
+    // 更新ROB表项执行结果（通过DynamicInst指针）
+    void update_entry(DynamicInstPtr inst, uint32_t result, bool has_exception = false, 
                      const std::string& exception_msg = "", bool is_jump = false, 
                      uint32_t jump_target = 0);
     
-    // 设置指令序号
-    void set_instruction_id(ROBEntry rob_entry, uint64_t instruction_id);
-    
-    // 设置物理寄存器
-    void set_physical_register(ROBEntry rob_entry, PhysRegNum physical_reg);
+    // 通过ROB索引更新（兼容性接口）
+    void update_entry_by_index(ROBEntry rob_entry, uint32_t result, bool has_exception = false, 
+                              const std::string& exception_msg = "", bool is_jump = false, 
+                              uint32_t jump_target = 0);
     
     // 获取可以发射的指令
-    ROBEntry get_dispatchable_entry() const;
+    DynamicInstPtr get_dispatchable_entry() const;
     
     // 标记指令为已发射到保留站
-    void mark_as_dispatched(ROBEntry rob_entry);
+    void mark_as_dispatched(DynamicInstPtr inst);
     
     // 尝试提交一条指令
     CommitResult commit_instruction();
@@ -146,7 +107,7 @@ public:
     bool is_full() const;
     
     // 获取ROB表项
-    const ReorderBufferEntry& get_entry(ROBEntry rob_entry) const;
+    DynamicInstPtr get_entry(ROBEntry rob_entry) const;
     
     // 检查表项是否有效
     bool is_entry_valid(ROBEntry rob_entry) const;
@@ -171,7 +132,7 @@ public:
     // 获取最老的异常信息
     struct ExceptionInfo {
         bool has_exception;
-        ROBEntry rob_entry;
+        DynamicInstPtr instruction;
         std::string exception_message;
         uint32_t pc;
     };

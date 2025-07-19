@@ -72,10 +72,35 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
         result.src1_value = physical_registers[result.src1_reg].value;
     }
     
-    if (instruction.rs2 < NUM_LOGICAL_REGS) {
+    // 检查指令是否需要第二个源操作数
+    bool needs_src2 = false;
+    switch (instruction.type) {
+        case InstructionType::R_TYPE:
+            needs_src2 = true; // R-type指令总是需要两个源操作数
+            break;
+        case InstructionType::S_TYPE:
+            needs_src2 = true; // Store指令需要地址基址(rs1)和数据(rs2)
+            break;
+        case InstructionType::B_TYPE:
+            needs_src2 = true; // 分支指令需要两个比较操作数
+            break;
+        case InstructionType::I_TYPE:
+        case InstructionType::U_TYPE:
+        case InstructionType::J_TYPE:
+        case InstructionType::SYSTEM_TYPE:
+            needs_src2 = false; // 这些类型只需要一个源操作数或不需要源操作数
+            break;
+    }
+    
+    if (needs_src2 && instruction.rs2 < NUM_LOGICAL_REGS) {
         result.src2_reg = rename_table[instruction.rs2].physical_reg;
         result.src2_ready = physical_registers[result.src2_reg].ready;
         result.src2_value = physical_registers[result.src2_reg].value;
+    } else {
+        // 不需要第二个源操作数，设置为就绪状态
+        result.src2_reg = 0; // 使用物理寄存器0 (x0)
+        result.src2_ready = true;
+        result.src2_value = 0;
     }
     
     // 重命名目标寄存器

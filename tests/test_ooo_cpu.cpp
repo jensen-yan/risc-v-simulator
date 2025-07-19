@@ -2,6 +2,7 @@
 #include "cpu/ooo/ooo_cpu.h"
 #include "core/memory.h"
 #include <memory>
+#include "common/debug_types.h"
 
 namespace riscv {
 
@@ -13,6 +14,24 @@ protected:
     void SetUp() override {
         memory = std::make_shared<Memory>(8192);  // 8KB内存
         cpu = std::make_unique<OutOfOrderCPU>(memory);
+
+        // 启用调试输出
+        auto& debugManager = DebugManager::getInstance();
+
+        // 设置回调函数
+        debugManager.setCallback([](const DebugInfo& info) {
+            std::cout << DebugFormatter::format(info, DebugFormatter::Mode::VERBOSE) << std::endl;
+        });
+        
+        // 启用相关分类
+        debugManager.enableCategory("RS");
+        debugManager.enableCategory("SYSTEM");
+        debugManager.enableCategory("COMMIT");
+        debugManager.enableCategory("ISSUE");
+        debugManager.enableCategory("WRITEBACK");
+        debugManager.enableCategory("RENAME");
+        debugManager.enableCategory("ROB");
+        debugManager.enableCategory("DECODE");
     }
     
     void TearDown() override {

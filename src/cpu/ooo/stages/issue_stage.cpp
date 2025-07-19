@@ -1,4 +1,5 @@
 #include "cpu/ooo/stages/issue_stage.h"
+#include "cpu/ooo/dynamic_inst.h"
 #include "common/debug_types.h"
 
 namespace riscv {
@@ -19,19 +20,18 @@ void IssueStage::execute(CPUState& state) {
     
     // 获取可以发射的指令
     auto dispatchable_entry = state.reorder_buffer->get_dispatchable_entry();
-    if (dispatchable_entry == ReorderBuffer::MAX_ROB_ENTRIES) {  // 没有可发射的指令
+    if (!dispatchable_entry) {  // 没有可发射的指令
         dprintf(ISSUE, "没有可发射的指令");
         return;
     }
     
-    const auto& rob_entry = state.reorder_buffer->get_entry(dispatchable_entry);
-    if (!rob_entry.valid || rob_entry.state != ReorderBufferEntry::State::ALLOCATED) {
+    if (!dispatchable_entry->is_allocated()) {
         dprintf(ISSUE, "ROB表项状态不正确");
         return;
     }
     
     dprintf(ISSUE, "尝试发射 Inst#%lu (ROB[%d])", 
-                        rob_entry.instruction_id, dispatchable_entry);
+                        dispatchable_entry->get_instruction_id(), dispatchable_entry->get_rob_entry());
     
     // 检查保留站是否有空闲表项
     if (!state.reservation_station->has_free_entry()) {
@@ -41,37 +41,24 @@ void IssueStage::execute(CPUState& state) {
     }
     
     // 进行寄存器重命名
-    auto rename_result = state.register_rename->rename_instruction(rob_entry.instruction);
+    auto rename_result = state.register_rename->rename_instruction(dispatchable_entry->get_decoded_info());
     if (!rename_result.success) {
         dprintf(ISSUE, "寄存器重命名失败，发射停顿");
         state.pipeline_stalls++;
         return;
     }
     
-    // 准备保留站表项
-    ReservationStationEntry rs_entry;
-    rs_entry.instruction = rob_entry.instruction;
-    rs_entry.instruction_id = rob_entry.instruction_id;
-    rs_entry.src1_reg = rename_result.src1_reg;
-    rs_entry.src2_reg = rename_result.src2_reg;
-    rs_entry.dest_reg = rename_result.dest_reg;
-    rs_entry.pc = rob_entry.pc;
-    rs_entry.rob_entry = dispatchable_entry;
-    rs_entry.valid = true;
+    // 更新指令的重命名信息
+    dispatchable_entry->set_physical_src1(rename_result.src1_reg);
+    dispatchable_entry->set_physical_src2(rename_result.src2_reg);
+    dispatchable_entry->set_physical_dest(rename_result.dest_reg);
     
-    // 检查操作数是否准备好
-    rs_entry.src1_ready = rename_result.src1_ready;
-    rs_entry.src2_ready = rename_result.src2_ready;
-    
-    // 获取操作数值
-    rs_entry.src1_value = rename_result.src1_value;
-    rs_entry.src2_value = rename_result.src2_value;
-    
-    // 将重命名结果更新到ROB表项
-    state.reorder_buffer->set_physical_register(dispatchable_entry, rename_result.dest_reg);
+    // 设置操作数就绪状态和值
+    dispatchable_entry->set_src1_ready(rename_result.src1_ready, rename_result.src1_value);
+    dispatchable_entry->set_src2_ready(rename_result.src2_ready, rename_result.src2_value);
     
     // 发射到保留站
-    auto issue_result = state.reservation_station->issue_instruction(rs_entry);
+    auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
     if (!issue_result.success) {
         dprintf(ISSUE, "保留站发射失败，回退重命名");
         state.register_rename->release_physical_register(rename_result.dest_reg);
@@ -80,10 +67,10 @@ void IssueStage::execute(CPUState& state) {
     }
     
     dprintf(ISSUE, "Inst#%lu 成功发射到保留站RS[%d]", 
-                        rob_entry.instruction_id, issue_result.rs_entry);
+                        dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
     
-    // 更新ROB表项状态，标记为已发射到保留站
-    state.reorder_buffer->mark_as_dispatched(dispatchable_entry);
+    // 更新指令状态，标记为已发射到保留站
+    dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
 }
 
 void IssueStage::flush() {

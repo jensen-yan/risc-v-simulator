@@ -1,4 +1,5 @@
 #include "cpu/ooo/stages/commit_stage.h"
+#include "cpu/ooo/dynamic_inst.h"
 #include "core/instruction_executor.h"
 #include "system/syscall_handler.h"
 #include "common/debug_types.h"
@@ -35,18 +36,24 @@ void CommitStage::execute(CPUState& state) {
     
     const auto& head_entry = state.reorder_buffer->get_entry(head_entry_id);
     const char* state_str;
-    switch (head_entry.state) {
-        case ReorderBufferEntry::State::ALLOCATED: state_str = "ALLOCATED"; break;
-        case ReorderBufferEntry::State::ISSUED: state_str = "ISSUED"; break;
-        case ReorderBufferEntry::State::EXECUTING: state_str = "EXECUTING"; break;
-        case ReorderBufferEntry::State::COMPLETED: state_str = "COMPLETED"; break;
-        case ReorderBufferEntry::State::RETIRED: state_str = "RETIRED"; break;
-        default: state_str = "UNKNOWN"; break;
+    if (head_entry) {
+        switch (head_entry->get_status()) {
+            case DynamicInst::Status::ALLOCATED: state_str = "ALLOCATED"; break;
+            case DynamicInst::Status::ISSUED: state_str = "ISSUED"; break;
+            case DynamicInst::Status::EXECUTING: state_str = "EXECUTING"; break;
+            case DynamicInst::Status::COMPLETED: state_str = "COMPLETED"; break;
+            case DynamicInst::Status::RETIRED: state_str = "RETIRED"; break;
+            default: state_str = "UNKNOWN"; break;
+        }
+    } else {
+        state_str = "NULL";
     }
     
-    dprintf(COMMIT, "头部指令 ROB[%d] Inst#%lu 状态: %s 结果准备: %s",
-            head_entry_id, head_entry.instruction_id, state_str,
-            (head_entry.result_ready ? "是" : "否"));
+    if (head_entry) {
+        dprintf(COMMIT, "头部指令 ROB[%d] Inst#%lu 状态: %s 结果准备: %s",
+                head_entry_id, head_entry->get_instruction_id(), state_str,
+                (head_entry->is_completed() ? "是" : "否"));
+    }
     
     if (!state.reorder_buffer->can_commit()) {
         dprintf(COMMIT, "头部指令尚未完成，无法提交");
@@ -64,67 +71,65 @@ void CommitStage::execute(CPUState& state) {
         const auto& committed_inst = commit_result.instruction;
         
         // 检查是否有异常
-        if (committed_inst.has_exception) {
-            dprintf(COMMIT, "提交异常指令: %s", committed_inst.exception_msg.c_str());
-            handle_exception(state, committed_inst.exception_msg, committed_inst.pc);
+        if (committed_inst->has_exception()) {
+            dprintf(COMMIT, "提交异常指令: %s", committed_inst->get_exception_message().c_str());
+            handle_exception(state, committed_inst->get_exception_message(), committed_inst->get_pc());
             break;
         }
         
         // 提交到架构寄存器
-        if (committed_inst.instruction.rd != 0) {  // x0寄存器不能写入
-            state.arch_registers[committed_inst.instruction.rd] = committed_inst.result;
+        if (committed_inst->get_decoded_info().rd != 0) {  // x0寄存器不能写入
+            state.arch_registers[committed_inst->get_decoded_info().rd] = committed_inst->get_result();
             dprintf(COMMIT, "Inst#%lu PC=0x%x x%d = 0x%x", 
-                committed_inst.instruction_id, committed_inst.pc, 
-                committed_inst.instruction.rd, committed_inst.result);
+                committed_inst->get_instruction_id(), committed_inst->get_pc(), 
+                committed_inst->get_decoded_info().rd, committed_inst->get_result());
         } else {
             dprintf(COMMIT, "Inst#%lu PC=0x%x (无目标寄存器)", 
-                committed_inst.instruction_id, committed_inst.pc);
+                committed_inst->get_instruction_id(), committed_inst->get_pc());
         }
         
         // 释放物理寄存器
-        state.register_rename->commit_instruction(committed_inst.logical_dest, 
-                                                 committed_inst.physical_dest);
+        state.register_rename->commit_instruction(committed_inst->get_logical_dest(), 
+                                                 committed_inst->get_physical_dest());
         
         // 确保架构寄存器状态与寄存器重命名模块同步
         // 这是为了确保DiffTest比较时状态一致
-        if (committed_inst.instruction.rd != 0) {
-            state.register_rename->update_architecture_register(committed_inst.instruction.rd, 
-                                                              committed_inst.result);
+        if (committed_inst->get_decoded_info().rd != 0) {
+            state.register_rename->update_architecture_register(committed_inst->get_decoded_info().rd, 
+                                                              committed_inst->get_result());
         }
         
         state.instruction_count++;
         
-        // 更新最近提交指令的PC
-        state.last_committed_pc = committed_inst.pc;
-        
         // Store Buffer清理：提交指令时，清除该指令及之前的Store条目
         // 这确保Store指令提交到内存后，相应的Store Buffer条目被清除
-        state.store_buffer->retire_stores_before(committed_inst.instruction_id);
+        state.store_buffer->retire_stores_before(committed_inst->get_instruction_id());
         
         // DiffTest: 当乱序CPU提交一条指令时，同步执行参考CPU并比较状态
         if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
             dprintf(DIFFTEST, "[COMMIT_TRACK] 提交指令: PC=0x%x, 指令ID=%lu, 指令计数=%lu", 
-                    committed_inst.pc, committed_inst.instruction_id, state.instruction_count);
-            state.cpu_interface->performDiffTest();
+                    committed_inst->get_pc(), committed_inst->get_instruction_id(), state.instruction_count);
+            // 使用提交指令的PC进行DiffTest
+            state.cpu_interface->performDiffTestWithCommittedPC(committed_inst->get_pc());
             dprintf(COMMIT, "执行DiffTest状态比较");
         }
         
         // 处理跳转指令：只有is_jump=true的指令才会改变PC
-        if (committed_inst.is_jump) {
-            state.pc = committed_inst.jump_target;
+        if (committed_inst->is_jump()) {
+            state.pc = committed_inst->get_jump_target();
             dprintf(COMMIT, "Inst#%lu 跳转到 0x%x", 
-               committed_inst.instruction_id, committed_inst.jump_target);
+               committed_inst->get_instruction_id(), committed_inst->get_jump_target());
             
             // 跳转指令提交后，刷新流水线中错误推测的指令
             flush_pipeline_after_commit(state);
         }
         
         // 处理系统调用
-        if (committed_inst.instruction.opcode == Opcode::SYSTEM) {
-            if (InstructionExecutor::isSystemCall(committed_inst.instruction)) {
+        if (committed_inst->get_decoded_info().opcode == Opcode::SYSTEM) {
+            if (InstructionExecutor::isSystemCall(committed_inst->get_decoded_info())) {
                 // ECALL
-                handle_ecall(state, committed_inst.pc);
-            } else if (InstructionExecutor::isBreakpoint(committed_inst.instruction)) {
+                handle_ecall(state, committed_inst->get_pc());
+            } else if (InstructionExecutor::isBreakpoint(committed_inst->get_decoded_info())) {
                 // EBREAK
                 handle_ebreak(state);
             }

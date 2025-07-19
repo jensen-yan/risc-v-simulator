@@ -25,7 +25,7 @@ ReservationStation::ReservationStation()
 void ReservationStation::initialize_free_list() {
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
         free_entries.push(i);
-        rs_entries[i].valid = false;
+        rs_entries[i] = nullptr;  // 初始化为空指针
     }
 }
 
@@ -36,11 +36,14 @@ void ReservationStation::initialize_execution_units() {
     std::fill(store_units_busy.begin(), store_units_busy.end(), false);
 }
 
-ReservationStation::IssueResult ReservationStation::issue_instruction(
-    const ReservationStationEntry& entry) {
-    
+ReservationStation::IssueResult ReservationStation::issue_instruction(DynamicInstPtr dynamic_inst) {
     IssueResult result;
     result.success = false;
+    
+    if (!dynamic_inst) {
+        result.error_message = "无效的DynamicInst指针";
+        return result;
+    }
     
     if (free_entries.empty()) {
         result.error_message = "保留站已满，无法发射指令";
@@ -50,14 +53,18 @@ ReservationStation::IssueResult ReservationStation::issue_instruction(
     
     // 分配保留站表项
     RSEntry rs_id = allocate_entry();
-    rs_entries[rs_id] = entry;
-    rs_entries[rs_id].valid = true;
+    rs_entries[rs_id] = dynamic_inst;
+    
+    // 设置RS表项编号并更新状态
+    dynamic_inst->set_rs_entry(rs_id);
+    dynamic_inst->set_status(DynamicInst::Status::ISSUED);
     
     result.success = true;
     result.rs_entry = rs_id;
     issued_count++;
     
-    dprintf(RS, "发射指令到保留站 RS%d, PC=0x%x", (int)rs_id, entry.pc);
+    dprintf(RS, "发射指令到保留站 RS%d, PC=0x%x, InstID=%lu", 
+           (int)rs_id, dynamic_inst->get_pc(), dynamic_inst->get_instruction_id());
     
     return result;
 }
@@ -66,56 +73,59 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
     DispatchResult result;
     result.success = false;
     
-    // 选择准备好的指令
+    // 选择一条准备好执行的指令
     RSEntry ready_rs = select_ready_instruction();
-    if (ready_rs == MAX_RS_ENTRIES) {
-        // 没有准备好的指令
+    if (ready_rs >= MAX_RS_ENTRIES) {
+        result.error_message = "没有准备好的指令可调度";
         return result;
     }
     
-    const auto& entry = rs_entries[ready_rs];
-    ExecutionUnitType unit_type = get_required_execution_unit(entry.instruction);
-    
-    // 为load/store指令添加详细的调度日志
-    if (unit_type == ExecutionUnitType::LOAD || unit_type == ExecutionUnitType::STORE) {
-        const char* inst_type = (unit_type == ExecutionUnitType::LOAD) ? "LOAD" : "STORE";
-        dprintf(RS, "%s指令调度详情: RS%d PC=0x%x src1_ready=%d src1_val=0x%x src2_ready=%d src2_val=0x%x", 
-                inst_type, (int)ready_rs, entry.pc, 
-                entry.src1_ready, entry.src1_value, 
-                entry.src2_ready, entry.src2_value);
+    DynamicInstPtr instruction = rs_entries[ready_rs];
+    if (!instruction) {
+        result.error_message = "无效的指令指针";
+        return result;
     }
+    
+    // 获取所需执行单元类型
+    ExecutionUnitType unit_type = instruction->get_required_execution_unit();
     
     // 检查执行单元是否可用
     if (!is_execution_unit_available(unit_type)) {
-        // 执行单元忙碌
+        result.error_message = "执行单元不可用";
+        stall_count++;
         return result;
     }
     
     // 分配执行单元
     int unit_id = allocate_execution_unit(unit_type);
     if (unit_id < 0) {
+        result.error_message = "执行单元分配失败";
         return result;
     }
     
-    // 准备调度结果
+    // 更新指令状态
+    instruction->set_status(DynamicInst::Status::EXECUTING);
+    
+    // 设置执行周期信息
+    auto& exec_info = instruction->get_execution_info();
+    exec_info.remaining_cycles = exec_info.execution_cycles;
+    
     result.success = true;
     result.rs_entry = ready_rs;
     result.unit_type = unit_type;
     result.unit_id = unit_id;
-    result.instruction = entry;
+    result.instruction = instruction;
     
-    // 释放保留站表项
-    release_entry(ready_rs);
     dispatched_count++;
     
-    const char* unit_name = "";
-    switch (unit_type) {
-        case ExecutionUnitType::ALU: unit_name = "ALU"; break;
-        case ExecutionUnitType::BRANCH: unit_name = "BRANCH"; break;
-        case ExecutionUnitType::LOAD: unit_name = "LOAD"; break;
-        case ExecutionUnitType::STORE: unit_name = "STORE"; break;
-    }
-    dprintf(RS, "调度指令 RS%d 到执行单元 %s%d", (int)ready_rs, unit_name, unit_id);
+    dprintf(RS, "调度指令到执行单元 %s%d, PC=0x%x, InstID=%lu", 
+           (unit_type == ExecutionUnitType::ALU ? "ALU" :
+            unit_type == ExecutionUnitType::BRANCH ? "BRANCH" :
+            unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE"),
+           unit_id, instruction->get_pc(), instruction->get_instruction_id());
+    
+    // 注意：不在这里清空RS条目，等指令完成并写回CDB后再清空
+    // 这样可以避免重复调度同一条指令
     
     return result;
 }
@@ -123,72 +133,47 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
 void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry) {
     if (!cdb_entry.valid) return;
     
-    int updated_count = 0;
-    
-    // 遍历所有有效的保留站表项
+    // 遍历所有保留站表项，更新等待该物理寄存器的操作数
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
-        if (!rs_entries[i].valid) continue;
-        
-        // 更新源操作数1
-        if (!rs_entries[i].src1_ready && rs_entries[i].src1_reg == cdb_entry.dest_reg) {
-            rs_entries[i].src1_ready = true;
-            rs_entries[i].src1_value = cdb_entry.value;
-            updated_count++;
+        if (rs_entries[i]) {
+            DynamicInstPtr inst = rs_entries[i];
             
-            // 为load/store指令添加操作数更新日志
-            ExecutionUnitType unit_type = get_required_execution_unit(rs_entries[i].instruction);
-            if (unit_type == ExecutionUnitType::LOAD || unit_type == ExecutionUnitType::STORE) {
-                const char* inst_type = (unit_type == ExecutionUnitType::LOAD) ? "LOAD" : "STORE";
-                dprintf(RS, "%s指令操作数更新: RS%d PC=0x%x src1更新 p%d -> 0x%x", 
-                        inst_type, i, rs_entries[i].pc, (int)cdb_entry.dest_reg, cdb_entry.value);
+            // 检查源操作数1
+            if (!inst->is_src1_ready() && inst->get_physical_src1() == cdb_entry.dest_reg) {
+                inst->set_src1_ready(true, cdb_entry.value);
+                dprintf(RS, "RS%d 源操作数1就绪: p%d = 0x%x", i, cdb_entry.dest_reg, cdb_entry.value);
+            }
+            
+            // 检查源操作数2
+            if (!inst->is_src2_ready() && inst->get_physical_src2() == cdb_entry.dest_reg) {
+                inst->set_src2_ready(true, cdb_entry.value);
+                dprintf(RS, "RS%d 源操作数2就绪: p%d = 0x%x", i, cdb_entry.dest_reg, cdb_entry.value);
             }
         }
-        
-        // 更新源操作数2
-        if (!rs_entries[i].src2_ready && rs_entries[i].src2_reg == cdb_entry.dest_reg) {
-            rs_entries[i].src2_ready = true;
-            rs_entries[i].src2_value = cdb_entry.value;
-            updated_count++;
-            
-            // 为load/store指令添加操作数更新日志
-            ExecutionUnitType unit_type = get_required_execution_unit(rs_entries[i].instruction);
-            if (unit_type == ExecutionUnitType::LOAD || unit_type == ExecutionUnitType::STORE) {
-                const char* inst_type = (unit_type == ExecutionUnitType::LOAD) ? "LOAD" : "STORE";
-                dprintf(RS, "%s指令操作数更新: RS%d PC=0x%x src2更新 p%d -> 0x%x", 
-                        inst_type, i, rs_entries[i].pc, (int)cdb_entry.dest_reg, cdb_entry.value);
-            }
-        }
-    }
-    
-    if (updated_count > 0) {
-        dprintf(RS, "CDB更新: p%d = 0x%x, 更新了 %d 个操作数", 
-                (int)cdb_entry.dest_reg, cdb_entry.value, updated_count);
     }
 }
 
 void ReservationStation::release_entry(RSEntry rs_entry) {
-    assert(rs_entry < MAX_RS_ENTRIES && "保留站表项ID无效");
+    if (rs_entry >= MAX_RS_ENTRIES) return;
     
-    rs_entries[rs_entry].valid = false;
-    free_entries.push(rs_entry);
+    if (rs_entries[rs_entry]) {
+        dprintf(RS, "释放保留站表项 RS%d", (int)rs_entry);
+        rs_entries[rs_entry] = nullptr;
+        free_entries.push(rs_entry);
+    }
 }
 
 void ReservationStation::flush_pipeline() {
-    // 清空所有保留站表项
+    dprintf(RS, "刷新保留站流水线");
+    
+    // 清空所有表项
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
-        rs_entries[i].valid = false;
+        rs_entries[i] = nullptr;
     }
     
-    // 重新初始化空闲列表
-    while (!free_entries.empty()) {
-        free_entries.pop();
-    }
+    // 重新初始化
     initialize_free_list();
-    
-    // 释放所有执行单元
     initialize_execution_units();
-    
-    dprintf(RS, "保留站刷新：清空所有表项和执行单元");
 }
 
 bool ReservationStation::has_free_entry() const {
@@ -202,17 +187,13 @@ size_t ReservationStation::get_free_entry_count() const {
 bool ReservationStation::is_execution_unit_available(ExecutionUnitType unit_type) const {
     switch (unit_type) {
         case ExecutionUnitType::ALU:
-            return std::find(alu_units_busy.begin(), alu_units_busy.end(), false) 
-                   != alu_units_busy.end();
+            return std::find(alu_units_busy.begin(), alu_units_busy.end(), false) != alu_units_busy.end();
         case ExecutionUnitType::BRANCH:
-            return std::find(branch_units_busy.begin(), branch_units_busy.end(), false) 
-                   != branch_units_busy.end();
+            return std::find(branch_units_busy.begin(), branch_units_busy.end(), false) != branch_units_busy.end();
         case ExecutionUnitType::LOAD:
-            return std::find(load_units_busy.begin(), load_units_busy.end(), false) 
-                   != load_units_busy.end();
+            return std::find(load_units_busy.begin(), load_units_busy.end(), false) != load_units_busy.end();
         case ExecutionUnitType::STORE:
-            return std::find(store_units_busy.begin(), store_units_busy.end(), false) 
-                   != store_units_busy.end();
+            return std::find(store_units_busy.begin(), store_units_busy.end(), false) != store_units_busy.end();
         default:
             return false;
     }
@@ -253,7 +234,7 @@ int ReservationStation::allocate_execution_unit(ExecutionUnitType unit_type) {
             }
             break;
     }
-    return -1; // 没有可用的执行单元
+    return -1;  // 分配失败
 }
 
 void ReservationStation::release_execution_unit(ExecutionUnitType unit_type, int unit_id) {
@@ -287,128 +268,115 @@ void ReservationStation::get_statistics(uint64_t& issued, uint64_t& dispatched, 
     stalls = stall_count;
 }
 
-RSEntry ReservationStation::allocate_entry() {
-    assert(!free_entries.empty() && "没有空闲的保留站表项");
-    
-    RSEntry entry = free_entries.front();
-    free_entries.pop();
-    return entry;
-}
-
-ExecutionUnitType ReservationStation::get_required_execution_unit(
-    const DecodedInstruction& instruction) const {
-    
-    switch (instruction.type) {
-        case InstructionType::R_TYPE:
-            // R型指令使用ALU
-            return ExecutionUnitType::ALU;
-            
-        case InstructionType::I_TYPE:
-            // I型指令：根据操作码区分是否为加载指令
-            if (instruction.opcode == Opcode::LOAD) {
-                return ExecutionUnitType::LOAD;
-            } else {
-                return ExecutionUnitType::ALU;
-            }
-            
-        case InstructionType::S_TYPE:
-            // S型指令是存储指令
-            return ExecutionUnitType::STORE;
-            
-        case InstructionType::B_TYPE:
-            // 分支指令使用分支单元
-            return ExecutionUnitType::BRANCH;
-            
-        case InstructionType::J_TYPE:
-        case InstructionType::U_TYPE:
-        default:
-            // 其他指令默认使用ALU
-            return ExecutionUnitType::ALU;
-    }
-}
-
-bool ReservationStation::is_instruction_ready(const ReservationStationEntry& entry) const {
-    return entry.valid && entry.src1_ready && entry.src2_ready;
-}
-
-RSEntry ReservationStation::select_ready_instruction() const {
-    RSEntry best_entry = MAX_RS_ENTRIES;
-    int best_priority = INT_MAX;
+void ReservationStation::dump_reservation_station() const {
+    std::cout << "=== 保留站状态转储 ===" << std::endl;
     
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
-        if (!rs_entries[i].valid) continue;
-        
-        if (is_instruction_ready(rs_entries[i])) {
-            int priority = calculate_priority(rs_entries[i]);
-            if (priority < best_priority) {
-                best_priority = priority;
-                best_entry = i;
-            }
+        if (rs_entries[i]) {
+            std::cout << "[RS" << std::setw(2) << i << "] " 
+                     << rs_entries[i]->to_string() << std::endl;
         }
     }
     
-    return best_entry;
+    std::cout << "===================" << std::endl;
 }
 
-int ReservationStation::calculate_priority(const ReservationStationEntry& entry) const {
-    // 简单的优先级策略：按照ROB表项编号，越小优先级越高
-    // 这样保证程序顺序的相对保持
-    return entry.rob_entry;
+void ReservationStation::dump_execution_units() const {
+    std::cout << "=== 执行单元状态 ===" << std::endl;
+    
+    std::cout << "ALU Units: ";
+    for (int i = 0; i < MAX_ALU_UNITS; ++i) {
+        std::cout << (alu_units_busy[i] ? "BUSY " : "FREE ");
+    }
+    std::cout << std::endl;
+    
+    std::cout << "Branch Units: ";
+    for (int i = 0; i < MAX_BRANCH_UNITS; ++i) {
+        std::cout << (branch_units_busy[i] ? "BUSY " : "FREE ");
+    }
+    std::cout << std::endl;
+    
+    std::cout << "Load Units: ";
+    for (int i = 0; i < MAX_LOAD_UNITS; ++i) {
+        std::cout << (load_units_busy[i] ? "BUSY " : "FREE ");
+    }
+    std::cout << std::endl;
+    
+    std::cout << "Store Units: ";
+    for (int i = 0; i < MAX_STORE_UNITS; ++i) {
+        std::cout << (store_units_busy[i] ? "BUSY " : "FREE ");
+    }
+    std::cout << std::endl;
+    
+    std::cout << "=================" << std::endl;
 }
 
-const ReservationStationEntry& ReservationStation::get_entry(RSEntry rs_entry) const {
-    assert(rs_entry < MAX_RS_ENTRIES && "保留站表项ID无效");
+DynamicInstPtr ReservationStation::get_entry(RSEntry rs_entry) const {
+    if (rs_entry >= MAX_RS_ENTRIES) return nullptr;
     return rs_entries[rs_entry];
 }
 
 bool ReservationStation::is_entry_ready(RSEntry rs_entry) const {
-    assert(rs_entry < MAX_RS_ENTRIES && "保留站表项ID无效");
-    return is_instruction_ready(rs_entries[rs_entry]);
+    if (rs_entry >= MAX_RS_ENTRIES) return false;
+    DynamicInstPtr inst = rs_entries[rs_entry];
+    return inst && is_instruction_ready(inst);
 }
 
-void ReservationStation::dump_reservation_station() const {
-    dprintf(RS, "保留站状态");
-    dprintf(RS, "空闲表项: %zu/%d", free_entries.size(), MAX_RS_ENTRIES);
-    
-    dprintf(RS, "有效表项:");
-    dprintf(RS, "ID  PC     指令  Src1  Src2  Dest  Ready ROB");
+// ========== 私有方法实现 ==========
+RSEntry ReservationStation::allocate_entry() {
+    // 寻找真正空闲的条目
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
-        if (rs_entries[i].valid) {
-            const auto& entry = rs_entries[i];
-            dprintf(RS, "%d  0x%x  %d  p%d  p%d  p%d  %s  %d", 
-                    i, entry.pc, (int)entry.instruction.type, 
-                    (int)entry.src1_reg, (int)entry.src2_reg, (int)entry.dest_reg, 
-                    (entry.src1_ready && entry.src2_ready ? "是" : "否"), 
-                    entry.rob_entry);
+        if (rs_entries[i] == nullptr) {
+            return i;
         }
     }
+    
+    // 没有空闲条目
+    return MAX_RS_ENTRIES;
 }
 
-void ReservationStation::dump_execution_units() const {
-    dprintf(RS, "执行单元状态");
+bool ReservationStation::is_instruction_ready(DynamicInstPtr instruction) const {
+    if (!instruction) return false;
+    return instruction->is_ready_to_execute();
+}
+
+RSEntry ReservationStation::select_ready_instruction() const {
+    RSEntry best_entry = MAX_RS_ENTRIES;  // 无效值
+    int best_priority = INT_MAX;
     
-    dprintf(RS, "ALU单元: ");
-    for (int i = 0; i < MAX_ALU_UNITS; ++i) {
-        dprintf(RS, "ALU%d(%s)", i, (alu_units_busy[i] ? "忙" : "闲"));
+    for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
+        if (rs_entries[i]) {
+            bool ready = is_instruction_ready(rs_entries[i]);
+            bool is_executing = (rs_entries[i]->get_status() == DynamicInst::Status::EXECUTING);
+            
+            dprintf(RS, "RS[%d] Inst#%lu PC=0x%x ready=%s src1_ready=%s src2_ready=%s status=%s", 
+                   i, rs_entries[i]->get_instruction_id(), rs_entries[i]->get_pc(),
+                   ready ? "是" : "否",
+                   rs_entries[i]->is_src1_ready() ? "是" : "否",
+                   rs_entries[i]->is_src2_ready() ? "是" : "否",
+                   rs_entries[i]->status_to_string(rs_entries[i]->get_status()));
+            
+            // 只调度准备好且没有在执行的指令
+            if (ready && !is_executing) {
+                int priority = calculate_priority(rs_entries[i]);
+                if (priority < best_priority) {
+                    best_priority = priority;
+                    best_entry = i;
+                }
+            }
+        }
     }
-    dprintf(RS, "---");
     
-    dprintf(RS, "分支单元: ");
-    for (int i = 0; i < MAX_BRANCH_UNITS; ++i) {
-        dprintf(RS, "BR%d(%s)", i, (branch_units_busy[i] ? "忙" : "闲"));
-    }
-    dprintf(RS, "---");
+    dprintf(RS, "select_ready_instruction: 选择 RS%d", (int)best_entry);
+    return best_entry;
+}
+
+int ReservationStation::calculate_priority(DynamicInstPtr instruction) const {
+    if (!instruction) return INT_MAX;
     
-    dprintf(RS, "加载单元: ");
-    for (int i = 0; i < MAX_LOAD_UNITS; ++i) {
-        dprintf(RS, "LD%d(%s)", i, (load_units_busy[i] ? "忙" : "闲"));
-    }
-    dprintf(RS, "---");
-    
-    dprintf(RS, "存储单元: ");
-    for (int i = 0; i < MAX_STORE_UNITS; ++i) {
-        dprintf(RS, "ST%d(%s)", i, (store_units_busy[i] ? "忙" : "闲"));
-    }
+    // 优先级计算：指令ID越小，优先级越高（程序顺序）
+    // 可以根据需要调整优先级策略
+    return static_cast<int>(instruction->get_instruction_id());
 }
 
 } // namespace riscv

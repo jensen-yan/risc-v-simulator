@@ -8,6 +8,7 @@
 #include "cpu/ooo/reorder_buffer.h"
 #include "cpu/ooo/store_buffer.h"
 #include "cpu/ooo/ooo_types.h"
+#include "cpu/ooo/dynamic_inst.h"
 #include "system/syscall_handler.h"
 #include "common/cpu_interface.h"
 #include <array>
@@ -31,7 +32,7 @@ struct FetchedInstruction {
 struct ExecutionUnit {
     bool busy;
     int remaining_cycles;
-    ReservationStationEntry instruction;
+    DynamicInstPtr instruction;    // 使用DynamicInst指针代替原来的副本
     uint32_t result;
     bool has_exception;
     std::string exception_msg;
@@ -119,7 +120,16 @@ struct CPUState {
 private:
     void initializeExecutionUnits() {
         auto initUnit = [](ExecutionUnit& unit) {
-            unit = {false, 0, {}, 0, false, "", 0, false};
+            unit.busy = false;
+            unit.remaining_cycles = 0;
+            unit.instruction = nullptr;  // 初始化为空指针
+            unit.result = 0;
+            unit.has_exception = false;
+            unit.exception_msg = "";
+            unit.jump_target = 0;
+            unit.is_jump = false;
+            unit.load_address = 0;
+            unit.load_size = 0;
         };
         
         for (auto& unit : alu_units) initUnit(unit);

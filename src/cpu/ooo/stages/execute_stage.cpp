@@ -1,4 +1,5 @@
 #include "cpu/ooo/stages/execute_stage.h"
+#include "cpu/ooo/dynamic_inst.h"
 #include "common/debug_types.h"
 #include "common/types.h"
 #include "core/instruction_executor.h"
@@ -19,7 +20,7 @@ void ExecuteStage::execute(CPUState& state) {
     auto dispatch_result = state.reservation_station->dispatch_instruction();
     if (dispatch_result.success) {
         dprintf(EXECUTE, "从保留站调度指令 RS[%d] Inst#%lu 到执行单元", 
-                            dispatch_result.rs_entry, dispatch_result.instruction.instruction_id);
+                            dispatch_result.rs_entry, dispatch_result.instruction->get_instruction_id());
         
         ExecutionUnit* unit = get_available_unit(dispatch_result.unit_type, state);
         if (unit) {
@@ -67,23 +68,23 @@ void ExecuteStage::execute(CPUState& state) {
     }
 }
 
-void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationStationEntry& entry, CPUState& state) {
+void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instruction, CPUState& state) {
     try {
-        const auto& inst = entry.instruction;
+        const auto& inst = instruction->get_decoded_info();
         
         switch (inst.type) {
             case InstructionType::R_TYPE:
                 // 寄存器-寄存器运算
-                unit.result = InstructionExecutor::executeRegisterOperation(inst, entry.src1_value, entry.src2_value);
+                unit.result = InstructionExecutor::executeRegisterOperation(inst, instruction->get_src1_value(), instruction->get_src2_value());
                 break;
                 
             case InstructionType::I_TYPE:
                 if (inst.opcode == Opcode::OP_IMM) {
                     // 立即数运算
-                    unit.result = InstructionExecutor::executeImmediateOperation(inst, entry.src1_value);
+                    unit.result = InstructionExecutor::executeImmediateOperation(inst, instruction->get_src1_value());
                 } else if (inst.opcode == Opcode::LOAD) {
                     // 加载指令
-                    uint32_t addr = entry.src1_value + inst.imm;
+                    uint32_t addr = instruction->get_src1_value() + inst.imm;
                     
                     // 确定访问大小
                     uint8_t access_size = 1; // 默认字节访问
@@ -108,11 +109,12 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                     
                 } else if (inst.opcode == Opcode::JALR) {
                     // JALR 指令 - I-type 跳转指令
-                    unit.result = entry.pc + (inst.is_compressed ? 2 : 4);
+                    unit.result = instruction->get_pc() + (inst.is_compressed ? 2 : 4);
                     
                     // JALR 指令：跳转目标地址 = rs1 + imm，并清除最低位
-                    unit.jump_target = InstructionExecutor::calculateJumpAndLinkTarget(inst, entry.pc, entry.src1_value);
+                    unit.jump_target = InstructionExecutor::calculateJumpAndLinkTarget(inst, instruction->get_pc(), instruction->get_src1_value());
                     unit.is_jump = true;  // 标记为跳转指令
+                    instruction->set_jump_info(true, unit.jump_target);
                 } else {
                     unit.has_exception = true;
                     unit.exception_msg = "不支持的I-type指令";
@@ -120,14 +122,16 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                 break;
 
             case InstructionType::SYSTEM_TYPE:
-                // 系统调用 - 不需要计算结果
+                // CSR指令或系统调用 - 暂时作为NOP处理
+                dprintf(EXECUTE, "执行SYSTEM_TYPE指令(NOP): Inst#%lu PC=0x%x", 
+                       instruction->get_instruction_id(), instruction->get_pc());
                 unit.result = 0;
                 break;
                 
             case InstructionType::B_TYPE:
                 // 分支指令（BNE, BEQ, BLT等）
                 {
-                    bool should_branch = InstructionExecutor::evaluateBranchCondition(inst, entry.src1_value, entry.src2_value);
+                    bool should_branch = InstructionExecutor::evaluateBranchCondition(inst, instruction->get_src1_value(), instruction->get_src2_value());
                     
                     // 设置分支结果（分支指令通常不写回寄存器，但需要完成执行）
                     unit.result = 0;  // 分支指令没有写回值
@@ -137,13 +141,14 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                     
                     if (should_branch) {
                         // 分支taken：条件成立，需要跳转
-                        unit.jump_target = entry.pc + inst.imm;
+                        unit.jump_target = instruction->get_pc() + inst.imm;
                         unit.is_jump = true;  // 标记需要改变PC
+                        instruction->set_jump_info(true, unit.jump_target);
                         
                         if (!predicted_taken) {
                             // 预测不跳转，但实际跳转 -> 预测错误
                             dprintf(EXECUTE, "分支指令 taken，目标地址: 0x%x (PC=0x%x + IMM=%d) (将在提交阶段刷新)",
-                                   unit.jump_target, entry.pc, inst.imm);
+                                   unit.jump_target, instruction->get_pc(), inst.imm);
                             // 注意：不在执行阶段刷新，让指令正常完成并提交
                             state.branch_mispredicts++;
                         } else {
@@ -171,7 +176,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
             case InstructionType::S_TYPE:
                 // 存储指令
                 {
-                    uint32_t addr = entry.src1_value + inst.imm;
+                    uint32_t addr = instruction->get_src1_value() + inst.imm;
                     
                     // 确定访问大小
                     uint8_t access_size = 1; // 默认字节访问
@@ -187,32 +192,33 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, const ReservationSta
                             break;
                     }
                     
-                    dprintf(EXECUTE, "Store指令执行：地址=0x%x 值=0x%x", addr, entry.src2_value);
+                    dprintf(EXECUTE, "Store指令执行：地址=0x%x 值=0x%x", addr, instruction->get_src2_value());
                     
                     // 执行Store到内存
-                    InstructionExecutor::storeToMemory(state.memory, addr, entry.src2_value, inst.funct3);
+                    InstructionExecutor::storeToMemory(state.memory, addr, instruction->get_src2_value(), inst.funct3);
                     
                     // 同时添加到Store Buffer用于Store-to-Load Forwarding
-                    state.store_buffer->add_store(addr, entry.src2_value, access_size, 
-                                                 entry.instruction_id, entry.pc);
+                    state.store_buffer->add_store(addr, instruction->get_src2_value(), access_size, 
+                                                 instruction->get_instruction_id(), instruction->get_pc());
                 }
                 break;
                 
             case InstructionType::U_TYPE:
                 // 上位立即数指令
-                unit.result = InstructionExecutor::executeUpperImmediate(inst, entry.pc);
+                unit.result = InstructionExecutor::executeUpperImmediate(inst, instruction->get_pc());
                 break;
                 
             case InstructionType::J_TYPE:
                 {
                     // JAL 指令 - J-type 无条件跳转
-                    unit.result = entry.pc + (inst.is_compressed ? 2 : 4);
-                    unit.jump_target = InstructionExecutor::calculateJumpTarget(inst, entry.pc);
+                    unit.result = instruction->get_pc() + (inst.is_compressed ? 2 : 4);
+                    unit.jump_target = InstructionExecutor::calculateJumpTarget(inst, instruction->get_pc());
                     unit.is_jump = true;  // 无条件跳转总是需要改变PC
+                    instruction->set_jump_info(true, unit.jump_target);
                     
                     // 无条件跳转指令：记录预测错误但不在执行阶段刷新
                     dprintf(EXECUTE, "无条件跳转指令，目标地址: 0x%x (PC=0x%x) (将在提交阶段刷新流水线)",
-                           unit.jump_target, entry.pc);
+                           unit.jump_target, instruction->get_pc());
                     
                     // 注意：不在执行阶段刷新，让指令正常完成并提交
                     // 流水线刷新将在提交阶段进行
@@ -244,9 +250,9 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             if (unit.remaining_cycles <= 0) {
                 // 执行完成，发送到CDB
                 CommonDataBusEntry cdb_entry;
-                cdb_entry.dest_reg = unit.instruction.dest_reg;
+                cdb_entry.dest_reg = unit.instruction->get_physical_dest();
                 cdb_entry.value = unit.result;
-                cdb_entry.rob_entry = unit.instruction.rob_entry;
+                cdb_entry.rob_entry = unit.instruction->get_rob_entry();
                 cdb_entry.valid = true;
                 cdb_entry.is_jump = unit.is_jump;
                 cdb_entry.jump_target = unit.jump_target;
@@ -254,10 +260,15 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 state.cdb_queue.push(cdb_entry);
                 
                 dprintf(EXECUTE, "ALU%zu 执行完成，Inst#%lu 结果 0x%x 发送到CDB", 
-                                    i, unit.instruction.instruction_id, unit.result);
+                                    i, unit.instruction->get_instruction_id(), unit.result);
+                
+                // 清空对应的保留站条目
+                RSEntry rs_entry = unit.instruction->get_rs_entry();
+                state.reservation_station->release_entry(rs_entry);
                 
                 // 释放执行单元
                 unit.busy = false;
+                unit.instruction = nullptr;
                 unit.has_exception = false;
                 unit.exception_msg.clear();
                 unit.is_jump = false;
@@ -279,27 +290,33 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             if (unit.remaining_cycles <= 0) {
                 // 分支指令执行完成，需要发送完成信号到CDB
                 CommonDataBusEntry cdb_entry;
-                cdb_entry.dest_reg = unit.instruction.dest_reg;  // 对于分支指令通常为0
+                cdb_entry.dest_reg = unit.instruction->get_physical_dest();  // 对于分支指令通常为0
                 cdb_entry.value = unit.result;  // 对于分支指令通常为0
-                cdb_entry.rob_entry = unit.instruction.rob_entry;
+                cdb_entry.rob_entry = unit.instruction->get_rob_entry();
                 cdb_entry.valid = true;
                 cdb_entry.is_jump = unit.is_jump;
                 cdb_entry.jump_target = unit.jump_target;
                 state.cdb_queue.push(cdb_entry);
                 
-                if (unit.instruction.instruction.type == InstructionType::J_TYPE) {
+                const auto& inst_type = unit.instruction->get_decoded_info().type;
+                if (inst_type == InstructionType::J_TYPE) {
                     dprintf(EXECUTE, "BRANCH%zu 跳转指令执行完成，Inst#%lu 结果发送到CDB", 
-                                        i, unit.instruction.instruction_id);
-                } else if (unit.instruction.instruction.type == InstructionType::B_TYPE) {
+                                        i, unit.instruction->get_instruction_id());
+                } else if (inst_type == InstructionType::B_TYPE) {
                     dprintf(EXECUTE, "BRANCH%zu 分支指令执行完成，Inst#%lu 完成信号发送到CDB", 
-                                        i, unit.instruction.instruction_id);
+                                        i, unit.instruction->get_instruction_id());
                 } else {
                     dprintf(EXECUTE, "BRANCH%zu 指令执行完成，Inst#%lu 结果发送到CDB", 
-                                        i, unit.instruction.instruction_id);
+                                        i, unit.instruction->get_instruction_id());
                 }
+                
+                // 清空对应的保留站条目
+                RSEntry rs_entry = unit.instruction->get_rs_entry();
+                state.reservation_station->release_entry(rs_entry);
                 
                 // 释放执行单元
                 unit.busy = false;
+                unit.instruction = nullptr;
                 unit.has_exception = false;
                 unit.exception_msg.clear();
                 unit.is_jump = false;
@@ -320,7 +337,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             
             if (unit.remaining_cycles <= 0) {
                 // 在Load指令完成前，再次检查Store依赖
-                bool should_wait = state.reorder_buffer->has_earlier_store_pending(unit.instruction.instruction_id);
+                bool should_wait = state.reorder_buffer->has_earlier_store_pending(unit.instruction->get_instruction_id());
                 
                 if (should_wait) {
                     // 仍然有未完成的Store依赖，延迟完成
@@ -335,20 +352,21 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 
                 // 加载指令完成，发送到CDB
                 CommonDataBusEntry cdb_entry;
-                cdb_entry.dest_reg = unit.instruction.dest_reg;
+                cdb_entry.dest_reg = unit.instruction->get_physical_dest();
                 cdb_entry.value = unit.result;
-                cdb_entry.rob_entry = unit.instruction.rob_entry;
+                cdb_entry.rob_entry = unit.instruction->get_rob_entry();
                 cdb_entry.valid = true;
                 
                 state.cdb_queue.push(cdb_entry);
                 
                 dprintf(EXECUTE, "LOAD%zu 执行完成，Inst#%lu %s 结果=0x%x 发送到CDB",
-                                           i, unit.instruction.instruction_id,
+                                           i, unit.instruction->get_instruction_id(),
                                            (used_forwarding ? "(使用Store转发)" : "(从内存读取)"),
                                            unit.result);
                 
                 // 释放执行单元
                 unit.busy = false;
+                unit.instruction = nullptr;
                 unit.has_exception = false;
                 unit.exception_msg.clear();
                 unit.is_jump = false;
@@ -372,16 +390,17 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 CommonDataBusEntry cdb_entry;
                 cdb_entry.dest_reg = 0; // 存储指令没有目标寄存器
                 cdb_entry.value = 0;
-                cdb_entry.rob_entry = unit.instruction.rob_entry;
+                cdb_entry.rob_entry = unit.instruction->get_rob_entry();
                 cdb_entry.valid = true;
                 
                 state.cdb_queue.push(cdb_entry);
                 
                 dprintf(EXECUTE, "STORE%zu 执行完成，Inst#%lu 通知ROB完成", 
-                                    i, unit.instruction.instruction_id);
+                                    i, unit.instruction->get_instruction_id());
                 
                 // 释放执行单元
                 unit.busy = false;
+                unit.instruction = nullptr;
                 unit.has_exception = false;
                 unit.exception_msg.clear();
                 unit.is_jump = false;
@@ -522,7 +541,7 @@ void ExecuteStage::reset() {
 }
 
 bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) {
-    const auto& inst = unit.instruction.instruction;
+    const auto& inst = unit.instruction->get_decoded_info();
     uint32_t addr = unit.load_address;
     uint8_t access_size = unit.load_size;
     

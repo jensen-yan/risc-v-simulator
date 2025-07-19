@@ -26,8 +26,11 @@ void WritebackStage::execute(CPUState& state) {
         state.register_rename->update_physical_register(cdb_entry.dest_reg, cdb_entry.value, cdb_entry.rob_entry);
         
         // 更新ROB表项
-        state.reorder_buffer->update_entry(cdb_entry.rob_entry, cdb_entry.value, false, "",
-                                     cdb_entry.is_jump, cdb_entry.jump_target);
+        auto rob_instruction = state.reorder_buffer->get_entry(cdb_entry.rob_entry);
+        if (rob_instruction) {
+            state.reorder_buffer->update_entry(rob_instruction, cdb_entry.value, false, "",
+                                         cdb_entry.is_jump, cdb_entry.jump_target);
+        }
         
         dprintf(WRITEBACK, "ROB[%d] status updated to COMPLETED", cdb_entry.rob_entry);
     }

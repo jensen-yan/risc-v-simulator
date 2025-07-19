@@ -45,25 +45,21 @@ void DiffTest::syncReferenceState(ICpuInterface* ooo_cpu) {
         reference_cpu_->setFPRegister(reg, value);
     }
     
-    // 同步PC - 使用提交PC而不是架构PC
-    uint32_t committed_pc = static_cast<OutOfOrderCPU*>(ooo_cpu)->getCommittedPC();
-    reference_cpu_->setPC(committed_pc);
 }
 
-bool DiffTest::stepAndCompare(ICpuInterface* ooo_cpu) {
+bool DiffTest::stepAndCompareWithCommittedPC(ICpuInterface* ooo_cpu, uint32_t committed_pc) {
     if (!enabled_ || !reference_cpu_ || !ooo_cpu) {
         return true;
     }
     
     comparison_count_++;
     
-    // 步骤1: 预检查PC是否一致（使用提交PC）
+    // 步骤1: 预检查PC是否一致（使用提供的committed_pc）
     uint32_t ref_pc = reference_cpu_->getPC();
-    uint32_t ooo_committed_pc = static_cast<OutOfOrderCPU*>(ooo_cpu)->getCommittedPC();
     
-    if (ref_pc != ooo_committed_pc) {
-        dprintf(DIFFTEST, "[PC_MISMATCH] PC预检查失败！提交PC不一致: 参考CPU=0x%x, 乱序CPU=0x%x", 
-                ref_pc, ooo_committed_pc);
+    if (ref_pc != committed_pc) {
+        dprintf(DIFFTEST, "[PC_MISMATCH] PC预检查失败！提交PC不一致: 参考CPU=0x%x, 乱序CPU提交PC=0x%x", 
+                ref_pc, committed_pc);
         
         mismatch_count_++;
         dumpState(reference_cpu_.get(), ooo_cpu);

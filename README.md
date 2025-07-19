@@ -61,6 +61,22 @@ make -j
 ### 系统指令
 - ECALL, EBREAK
 
+## 构建riscv-tests
+
+```bash
+git submodule update --init --recursive
+
+# only for ubuntu 22.04
+source setup_riscv_env.sh
+
+cd riscv-tests
+
+# see README.md in riscv-tests
+make -j 
+
+```
+
+
 ## 开发说明
 
 本项目遵循测试驱动开发（TDD）实践。每条指令都有对应的单元测试。

@@ -12,19 +12,18 @@ StoreBuffer::StoreBuffer() : next_allocate_index(0) {
     }
 }
 
-void StoreBuffer::add_store(uint32_t address, uint32_t value, uint8_t size, uint64_t instruction_id, uint32_t pc) {
+void StoreBuffer::add_store(DynamicInstPtr instruction, uint32_t address, uint32_t value, uint8_t size) {
     // 找到下一个可用的条目（可能覆盖旧条目）
     StoreBufferEntry& entry = entries[next_allocate_index];
     
     entry.valid = true;
+    entry.instruction = instruction;
     entry.address = address;
     entry.value = value;
     entry.size = size;
-    entry.instruction_id = instruction_id;
-    entry.pc = pc;
     
     dprintf(EXECUTE, "Store Buffer添加条目[%d]: 地址=0x%x, 值=0x%x, 大小=%d, Inst#%lu, PC=0x%x", 
-            next_allocate_index, address, value, size, instruction_id, pc);
+            next_allocate_index, address, value, size, instruction->get_instruction_id(), instruction->get_pc());
     
     // 移动到下一个分配位置（循环）
     next_allocate_index = (next_allocate_index + 1) % MAX_ENTRIES;
@@ -45,7 +44,7 @@ bool StoreBuffer::forward_load(uint32_t address, uint8_t size, uint32_t& result_
             if (entry.address == address && entry.size == size) {
                 result_value = entry.value;
                 dprintf(EXECUTE, "Store-to-Load Forwarding: 完全匹配 地址=0x%x, 大小=%d, 转发值=0x%x (来自Inst#%lu)", 
-                        address, size, result_value, entry.instruction_id);
+                        address, size, result_value, entry.instruction->get_instruction_id());
                 return true;
             }
             
@@ -53,12 +52,12 @@ bool StoreBuffer::forward_load(uint32_t address, uint8_t size, uint32_t& result_
             if (can_extract_load_data(entry, address, size)) {
                 result_value = extract_load_data(entry, address, size);
                 dprintf(EXECUTE, "Store-to-Load Forwarding: 部分匹配 Load地址=0x%x, Load大小=%d, Store地址=0x%x, Store大小=%d, 转发值=0x%x (来自Inst#%lu)", 
-                        address, size, entry.address, entry.size, result_value, entry.instruction_id);
+                        address, size, entry.address, entry.size, result_value, entry.instruction->get_instruction_id());
                 return true;
             } else {
                 // 有重叠但无法转发（如部分字节写入）- 这种情况下Load必须等待Store提交到内存
                 dprintf(EXECUTE, "Store-to-Load Forwarding: 地址重叠但无法转发 Load地址=0x%x, Load大小=%d, Store地址=0x%x, Store大小=%d (来自Inst#%lu)", 
-                        address, size, entry.address, entry.size, entry.instruction_id);
+                        address, size, entry.address, entry.size, entry.instruction->get_instruction_id());
                 return false; // 无法转发，Load需要等待
             }
         }
@@ -73,10 +72,11 @@ void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
     int retired_count = 0;
     
     for (int i = 0; i < MAX_ENTRIES; ++i) {
-        if (entries[i].valid && entries[i].instruction_id <= instruction_id) {
+        if (entries[i].valid && entries[i].instruction && entries[i].instruction->get_instruction_id() <= instruction_id) {
             dprintf(EXECUTE, "Store Buffer退休条目[%d]: Inst#%lu, 地址=0x%x", 
-                    i, entries[i].instruction_id, entries[i].address);
+                    i, entries[i].instruction->get_instruction_id(), entries[i].address);
             entries[i].valid = false;
+            entries[i].instruction = nullptr; // 清除指令指针
             retired_count++;
         }
     }
@@ -91,6 +91,7 @@ void StoreBuffer::flush() {
     
     for (auto& entry : entries) {
         entry.valid = false;
+        entry.instruction = nullptr; // 清除指令指针
     }
     next_allocate_index = 0;
 }
@@ -101,10 +102,10 @@ void StoreBuffer::dump() const {
     
     bool has_valid = false;
     for (int i = 0; i < MAX_ENTRIES; ++i) {
-        if (entries[i].valid) {
+        if (entries[i].valid && entries[i].instruction) {
             dprintf(EXECUTE, "  [%d] 地址=0x%x, 值=0x%x, 大小=%d, Inst#%lu, PC=0x%x", 
                     i, entries[i].address, entries[i].value, entries[i].size, 
-                    entries[i].instruction_id, entries[i].pc);
+                    entries[i].instruction->get_instruction_id(), entries[i].instruction->get_pc());
             has_valid = true;
         }
     }

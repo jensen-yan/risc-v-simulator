@@ -1,22 +1,21 @@
 #pragma once
 
 #include "common/types.h"
+#include "cpu/ooo/dynamic_inst.h"
 #include <array>
 #include <cstdint>
-#include <iostream>
 
 namespace riscv {
 
 // Store Buffer 表项，用于 Store-to-Load Forwarding
 struct StoreBufferEntry {
-    bool valid;              // 表项是否有效
-    uint32_t address;        // 存储地址
-    uint32_t value;          // 存储值
-    uint8_t size;            // 存储大小（1=字节, 2=半字, 4=字）
-    uint64_t instruction_id; // 指令ID，用于调试
-    uint32_t pc;            // 指令PC，用于调试
+    bool valid;                     // 表项是否有效
+    DynamicInstPtr instruction;     // 关联的动态指令对象
+    uint32_t address;              // 存储地址
+    uint32_t value;                // 存储值
+    uint8_t size;                  // 存储大小（1=字节, 2=半字, 4=字）
     
-    StoreBufferEntry() : valid(false), address(0), value(0), size(0), instruction_id(0), pc(0) {}
+    StoreBufferEntry() : valid(false), instruction(nullptr), address(0), value(0), size(0) {}
 };
 
 // Store Buffer，用于实现 Store-to-Load Forwarding
@@ -30,7 +29,7 @@ public:
     StoreBuffer();
     
     // 添加Store条目
-    void add_store(uint32_t address, uint32_t value, uint8_t size, uint64_t instruction_id, uint32_t pc);
+    void add_store(DynamicInstPtr instruction, uint32_t address, uint32_t value, uint8_t size);
     
     // 查找匹配的Store (返回是否找到，如果找到则通过result_value返回值)
     bool forward_load(uint32_t address, uint8_t size, uint32_t& result_value) const;

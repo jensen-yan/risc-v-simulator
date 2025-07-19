@@ -3,7 +3,6 @@
 #include "cpu/ooo/ooo_types.h"
 #include "cpu/ooo/dynamic_inst.h"
 #include <vector>
-#include <queue>
 #include <string>
 
 namespace riscv {
@@ -33,8 +32,6 @@ private:
     // 保留站表项
     std::vector<DynamicInstPtr> rs_entries;
     
-    // 空闲保留站表项队列
-    std::queue<RSEntry> free_entries;
     
     // 执行单元忙碌状态
     std::vector<bool> alu_units_busy;

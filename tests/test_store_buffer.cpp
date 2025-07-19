@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/dynamic_inst.h"
 #include "common/types.h"
 
 using namespace riscv;
@@ -14,6 +15,20 @@ protected:
         store_buffer.reset();
     }
 
+    // 创建测试用的DynamicInst对象
+    DynamicInstPtr createTestDynamicInst(uint64_t instruction_id, uint32_t pc) {
+        // 创建一个简单的Store指令用于测试
+        DecodedInstruction decoded_inst;
+        decoded_inst.type = InstructionType::S_TYPE;
+        decoded_inst.opcode = Opcode::STORE;  // Store指令的opcode
+        decoded_inst.funct3 = Funct3::SW;     // SW指令
+        decoded_inst.rs1 = 1;                 // 基址寄存器
+        decoded_inst.rs2 = 2;                 // 源寄存器
+        decoded_inst.imm = 0;                 // 偏移量
+        
+        return create_dynamic_inst(decoded_inst, pc, instruction_id);
+    }
+
     std::unique_ptr<StoreBuffer> store_buffer;
 };
 
@@ -25,8 +40,10 @@ TEST_F(StoreBufferTest, AddStoreEntry) {
     uint64_t instruction_id = 1;
     uint32_t pc = 0x80000000;
 
+    auto instruction = createTestDynamicInst(instruction_id, pc);
+    
     // 添加Store条目不应抛出异常
-    EXPECT_NO_THROW(store_buffer->add_store(address, value, size, instruction_id, pc));
+    EXPECT_NO_THROW(store_buffer->add_store(instruction, address, value, size));
 }
 
 // 测试Store-to-Load Forwarding - 完全匹配
@@ -37,8 +54,10 @@ TEST_F(StoreBufferTest, ForwardingExactMatch) {
     uint64_t instruction_id = 1;
     uint32_t pc = 0x80000000;
 
+    auto instruction = createTestDynamicInst(instruction_id, pc);
+    
     // 添加Store条目
-    store_buffer->add_store(address, store_value, size, instruction_id, pc);
+    store_buffer->add_store(instruction, address, store_value, size);
 
     // 尝试Load相同地址和大小
     uint32_t load_result;
@@ -56,8 +75,10 @@ TEST_F(StoreBufferTest, ForwardingByteAccess) {
     uint64_t instruction_id = 1;
     uint32_t pc = 0x80000000;
 
+    auto instruction = createTestDynamicInst(instruction_id, pc);
+    
     // 添加Store条目（字存储）
-    store_buffer->add_store(address, store_value, store_size, instruction_id, pc);
+    store_buffer->add_store(instruction, address, store_value, store_size);
 
     // 尝试Load字节（地址+0）
     uint32_t load_result;
@@ -90,8 +111,10 @@ TEST_F(StoreBufferTest, ForwardingNoMatch) {
     uint64_t instruction_id = 1;
     uint32_t pc = 0x80000000;
 
+    auto instruction = createTestDynamicInst(instruction_id, pc);
+    
     // 添加Store条目
-    store_buffer->add_store(store_address, store_value, store_size, instruction_id, pc);
+    store_buffer->add_store(instruction, store_address, store_value, store_size);
 
     // 尝试Load不同地址
     uint32_t load_result;
@@ -108,9 +131,12 @@ TEST_F(StoreBufferTest, RetireStores) {
     uint8_t size = 4;
     uint32_t pc = 0x80000000;
 
+    auto instruction1 = createTestDynamicInst(1, pc);
+    auto instruction2 = createTestDynamicInst(2, pc);
+    
     // 添加两个Store条目
-    store_buffer->add_store(address1, value, size, 1, pc);
-    store_buffer->add_store(address2, value, size, 2, pc);
+    store_buffer->add_store(instruction1, address1, value, size);
+    store_buffer->add_store(instruction2, address2, value, size);
 
     // 两个Store都应该能转发
     uint32_t load_result;
@@ -141,7 +167,8 @@ TEST_F(StoreBufferTest, CircularOverwrite) {
 
     // 添加超过Buffer容量的Store条目（假设容量为8）
     for (int i = 0; i < 10; ++i) {
-        store_buffer->add_store(base_address + i * 4, value + i, size, i + 1, pc);
+        auto instruction = createTestDynamicInst(i + 1, pc);
+        store_buffer->add_store(instruction, base_address + i * 4, value + i, size);
     }
 
     // 最早的Store条目应该被覆盖
@@ -163,8 +190,10 @@ TEST_F(StoreBufferTest, FlushBuffer) {
     uint64_t instruction_id = 1;
     uint32_t pc = 0x80000000;
 
+    auto instruction = createTestDynamicInst(instruction_id, pc);
+    
     // 添加Store条目
-    store_buffer->add_store(address, value, size, instruction_id, pc);
+    store_buffer->add_store(instruction, address, value, size);
 
     // 验证Store条目存在
     uint32_t load_result;
@@ -183,10 +212,14 @@ TEST_F(StoreBufferTest, MultipleWritesToSameAddress) {
     uint8_t size = 4;
     uint32_t pc = 0x80000000;
 
+    auto instruction1 = createTestDynamicInst(1, pc);
+    auto instruction2 = createTestDynamicInst(2, pc);
+    auto instruction3 = createTestDynamicInst(3, pc);
+    
     // 添加多次写入到同一地址
-    store_buffer->add_store(address, 0x11111111, size, 1, pc);
-    store_buffer->add_store(address, 0x22222222, size, 2, pc);
-    store_buffer->add_store(address, 0x33333333, size, 3, pc);
+    store_buffer->add_store(instruction1, address, 0x11111111, size);
+    store_buffer->add_store(instruction2, address, 0x22222222, size);
+    store_buffer->add_store(instruction3, address, 0x33333333, size);
 
     // 应该转发最新的值
     uint32_t load_result;
@@ -204,8 +237,10 @@ TEST_F(StoreBufferTest, OverlapNoForwarding) {
     uint64_t instruction_id = 1;
     uint32_t pc = 0x80000000;
 
+    auto instruction = createTestDynamicInst(instruction_id, pc);
+    
     // 添加字节Store
-    store_buffer->add_store(store_address, store_value, store_size, instruction_id, pc);
+    store_buffer->add_store(instruction, store_address, store_value, store_size);
 
     // 尝试Load字（覆盖更大范围）
     uint32_t load_result;

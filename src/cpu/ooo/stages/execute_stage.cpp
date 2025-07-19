@@ -198,8 +198,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     InstructionExecutor::storeToMemory(state.memory, addr, instruction->get_src2_value(), inst.funct3);
                     
                     // 同时添加到Store Buffer用于Store-to-Load Forwarding
-                    state.store_buffer->add_store(addr, instruction->get_src2_value(), access_size, 
-                                                 instruction->get_instruction_id(), instruction->get_pc());
+                    state.store_buffer->add_store(instruction, addr, instruction->get_src2_value(), access_size);
                 }
                 break;
                 

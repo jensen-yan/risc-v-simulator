@@ -24,7 +24,6 @@ ReservationStation::ReservationStation()
 
 void ReservationStation::initialize_free_list() {
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
-        free_entries.push(i);
         rs_entries[i] = nullptr;  // 初始化为空指针
     }
 }
@@ -45,7 +44,7 @@ ReservationStation::IssueResult ReservationStation::issue_instruction(DynamicIns
         return result;
     }
     
-    if (free_entries.empty()) {
+    if (!has_free_entry()) {
         result.error_message = "保留站已满，无法发射指令";
         stall_count++;
         return result;
@@ -159,7 +158,6 @@ void ReservationStation::release_entry(RSEntry rs_entry) {
     if (rs_entries[rs_entry]) {
         dprintf(RS, "释放保留站表项 RS%d", (int)rs_entry);
         rs_entries[rs_entry] = nullptr;
-        free_entries.push(rs_entry);
     }
 }
 
@@ -177,11 +175,22 @@ void ReservationStation::flush_pipeline() {
 }
 
 bool ReservationStation::has_free_entry() const {
-    return !free_entries.empty();
+    for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
+        if (rs_entries[i] == nullptr) {
+            return true;
+        }
+    }
+    return false;
 }
 
 size_t ReservationStation::get_free_entry_count() const {
-    return free_entries.size();
+    size_t count = 0;
+    for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
+        if (rs_entries[i] == nullptr) {
+            count++;
+        }
+    }
+    return count;
 }
 
 bool ReservationStation::is_execution_unit_available(ExecutionUnitType unit_type) const {

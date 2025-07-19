@@ -247,32 +247,10 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             dprintf(EXECUTE, "ALU%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                // 设置执行结果和跳转信息到DynamicInst
-                unit.instruction->set_result(unit.result);
-                unit.instruction->set_jump_info(unit.is_jump, unit.jump_target);
-                
-                // 执行完成，发送到CDB
-                CommonDataBusEntry cdb_entry(unit.instruction);
-                
-                state.cdb_queue.push(cdb_entry);
-                
                 dprintf(EXECUTE, "ALU%zu 执行完成，Inst#%lu 结果 0x%x 发送到CDB", 
                                     i, unit.instruction->get_instruction_id(), unit.result);
                 
-                // 清空对应的保留站条目
-                RSEntry rs_entry = unit.instruction->get_rs_entry();
-                state.reservation_station->release_entry(rs_entry);
-                
-                // 释放执行单元
-                unit.busy = false;
-                unit.instruction = nullptr;
-                unit.has_exception = false;
-                unit.exception_msg.clear();
-                unit.is_jump = false;
-                unit.jump_target = 0;
-                
-                // 释放保留站中的执行单元状态
-                state.reservation_station->release_execution_unit(ExecutionUnitType::ALU, i);
+                complete_execution_unit(unit, ExecutionUnitType::ALU, i, state);
             }
         }
     }
@@ -285,40 +263,9 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             dprintf(EXECUTE, "BRANCH%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                // 设置执行结果和跳转信息到DynamicInst
-                unit.instruction->set_result(unit.result);
-                unit.instruction->set_jump_info(unit.is_jump, unit.jump_target);
-                
-                // 分支指令执行完成，需要发送完成信号到CDB
-                CommonDataBusEntry cdb_entry(unit.instruction);
-                state.cdb_queue.push(cdb_entry);
-                
-                const auto& inst_type = unit.instruction->get_decoded_info().type;
-                if (inst_type == InstructionType::J_TYPE) {
-                    dprintf(EXECUTE, "BRANCH%zu 跳转指令执行完成，Inst#%lu 结果发送到CDB", 
+                dprintf(EXECUTE, "BRANCH%zu 跳转指令执行完成，Inst#%lu 结果发送到CDB", 
                                         i, unit.instruction->get_instruction_id());
-                } else if (inst_type == InstructionType::B_TYPE) {
-                    dprintf(EXECUTE, "BRANCH%zu 分支指令执行完成，Inst#%lu 完成信号发送到CDB", 
-                                        i, unit.instruction->get_instruction_id());
-                } else {
-                    dprintf(EXECUTE, "BRANCH%zu 指令执行完成，Inst#%lu 结果发送到CDB", 
-                                        i, unit.instruction->get_instruction_id());
-                }
-                
-                // 清空对应的保留站条目
-                RSEntry rs_entry = unit.instruction->get_rs_entry();
-                state.reservation_station->release_entry(rs_entry);
-                
-                // 释放执行单元
-                unit.busy = false;
-                unit.instruction = nullptr;
-                unit.has_exception = false;
-                unit.exception_msg.clear();
-                unit.is_jump = false;
-                unit.jump_target = 0;
-                
-                // 释放保留站中的执行单元状态
-                state.reservation_station->release_execution_unit(ExecutionUnitType::BRANCH, i);
+                complete_execution_unit(unit, ExecutionUnitType::BRANCH, i, state);
             }
         }
     }
@@ -345,33 +292,12 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 // 尝试Store-to-Load Forwarding
                 bool used_forwarding = perform_load_execution(unit, state);
                 
-                // 设置执行结果到DynamicInst
-                unit.instruction->set_result(unit.result);
-                
-                // 加载指令完成，发送到CDB
-                CommonDataBusEntry cdb_entry(unit.instruction);
-                
-                state.cdb_queue.push(cdb_entry);
-                
                 dprintf(EXECUTE, "LOAD%zu 执行完成，Inst#%lu %s 结果=0x%x 发送到CDB",
                                            i, unit.instruction->get_instruction_id(),
                                            (used_forwarding ? "(使用Store转发)" : "(从内存读取)"),
                                            unit.result);
                 
-                // 清空对应的保留站条目
-                RSEntry rs_entry = unit.instruction->get_rs_entry();
-                state.reservation_station->release_entry(rs_entry);
-                
-                // 释放执行单元
-                unit.busy = false;
-                unit.instruction = nullptr;
-                unit.has_exception = false;
-                unit.exception_msg.clear();
-                unit.is_jump = false;
-                unit.jump_target = 0;
-                
-                // 释放保留站中的执行单元状态
-                state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, i);
+                complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
             }
         }
     }
@@ -384,31 +310,13 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             dprintf(EXECUTE, "STORE%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                // 设置执行结果到DynamicInst（存储指令结果为0）
-                unit.instruction->set_result(0);
-                
-                // 存储指令完成，不需要写回结果，但需要更新ROB状态
-                CommonDataBusEntry cdb_entry(unit.instruction);
-                
-                state.cdb_queue.push(cdb_entry);
+                // 存储指令结果为0
+                unit.result = 0;
                 
                 dprintf(EXECUTE, "STORE%zu 执行完成，Inst#%lu 通知ROB完成", 
                                     i, unit.instruction->get_instruction_id());
                 
-                // 清空对应的保留站条目
-                RSEntry rs_entry = unit.instruction->get_rs_entry();
-                state.reservation_station->release_entry(rs_entry);
-                
-                // 释放执行单元
-                unit.busy = false;
-                unit.instruction = nullptr;
-                unit.has_exception = false;
-                unit.exception_msg.clear();
-                unit.is_jump = false;
-                unit.jump_target = 0;
-                
-                // 释放保留站中的执行单元状态
-                state.reservation_station->release_execution_unit(ExecutionUnitType::STORE, i);
+                complete_execution_unit(unit, ExecutionUnitType::STORE, i, state);
             }
         }
     }
@@ -498,39 +406,51 @@ void ExecuteStage::flush_pipeline(CPUState& state) {
     reset_execution_units(state);
 }
 
+void ExecuteStage::reset_single_unit(ExecutionUnit& unit) {
+    // 重置单个执行单元的通用逻辑
+    unit.busy = false;
+    unit.remaining_cycles = 0;
+    unit.has_exception = false;
+    unit.is_jump = false;
+    unit.jump_target = 0;
+    unit.instruction = nullptr;
+    unit.exception_msg.clear();
+}
+
+template<typename UnitContainer>
+void ExecuteStage::reset_unit_container(UnitContainer& units) {
+    // 重置执行单元容器的通用函数
+    for (auto& unit : units) {
+        reset_single_unit(unit);
+    }
+}
+
+void ExecuteStage::complete_execution_unit(ExecutionUnit& unit, ExecutionUnitType unit_type, size_t unit_index, CPUState& state) {
+    // 设置执行结果和跳转信息到DynamicInst
+    unit.instruction->set_result(unit.result);
+    unit.instruction->set_jump_info(unit.is_jump, unit.jump_target);
+    
+    // 执行完成，发送到CDB
+    CommonDataBusEntry cdb_entry(unit.instruction);
+    state.cdb_queue.push(cdb_entry);
+    
+    // 清空对应的保留站条目
+    RSEntry rs_entry = unit.instruction->get_rs_entry();
+    state.reservation_station->release_entry(rs_entry);
+    
+    // 释放执行单元
+    reset_single_unit(unit);
+    
+    // 释放保留站中的执行单元状态
+    state.reservation_station->release_execution_unit(unit_type, unit_index);
+}
+
 void ExecuteStage::reset_execution_units(CPUState& state) {
     // 重置所有执行单元
-    for (auto& unit : state.alu_units) {
-        unit.busy = false;
-        unit.remaining_cycles = 0;
-        unit.has_exception = false;
-        unit.is_jump = false;
-        unit.jump_target = 0;
-    }
-    
-    for (auto& unit : state.branch_units) {
-        unit.busy = false;
-        unit.remaining_cycles = 0;
-        unit.has_exception = false;
-        unit.is_jump = false;
-        unit.jump_target = 0;
-    }
-    
-    for (auto& unit : state.load_units) {
-        unit.busy = false;
-        unit.remaining_cycles = 0;
-        unit.has_exception = false;
-        unit.is_jump = false;
-        unit.jump_target = 0;
-    }
-    
-    for (auto& unit : state.store_units) {
-        unit.busy = false;
-        unit.remaining_cycles = 0;
-        unit.has_exception = false;
-        unit.is_jump = false;
-        unit.jump_target = 0;
-    }
+    reset_unit_container(state.alu_units);
+    reset_unit_container(state.branch_units);
+    reset_unit_container(state.load_units);
+    reset_unit_container(state.store_units);
 }
 
 void ExecuteStage::flush() {

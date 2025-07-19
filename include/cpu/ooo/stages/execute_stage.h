@@ -36,6 +36,14 @@ private:
     void flush_pipeline(CPUState& state);
     void reset_execution_units(CPUState& state);
     
+    // 执行单元重置的辅助函数
+    void reset_single_unit(ExecutionUnit& unit);
+    template<typename UnitContainer>
+    void reset_unit_container(UnitContainer& units);
+    
+    // 执行单元完成时的公共处理逻辑
+    void complete_execution_unit(ExecutionUnit& unit, ExecutionUnitType unit_type, size_t unit_index, CPUState& state);
+    
     // 调试辅助方法
     void print_stage_activity(const std::string& activity, uint64_t cycle, uint32_t pc);
 };

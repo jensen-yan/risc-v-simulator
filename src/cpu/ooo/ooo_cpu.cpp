@@ -317,10 +317,7 @@ void OutOfOrderCPU::dumpPipelineState() const {
     std::cout << "CDB队列大小: " << cpu_state_.cdb_queue.size() << std::endl;
 }
 
-void OutOfOrderCPU::print_stage_activity(const std::string& stage, const std::string& activity) {
-    auto& debugManager = DebugManager::getInstance();
-    debugManager.printf(stage, activity, cpu_state_.cycle_count, cpu_state_.pc);
-}
+
 
 void OutOfOrderCPU::enableDiffTest(bool enable) {
     if (difftest_) {

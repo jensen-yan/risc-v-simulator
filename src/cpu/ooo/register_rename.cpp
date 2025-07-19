@@ -252,10 +252,10 @@ void RegisterRenameUnit::dump_physical_registers() const {
             dprintf(RENAME, "p%d:  等待中  ", i);
         }
         
-        if (i % 4 == 3) dprintf(RENAME, "");
+        if (i % 4 == 3) dprintf(RENAME, "---");
         else dprintf(RENAME, "  ");
     }
-    dprintf(RENAME, "");
+    dprintf(RENAME, "---");
 }
 
 void RegisterRenameUnit::dump_free_list() const {

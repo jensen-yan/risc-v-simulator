@@ -180,7 +180,7 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
     result.success = true;
     result.instruction = head_entry;
     
-    dprintf(ROB, "提交指令 ROB%d, PC=0x%x, 结果=0x%x, 指令ID=%llu", 
+    dprintf(ROB, "提交指令 ROB%d, PC=0x%x, 结果=0x%x, 指令ID=%lu", 
             index_to_entry(head_index), head_entry.pc, head_entry.result, head_entry.instruction_id);
     
     // 更新状态
@@ -410,10 +410,10 @@ void ReorderBuffer::dump_reorder_buffer() const {
 
 void ReorderBuffer::dump_rob_summary() const {
     dprintf(ROB, "ROB统计信息");
-    dprintf(ROB, "已分配: %llu", allocated_count);
-    dprintf(ROB, "已提交: %llu", committed_count);
-    dprintf(ROB, "已刷新: %llu", flushed_count);
-    dprintf(ROB, "异常数: %llu", exception_count); 
+    dprintf(ROB, "已分配: %lu", allocated_count);
+    dprintf(ROB, "已提交: %lu", committed_count);
+    dprintf(ROB, "已刷新: %lu", flushed_count);
+    dprintf(ROB, "异常数: %lu", exception_count); 
     dprintf(ROB, "当前占用: %d/%d", entry_count, MAX_ROB_ENTRIES);
 }
 
@@ -432,7 +432,7 @@ bool ReorderBuffer::has_earlier_store_pending(uint64_t current_instruction_id) c
             entry.instruction.type == InstructionType::S_TYPE &&  // Store指令
             entry.state != ReorderBufferEntry::State::COMPLETED) {  // 未完成
             
-            dprintf(ROB, "发现更早的未完成Store指令: Inst#%llu PC=0x%x (当前Load Inst#%llu)", 
+            dprintf(ROB, "发现更早的未完成Store指令: Inst#%lu PC=0x%x (当前Load Inst#%lu)", 
                     entry.instruction_id, entry.pc, current_instruction_id);
             return true;
         }

@@ -391,19 +391,19 @@ void ReservationStation::dump_execution_units() const {
     for (int i = 0; i < MAX_ALU_UNITS; ++i) {
         dprintf(RS, "ALU%d(%s)", i, (alu_units_busy[i] ? "忙" : "闲"));
     }
-    dprintf(RS, "");
+    dprintf(RS, "---");
     
     dprintf(RS, "分支单元: ");
     for (int i = 0; i < MAX_BRANCH_UNITS; ++i) {
         dprintf(RS, "BR%d(%s)", i, (branch_units_busy[i] ? "忙" : "闲"));
     }
-    dprintf(RS, "");
+    dprintf(RS, "---");
     
     dprintf(RS, "加载单元: ");
     for (int i = 0; i < MAX_LOAD_UNITS; ++i) {
         dprintf(RS, "LD%d(%s)", i, (load_units_busy[i] ? "忙" : "闲"));
     }
-    dprintf(RS, "");
+    dprintf(RS, "---");
     
     dprintf(RS, "存储单元: ");
     for (int i = 0; i < MAX_STORE_UNITS; ++i) {

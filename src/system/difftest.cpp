@@ -22,7 +22,7 @@ void DiffTest::setReferencePC(uint64_t pc) {
     }
     
     reference_cpu_->setPC(pc);
-    dprintf(DIFFTEST, "设置参考CPU PC=0x%llx", pc);
+    dprintf(DIFFTEST, "设置参考CPU PC=0x%lx", pc);
 }
 
 /**
@@ -88,7 +88,7 @@ bool DiffTest::stepAndCompare(ICpuInterface* ooo_cpu) {
     
     if (!all_match) {
         mismatch_count_++;
-        dprintf(DIFFTEST, "发现状态不一致！比较次数: %llu, 总不一致次数: %llu", comparison_count_, mismatch_count_);
+        dprintf(DIFFTEST, "发现状态不一致！比较次数: %lu, 总不一致次数: %lu", comparison_count_, mismatch_count_);
         
         // 转储详细状态信息
         dumpState(reference_cpu_.get(), ooo_cpu);
@@ -99,7 +99,7 @@ bool DiffTest::stepAndCompare(ICpuInterface* ooo_cpu) {
             std::exit(1);
         }
     } else {
-        dprintf(DIFFTEST, "比较 #%llu 通过", comparison_count_);
+        dprintf(DIFFTEST, "比较 #%lu 通过", comparison_count_);
     }
     
     return all_match;

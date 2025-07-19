@@ -342,10 +342,3 @@ private:
     uint64_t current_cycle = riscv::DebugContext::getInstance().getCurrentCycle(); \
     riscv::DebugManager::getInstance().printf(#stage, std::string(buffer), current_cycle); \
 } while(0)
-
-// 支持自定义周期和PC的dprintf宏（用于特殊场景）
-#define dprintf_cycle(stage, cycle, pc, ...) do { \
-    char buffer[1024]; \
-    snprintf(buffer, sizeof(buffer), __VA_ARGS__); \
-    riscv::DebugManager::getInstance().printf(#stage, std::string(buffer), cycle, pc); \
-} while(0)

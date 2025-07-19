@@ -9,11 +9,9 @@ FetchStage::FetchStage() {
 }
 
 void FetchStage::execute(CPUState& state) {
-    print_stage_activity("开始取指阶段", state.cycle_count, state.pc);
-    
     // 如果已经停机，不再取指
     if (state.halted) {
-        print_stage_activity("CPU已停机，跳过取指", state.cycle_count, state.pc);
+        dprintf(FETCH, "CPU已停机，跳过取指");
         return;
     }
     
@@ -25,15 +23,14 @@ void FetchStage::execute(CPUState& state) {
             // 如果指令为0，可能表明程序结束，但不要立即停机
             // 要等待流水线中的指令全部完成提交
             if (raw_inst == 0) {
-                print_stage_activity("取指到空指令(0x0)，停止取指但等待流水线清空", 
-                                    state.cycle_count, state.pc);
+                dprintf(FETCH, "取指到空指令(0x0)，停止取指但等待流水线清空");
                 
                 // 检查是否还有未完成的指令
                 if (state.reorder_buffer->is_empty() && 
                     state.fetch_buffer.empty() && 
                     state.cdb_queue.empty()) {
                     state.halted = true;
-                    print_stage_activity("流水线已清空，程序结束", state.cycle_count, state.pc);
+                    dprintf(FETCH, "流水线已清空，程序结束");
                 }
                 return;
             }
@@ -46,36 +43,32 @@ void FetchStage::execute(CPUState& state) {
             if ((raw_inst & 0x03) != 0x03) {
                 fetched.is_compressed = true;
                 state.pc += 2;
-                std::string msg = fmt::format("取指令: pc = 0x{:x} data = 0x{:x} (压缩指令，PC+2)", 
+                dprintf(FETCH, "取指令: pc = 0x%x data = 0x%x (压缩指令，PC+2)", 
                     fetched.pc, raw_inst);
-                print_stage_activity(msg, state.cycle_count, fetched.pc);
             } else {
                 fetched.is_compressed = false;
                 state.pc += 4;
-                std::string msg = fmt::format("取指令: pc = 0x{:x} data = 0x{:x} (正常指令，PC+4)", 
+                dprintf(FETCH, "取指令: pc = 0x%x data = 0x%x (正常指令，PC+4)", 
                     fetched.pc, raw_inst);
-                print_stage_activity(msg, state.cycle_count, fetched.pc);
             }
             
             state.fetch_buffer.push(fetched);
             
         } catch (const MemoryException& e) {
             // 取指失败，停止取指但等待流水线清空
-            print_stage_activity("取指失败，停止取指但等待流水线清空: " + std::string(e.what()), 
-                                state.cycle_count, state.pc);
+            dprintf(FETCH, "取指失败，停止取指但等待流水线清空: %s", e.what());
             
             // 检查是否还有未完成的指令
             if (state.reorder_buffer->is_empty() && 
                 state.fetch_buffer.empty() && 
                 state.cdb_queue.empty()) {
                 state.halted = true;
-                print_stage_activity("流水线已清空，程序结束", state.cycle_count, state.pc);
+                dprintf(FETCH, "流水线已清空，程序结束");
             }
             return;
         }
     } else {
-        print_stage_activity("取指缓冲区已满(大小=" + std::to_string(state.fetch_buffer.size()) + 
-                           ")，跳过取指", state.cycle_count, state.pc);
+        dprintf(FETCH, "取指缓冲区已满(大小=%zu)，跳过取指", state.fetch_buffer.size());
     }
     
     // 每个周期结束时检查是否应该停机
@@ -102,7 +95,7 @@ void FetchStage::execute(CPUState& state) {
         
         if (!has_busy_units && state.reorder_buffer->is_empty()) {
             state.halted = true;
-            print_stage_activity("所有指令完成，CPU停机", state.cycle_count, state.pc);
+            dprintf(FETCH, "所有指令完成，CPU停机");
         }
     }
 }
@@ -110,17 +103,12 @@ void FetchStage::execute(CPUState& state) {
 void FetchStage::flush() {
     // 刷新取指阶段状态（例如：清空预取缓冲区等）
     // 在简单实现中，取指缓冲区的清空由主控制器处理
-    print_stage_activity("取指阶段已刷新", 0, 0);
+    dprintf(FETCH, "取指阶段已刷新");
 }
 
 void FetchStage::reset() {
     // 重置取指阶段到初始状态
-    print_stage_activity("取指阶段已重置", 0, 0);
-}
-
-void FetchStage::print_stage_activity(const std::string& activity, uint64_t cycle, uint32_t pc) {
-    auto& debugManager = DebugManager::getInstance();
-    debugManager.printf(get_stage_name(), activity, cycle, pc);
+    dprintf(FETCH, "取指阶段已重置");
 }
 
 } // namespace riscv 

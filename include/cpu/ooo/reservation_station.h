@@ -6,6 +6,39 @@
 
 namespace riscv {
 
+// 保留站表项
+struct ReservationStationEntry {
+    DecodedInstruction instruction;
+    
+    // 指令跟踪
+    uint64_t instruction_id;    // 全局指令序号
+    
+    // 操作数信息
+    bool src1_ready;
+    bool src2_ready;
+    uint32_t src1_value;
+    uint32_t src2_value;
+    PhysRegNum src1_reg;
+    PhysRegNum src2_reg;
+    
+    // 目标寄存器
+    PhysRegNum dest_reg;
+    
+    // 关联的ROB表项
+    ROBEntry rob_entry;
+    
+    // 是否有效
+    bool valid;
+    
+    // 指令地址
+    uint32_t pc;
+    
+    ReservationStationEntry() : instruction_id(0), src1_ready(false), src2_ready(false), 
+                               src1_value(0), src2_value(0), 
+                               src1_reg(0), src2_reg(0), dest_reg(0),
+                               rob_entry(0), valid(false), pc(0) {}
+};
+
 /**
  * 保留站调度单元
  * 

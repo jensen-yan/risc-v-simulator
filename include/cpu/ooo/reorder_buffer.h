@@ -7,6 +7,49 @@
 
 namespace riscv {
 
+// 重排序缓冲表项
+struct ReorderBufferEntry {
+    DecodedInstruction instruction;
+    
+    // 指令跟踪
+    uint64_t instruction_id;    // 全局指令序号
+    
+    // 指令状态
+    enum class State {
+        ALLOCATED,   // 已分配到ROB，等待发射
+        ISSUED,      // 已发射到保留站，等待调度
+        EXECUTING,   // 正在执行
+        COMPLETED,   // 执行完成
+        RETIRED      // 已退休
+    } state;
+    
+    // 结果信息
+    uint32_t result;
+    bool result_ready;
+    
+    // 目标寄存器
+    RegNum logical_dest;    // 逻辑寄存器
+    PhysRegNum physical_dest;  // 物理寄存器
+    
+    // 异常信息
+    bool has_exception;
+    std::string exception_msg;
+    
+    // 指令地址
+    uint32_t pc;
+    
+    // 跳转指令相关（is_jump=true表示此指令提交时需要改变PC）
+    bool is_jump;           // 是否需要跳转（包括条件分支taken和无条件跳转）
+    uint32_t jump_target;   // 跳转目标地址
+    
+    // 是否有效
+    bool valid;
+    
+    ReorderBufferEntry() : instruction_id(0), state(State::ALLOCATED), result(0), result_ready(false),
+                          logical_dest(0), physical_dest(0), has_exception(false),
+                          pc(0), is_jump(false), jump_target(0), valid(false) {}
+};
+
 /**
  * 重排序缓冲单元(Reorder Buffer)
  * 

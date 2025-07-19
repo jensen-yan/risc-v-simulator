@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "cpu/ooo/ooo_types.h"
+#include "cpu/ooo/store_buffer.h"
 #include "common/types.h"
 
 using namespace riscv;

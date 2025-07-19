@@ -6,6 +6,23 @@
 
 namespace riscv {
 
+// 物理寄存器状态
+struct PhysicalRegister {
+    uint32_t value;
+    bool ready;             // 是否准备好
+    ROBEntry producer_rob;  // 产生这个值的ROB表项
+    
+    PhysicalRegister() : value(0), ready(true), producer_rob(0) {}
+};
+
+// 重命名表项
+struct RenameEntry {
+    PhysRegNum physical_reg;
+    bool valid;
+    
+    RenameEntry() : physical_reg(0), valid(false) {}
+};
+
 /**
  * 寄存器重命名单元
  * 

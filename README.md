@@ -79,6 +79,12 @@ make -j
 
 ## 开发说明
 
+需要安装gtest 库，用于运行单元测试。
+
+```bash
+sudo apt-get install libgtest-dev
+```
+
 本项目遵循测试驱动开发（TDD）实践。每条指令都有对应的单元测试。
 
 python3 run_tests.py

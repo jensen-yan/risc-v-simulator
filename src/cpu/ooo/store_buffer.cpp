@@ -1,10 +1,16 @@
-#include "cpu/ooo/ooo_types.h"
+#include "cpu/ooo/store_buffer.h"
 #include "common/debug_types.h"
 #include "common/types.h"
 #include <iostream>
 #include <iomanip>
 
 namespace riscv {
+
+StoreBuffer::StoreBuffer() : next_allocate_index(0) {
+    for (auto& entry : entries) {
+        entry.valid = false;
+    }
+}
 
 void StoreBuffer::add_store(uint32_t address, uint32_t value, uint8_t size, uint64_t instruction_id, uint32_t pc) {
     // 找到下一个可用的条目（可能覆盖旧条目）

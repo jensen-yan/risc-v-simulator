@@ -6,6 +6,7 @@
 #include "cpu/ooo/register_rename.h"
 #include "cpu/ooo/reservation_station.h"
 #include "cpu/ooo/reorder_buffer.h"
+#include "cpu/ooo/store_buffer.h"
 #include "cpu/ooo/ooo_types.h"
 #include "system/syscall_handler.h"
 #include "common/cpu_interface.h"

@@ -27,18 +27,17 @@ enum class ExecutionUnitType {
     STORE       // 存储单元
 };
 
-// 公共数据总线项
+// 前向声明
+class DynamicInst;
+using DynamicInstPtr = std::shared_ptr<DynamicInst>;
+
+// 公共数据总线项 - 使用DynamicInst指针保持数据一致性
 struct CommonDataBusEntry {
-    PhysRegNum dest_reg;
-    uint32_t value;
-    ROBEntry rob_entry;
+    DynamicInstPtr instruction;    // 直接使用DynamicInst指针作为数据源
     bool valid;
-    // 跳转指令相关（从执行单元传递到ROB的控制流信息）
-    bool is_jump;           // 是否需要跳转
-    uint32_t jump_target;   // 跳转目标地址
     
-    CommonDataBusEntry() : dest_reg(0), value(0), rob_entry(0), valid(false), 
-                          is_jump(false), jump_target(0) {}
+    CommonDataBusEntry() : instruction(nullptr), valid(false) {}
+    explicit CommonDataBusEntry(DynamicInstPtr inst) : instruction(inst), valid(true) {}
 };
 
 // 分支预测结果

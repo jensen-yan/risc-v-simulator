@@ -14,25 +14,38 @@ void WritebackStage::execute(CPUState& state) {
         CommonDataBusEntry cdb_entry = state.cdb_queue.front();
         state.cdb_queue.pop();
         
+        // 检查指令是否有效
+        if (!cdb_entry.instruction) {
+            dprintf(WRITEBACK, "CDB条目无效，跳过处理");
+            continue;
+        }
+        
+        auto instruction = cdb_entry.instruction;
+        auto rob_entry = instruction->get_rob_entry();
+        auto phys_dest = instruction->get_physical_dest();
+        auto result = instruction->get_result();
+        
         dprintf(WRITEBACK, "CDB writeback: ROB[%d] p%d = 0x%x",
-                                        cdb_entry.rob_entry, 
-                                        static_cast<int>(cdb_entry.dest_reg), 
-                                        cdb_entry.value);
+                rob_entry, static_cast<int>(phys_dest), result);
         
         // 更新保留站中的操作数
         state.reservation_station->update_operands(cdb_entry);
         
         // 更新寄存器重命名映射
-        state.register_rename->update_physical_register(cdb_entry.dest_reg, cdb_entry.value, cdb_entry.rob_entry);
+        state.register_rename->update_physical_register(phys_dest, result, rob_entry);
         
-        // 更新ROB表项
-        auto rob_instruction = state.reorder_buffer->get_entry(cdb_entry.rob_entry);
-        if (rob_instruction) {
-            state.reorder_buffer->update_entry(rob_instruction, cdb_entry.value, false, "",
-                                         cdb_entry.is_jump, cdb_entry.jump_target);
+        // 更新ROB表项（使用DynamicInst指针直接验证）
+        auto rob_instruction = state.reorder_buffer->get_entry(rob_entry);
+        if (rob_instruction && rob_instruction == instruction) {
+            // 指令指针匹配，安全更新
+            state.reorder_buffer->update_entry(instruction, result, false, "",
+                                         instruction->is_jump(), instruction->get_jump_target());
+        } else {
+            dprintf(WRITEBACK, "CDB条目过期，跳过更新: ROB[%d] 当前指令=%p, CDB指令=%p",
+                   rob_entry, rob_instruction.get(), instruction.get());
         }
         
-        dprintf(WRITEBACK, "ROB[%d] status updated to COMPLETED", cdb_entry.rob_entry);
+        dprintf(WRITEBACK, "ROB[%d] status updated to COMPLETED", rob_entry);
     }
     
     if (state.cdb_queue.empty()) {

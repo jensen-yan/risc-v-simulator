@@ -130,7 +130,10 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
 }
 
 void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry) {
-    if (!cdb_entry.valid) return;
+    if (!cdb_entry.valid || !cdb_entry.instruction) return;
+    
+    auto phys_dest = cdb_entry.instruction->get_physical_dest();
+    auto result = cdb_entry.instruction->get_result();
     
     // 遍历所有保留站表项，更新等待该物理寄存器的操作数
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
@@ -138,15 +141,15 @@ void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry) {
             DynamicInstPtr inst = rs_entries[i];
             
             // 检查源操作数1
-            if (!inst->is_src1_ready() && inst->get_physical_src1() == cdb_entry.dest_reg) {
-                inst->set_src1_ready(true, cdb_entry.value);
-                dprintf(RS, "RS%d 源操作数1就绪: p%d = 0x%x", i, cdb_entry.dest_reg, cdb_entry.value);
+            if (!inst->is_src1_ready() && inst->get_physical_src1() == phys_dest) {
+                inst->set_src1_ready(true, result);
+                dprintf(RS, "RS%d 源操作数1就绪: p%d = 0x%x", i, phys_dest, result);
             }
             
             // 检查源操作数2
-            if (!inst->is_src2_ready() && inst->get_physical_src2() == cdb_entry.dest_reg) {
-                inst->set_src2_ready(true, cdb_entry.value);
-                dprintf(RS, "RS%d 源操作数2就绪: p%d = 0x%x", i, cdb_entry.dest_reg, cdb_entry.value);
+            if (!inst->is_src2_ready() && inst->get_physical_src2() == phys_dest) {
+                inst->set_src2_ready(true, result);
+                dprintf(RS, "RS%d 源操作数2就绪: p%d = 0x%x", i, phys_dest, result);
             }
         }
     }
@@ -357,13 +360,6 @@ RSEntry ReservationStation::select_ready_instruction() const {
         if (rs_entries[i]) {
             bool ready = is_instruction_ready(rs_entries[i]);
             bool is_executing = (rs_entries[i]->get_status() == DynamicInst::Status::EXECUTING);
-            
-            dprintf(RS, "RS[%d] Inst#%lu PC=0x%x ready=%s src1_ready=%s src2_ready=%s status=%s", 
-                   i, rs_entries[i]->get_instruction_id(), rs_entries[i]->get_pc(),
-                   ready ? "是" : "否",
-                   rs_entries[i]->is_src1_ready() ? "是" : "否",
-                   rs_entries[i]->is_src2_ready() ? "是" : "否",
-                   rs_entries[i]->status_to_string(rs_entries[i]->get_status()));
             
             // 只调度准备好且没有在执行的指令
             if (ready && !is_executing) {

@@ -247,14 +247,12 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             dprintf(EXECUTE, "ALU%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
+                // 设置执行结果和跳转信息到DynamicInst
+                unit.instruction->set_result(unit.result);
+                unit.instruction->set_jump_info(unit.is_jump, unit.jump_target);
+                
                 // 执行完成，发送到CDB
-                CommonDataBusEntry cdb_entry;
-                cdb_entry.dest_reg = unit.instruction->get_physical_dest();
-                cdb_entry.value = unit.result;
-                cdb_entry.rob_entry = unit.instruction->get_rob_entry();
-                cdb_entry.valid = true;
-                cdb_entry.is_jump = unit.is_jump;
-                cdb_entry.jump_target = unit.jump_target;
+                CommonDataBusEntry cdb_entry(unit.instruction);
                 
                 state.cdb_queue.push(cdb_entry);
                 
@@ -287,14 +285,12 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             dprintf(EXECUTE, "BRANCH%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
+                // 设置执行结果和跳转信息到DynamicInst
+                unit.instruction->set_result(unit.result);
+                unit.instruction->set_jump_info(unit.is_jump, unit.jump_target);
+                
                 // 分支指令执行完成，需要发送完成信号到CDB
-                CommonDataBusEntry cdb_entry;
-                cdb_entry.dest_reg = unit.instruction->get_physical_dest();  // 对于分支指令通常为0
-                cdb_entry.value = unit.result;  // 对于分支指令通常为0
-                cdb_entry.rob_entry = unit.instruction->get_rob_entry();
-                cdb_entry.valid = true;
-                cdb_entry.is_jump = unit.is_jump;
-                cdb_entry.jump_target = unit.jump_target;
+                CommonDataBusEntry cdb_entry(unit.instruction);
                 state.cdb_queue.push(cdb_entry);
                 
                 const auto& inst_type = unit.instruction->get_decoded_info().type;
@@ -349,12 +345,11 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 // 尝试Store-to-Load Forwarding
                 bool used_forwarding = perform_load_execution(unit, state);
                 
+                // 设置执行结果到DynamicInst
+                unit.instruction->set_result(unit.result);
+                
                 // 加载指令完成，发送到CDB
-                CommonDataBusEntry cdb_entry;
-                cdb_entry.dest_reg = unit.instruction->get_physical_dest();
-                cdb_entry.value = unit.result;
-                cdb_entry.rob_entry = unit.instruction->get_rob_entry();
-                cdb_entry.valid = true;
+                CommonDataBusEntry cdb_entry(unit.instruction);
                 
                 state.cdb_queue.push(cdb_entry);
                 
@@ -362,6 +357,10 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                                            i, unit.instruction->get_instruction_id(),
                                            (used_forwarding ? "(使用Store转发)" : "(从内存读取)"),
                                            unit.result);
+                
+                // 清空对应的保留站条目
+                RSEntry rs_entry = unit.instruction->get_rs_entry();
+                state.reservation_station->release_entry(rs_entry);
                 
                 // 释放执行单元
                 unit.busy = false;
@@ -385,17 +384,20 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             dprintf(EXECUTE, "STORE%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
+                // 设置执行结果到DynamicInst（存储指令结果为0）
+                unit.instruction->set_result(0);
+                
                 // 存储指令完成，不需要写回结果，但需要更新ROB状态
-                CommonDataBusEntry cdb_entry;
-                cdb_entry.dest_reg = 0; // 存储指令没有目标寄存器
-                cdb_entry.value = 0;
-                cdb_entry.rob_entry = unit.instruction->get_rob_entry();
-                cdb_entry.valid = true;
+                CommonDataBusEntry cdb_entry(unit.instruction);
                 
                 state.cdb_queue.push(cdb_entry);
                 
                 dprintf(EXECUTE, "STORE%zu 执行完成，Inst#%lu 通知ROB完成", 
                                     i, unit.instruction->get_instruction_id());
+                
+                // 清空对应的保留站条目
+                RSEntry rs_entry = unit.instruction->get_rs_entry();
+                state.reservation_station->release_entry(rs_entry);
                 
                 // 释放执行单元
                 unit.busy = false;

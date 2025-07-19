@@ -135,11 +135,22 @@ TEST_F(ReservationStationTest, OperandDependency) {
     EXPECT_FALSE(dispatch_result.success) << "操作数未准备好时不应该调度";
     
     // 通过CDB更新操作数
-    CommonDataBusEntry cdb_entry;
-    cdb_entry.dest_reg = 32;  // 对应src1_reg
-    cdb_entry.value = 0xAABBCCDD;
-    cdb_entry.rob_entry = 1;
-    cdb_entry.valid = true;
+    // 创建一个模拟的DynamicInst来测试CDB更新
+    DecodedInstruction test_decoded;
+    test_decoded.type = InstructionType::R_TYPE;
+    test_decoded.opcode = Opcode::OP;
+    test_decoded.rd = 1;
+    test_decoded.rs1 = 2;
+    test_decoded.rs2 = 3;
+    test_decoded.funct3 = Funct3::ADD_SUB;
+    test_decoded.funct7 = Funct7::NORMAL;
+    test_decoded.imm = 0;
+    
+    auto mock_inst = std::make_shared<DynamicInst>(test_decoded, 0x1000, 999);
+    mock_inst->set_physical_dest(PhysRegNum(32));  // 对应src1_reg
+    mock_inst->set_result(0xAABBCCDD);
+    
+    CommonDataBusEntry cdb_entry(mock_inst);
     
     rs.update_operands(cdb_entry);
     

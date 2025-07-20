@@ -19,9 +19,10 @@ class DiffTest {
 public:
     /**
      * 构造函数
-     * @param memory 共享内存实例
+     * @param main_cpu 主CPU（乱序CPU）
+     * @param reference_cpu 参考CPU（顺序CPU）
      */
-    explicit DiffTest(std::shared_ptr<Memory> memory);
+    DiffTest(ICpuInterface* main_cpu, ICpuInterface* reference_cpu);
     ~DiffTest();
     
     // 禁用拷贝构造和赋值
@@ -88,11 +89,12 @@ private:
     void dumpState(ICpuInterface* ref_cpu, ICpuInterface* ooo_cpu);
     
     // 成员变量
-    std::unique_ptr<ICpuInterface> reference_cpu_;  // 参考CPU
-    bool enabled_;                                  // 是否启用
-    bool stop_on_mismatch_;                        // 发现不一致时是否停止
-    uint64_t comparison_count_;                    // 比较次数
-    uint64_t mismatch_count_;                      // 不一致次数
+    ICpuInterface* main_cpu_;       // 主CPU（乱序CPU）
+    ICpuInterface* reference_cpu_;  // 参考CPU（顺序CPU）
+    bool enabled_;                  // 是否启用
+    bool stop_on_mismatch_;        // 发现不一致时是否停止
+    uint64_t comparison_count_;    // 比较次数
+    uint64_t mismatch_count_;      // 不一致次数
 };
 
 } // namespace riscv 

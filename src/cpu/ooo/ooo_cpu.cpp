@@ -15,7 +15,7 @@
 
 namespace riscv {
 
-OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory) {
+OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory), difftest_(nullptr) {
     // 初始化CPUState
     cpu_state_.memory = memory_;
     cpu_state_.cpu_interface = this;  // 设置CPU接口引用，让Stage可以调用CPU方法
@@ -32,8 +32,7 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory) {
     cpu_state_.syscall_handler = std::make_unique<SyscallHandler>(memory_);
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
     
-    // 初始化DiffTest组件
-    difftest_ = std::make_unique<DiffTest>(memory_);
+    // DiffTest将由Simulator通过setDiffTest()方法设置
     
     // 创建流水线阶段
     fetch_stage_ = std::make_unique<FetchStage>();
@@ -43,7 +42,7 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory) {
     writeback_stage_ = std::make_unique<WritebackStage>();
     commit_stage_ = std::make_unique<CommitStage>();
     
-    std::cout << "乱序执行CPU初始化完成（新流水线设计）" << std::endl;
+    std::cout << "乱序执行CPU初始化完成（新流水线设计），DiffTest将由Simulator设置" << std::endl;
 }
 
 OutOfOrderCPU::~OutOfOrderCPU() = default;
@@ -92,7 +91,6 @@ void OutOfOrderCPU::run() {
 void OutOfOrderCPU::reset() {
     // 重置CPU状态
     cpu_state_.pc = 0;
-    cpu_state_.last_committed_pc = 0;
     cpu_state_.halted = false;
     cpu_state_.instruction_count = 0;
     cpu_state_.cycle_count = 0;
@@ -318,6 +316,11 @@ void OutOfOrderCPU::dumpPipelineState() const {
 }
 
 
+
+void OutOfOrderCPU::setDiffTest(DiffTest* difftest) {
+    difftest_ = difftest;
+    std::cout << "[OutOfOrderCPU] DiffTest已设置" << std::endl;
+}
 
 void OutOfOrderCPU::enableDiffTest(bool enable) {
     if (difftest_) {

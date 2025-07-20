@@ -51,7 +51,6 @@ struct ExecutionUnit {
 struct CPUState {
     // 基本CPU状态
     uint32_t pc;                    // 程序计数器（取指PC）
-    uint32_t last_committed_pc;     // 最近提交指令的PC（用于difftest）
     bool halted;                    // 停机标志
     uint64_t instruction_count;     // 指令计数器
     uint64_t cycle_count;          // 周期计数器

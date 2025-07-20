@@ -1,4 +1,6 @@
 #include "system/simulator.h"
+#include "system/difftest.h"
+#include "cpu/ooo/ooo_cpu.h"
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -9,7 +11,17 @@ Simulator::Simulator(size_t memorySize, CpuType cpuType)
     : memory_(std::make_shared<Memory>(memorySize)),
       cpu_(CpuFactory::createCpu(cpuType, memory_)),
       cpuType_(cpuType) {
+    
+    // 如果是乱序CPU，创建独立的参考内存和参考CPU用于DiffTest
+    if (cpuType == CpuType::OUT_OF_ORDER) {
+        reference_memory_ = std::make_shared<Memory>(memorySize);
+        reference_cpu_ = CpuFactory::createCpu(CpuType::IN_ORDER, reference_memory_);
+        
+        // DiffTest将在loadElfProgram中创建，因为需要两个CPU都加载相同的程序
+    }
 }
+
+Simulator::~Simulator() = default;
 
 bool Simulator::loadProgram(const std::string& filename) {
     try {
@@ -175,7 +187,7 @@ std::vector<uint8_t> Simulator::loadBinaryFile(const std::string& filename) {
 
 bool Simulator::loadElfProgram(const std::string& filename) {
     try {
-        // 加载ELF文件
+        // 加载ELF文件到主CPU内存
         ElfLoader::ElfInfo elfInfo = ElfLoader::loadElfFile(filename, memory_);
         
         if (!elfInfo.isValid) {
@@ -183,15 +195,42 @@ bool Simulator::loadElfProgram(const std::string& filename) {
             return false;
         }
 
-        // 重置CPU状态
+        // 重置主CPU状态
         cpu_->reset();
         
-        // 设置程序计数器为ELF入口点
+        // 设置主CPU的程序计数器为ELF入口点
         cpu_->setPC(elfInfo.entryPoint);
         
-        // 设置栈指针 - 栈从内存顶部开始向下增长
+        // 设置主CPU的栈指针 - 栈从内存顶部开始向下增长
         cpu_->setRegister(2, memory_->getSize() - 4); // sp
         cpu_->setRegister(8, memory_->getSize() - 4); // s0/fp
+        
+        // 如果是乱序CPU模式，同时加载ELF到参考CPU
+        if (cpuType_ == CpuType::OUT_OF_ORDER && reference_memory_ && reference_cpu_) {
+            // 加载相同的ELF文件到参考CPU内存
+            ElfLoader::ElfInfo refElfInfo = ElfLoader::loadElfFile(filename, reference_memory_);
+            
+            if (!refElfInfo.isValid) {
+                std::cerr << "参考CPU ELF加载失败: " << filename << std::endl;
+                return false;
+            }
+            
+            // 重置参考CPU状态
+            reference_cpu_->reset();
+            
+            // 设置参考CPU的程序计数器和栈指针
+            reference_cpu_->setPC(refElfInfo.entryPoint);
+            reference_cpu_->setRegister(2, reference_memory_->getSize() - 4); // sp
+            reference_cpu_->setRegister(8, reference_memory_->getSize() - 4); // s0/fp
+            
+            // 创建DiffTest组件，传入两个独立的CPU
+            difftest_ = std::make_unique<DiffTest>(cpu_.get(), reference_cpu_.get());
+            
+            // 将DiffTest设置到乱序CPU中
+            cpu_->setDiffTest(difftest_.get());
+            
+            std::cout << "DiffTest已初始化" << std::endl;
+        }
         
         std::cout << "ELF程序加载成功，入口点: 0x" << std::hex << elfInfo.entryPoint << std::dec << std::endl;
         return true;

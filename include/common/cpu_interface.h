@@ -48,6 +48,7 @@ public:
     virtual void dumpState() const = 0;
     
     // DiffTest功能（默认实现为空，只有OOO CPU需要实现）
+    virtual void setDiffTest(class DiffTest* difftest) {} // 设置DiffTest引用
     virtual void performDiffTestWithCommittedPC(uint32_t committed_pc) {}
     virtual bool isDiffTestEnabled() const { return false; }
 };

@@ -66,9 +66,6 @@ public:
     uint32_t getPC() const override { return cpu_state_.pc; }
     void setPC(uint32_t pc) override { cpu_state_.pc = pc; }
     
-    // 获取最近提交指令的PC（用于difftest）
-    uint32_t getCommittedPC() const { return cpu_state_.last_committed_pc; }
-    
     // 状态查询
     bool isHalted() const override { return cpu_state_.halted; }
     uint64_t getInstructionCount() const override { return cpu_state_.instruction_count; }
@@ -88,6 +85,7 @@ public:
     void dumpPipelineState() const;
     
     // DiffTest控制接口
+    void setDiffTest(class DiffTest* difftest);  // 由Simulator设置DiffTest引用
     void enableDiffTest(bool enable);
     bool isDiffTestEnabled() const override;
     void performDiffTestWithCommittedPC(uint32_t committed_pc) override;
@@ -107,8 +105,8 @@ private:
     std::shared_ptr<Memory> memory_;
     std::unique_ptr<SyscallHandler> syscall_handler_;
     
-    // DiffTest组件
-    std::unique_ptr<class DiffTest> difftest_;
+    // DiffTest组件（由Simulator管理，这里只保存引用）
+    class DiffTest* difftest_;
     
     // 调试辅助方法
     void print_stage_activity(const std::string& stage, const std::string& activity);

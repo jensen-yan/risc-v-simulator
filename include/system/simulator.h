@@ -6,6 +6,11 @@
 #include <string>
 #include <memory>
 
+// 前向声明
+namespace riscv {
+    class DiffTest;
+}
+
 namespace riscv {
 
 /**
@@ -15,7 +20,7 @@ namespace riscv {
 class Simulator {
 public:
     explicit Simulator(size_t memorySize = Memory::DEFAULT_SIZE, CpuType cpuType = CpuType::IN_ORDER);
-    ~Simulator() = default;
+    ~Simulator();
     
     // 禁用拷贝构造和赋值
     Simulator(const Simulator&) = delete;
@@ -63,9 +68,17 @@ public:
     ICpuInterface* getCpu() { return cpu_.get(); }
     
 private:
+    // 主CPU内存和CPU
     std::shared_ptr<Memory> memory_;
     std::unique_ptr<ICpuInterface> cpu_;
     CpuType cpuType_;
+    
+    // 参考CPU内存和CPU（仅乱序CPU模式下使用）
+    std::shared_ptr<Memory> reference_memory_;
+    std::unique_ptr<ICpuInterface> reference_cpu_;
+    
+    // DiffTest组件（仅乱序CPU模式下使用）
+    std::unique_ptr<DiffTest> difftest_;
     
     // 辅助方法
     std::vector<uint8_t> loadBinaryFile(const std::string& filename);

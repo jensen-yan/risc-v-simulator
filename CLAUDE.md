@@ -71,4 +71,10 @@ riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles -static
 riscv64-unknown-elf-objcopy -O binary test_simple.elf test_simple.bin
 ```
 
-[文件的其余内容保持不变]
+## 工作目录提醒
+
+- 请关注当前是否在build 目录下，编译运行需要在build 目录下，查找文件等要返回上级目录！
+
+## 调试记忆
+
+- 你当前可能再build 目录下，所以找不到函数和文件，查找文件请回到主目录！

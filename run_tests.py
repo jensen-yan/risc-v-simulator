@@ -12,6 +12,8 @@ import glob
 from pathlib import Path
 from typing import List, Tuple, Dict
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 class TestRunner:
     def __init__(self, simulator_path: str, riscv_tests_path: str):
@@ -23,6 +25,7 @@ class TestRunner:
             'timeout': [],
             'error': []
         }
+        self.lock = threading.Lock()  # 线程锁保护共享数据
         
     def find_test_files(self, test_pattern: str = "rv32ui-p-*") -> List[str]:
         """查找符合模式的测试文件"""
@@ -37,10 +40,9 @@ class TestRunner:
         
         return sorted(files)
     
-    def run_single_test(self, test_file: str, timeout: int = 10, ooo: bool = False) -> Tuple[str, str, int]:
-        """运行单个测试文件"""
+    def run_single_test(self, test_file: str, timeout: int = 10, ooo: bool = False) -> Tuple[str, str, int, float, str]:
+        """运行单个测试文件，返回状态、输出、返回码、执行时间和测试名"""
         test_name = os.path.basename(test_file)
-        print(f"运行测试: {test_name}...", end=' ', flush=True)
         
         try:
             # 构建模拟器命令
@@ -51,7 +53,6 @@ class TestRunner:
                 test_file
             ]
             if ooo:
-                print("测试OOO CPU")
                 cmd.append("--ooo")
             
             # 运行测试
@@ -63,6 +64,7 @@ class TestRunner:
                 timeout=timeout
             )
             end_time = time.time()
+            elapsed = end_time - start_time
             
             # 解析结果
             stdout = result.stdout
@@ -70,23 +72,18 @@ class TestRunner:
             
             # 检查是否通过
             if "=== 测试结果: PASS ===" in stdout:
-                print(f"✅ PASS ({end_time - start_time:.2f}s)")
-                return "passed", "", result.returncode
+                return "passed", "", result.returncode, elapsed, test_name
             elif "=== 测试结果: FAIL ===" in stdout:
-                print(f"❌ FAIL ({end_time - start_time:.2f}s)")
-                return "failed", stderr, result.returncode
+                return "failed", stderr, result.returncode, elapsed, test_name
             else:
-                print(f"⚠️  UNKNOWN ({end_time - start_time:.2f}s)")
-                return "error", f"未知结果:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}", result.returncode
+                return "error", f"未知结果:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}", result.returncode, elapsed, test_name
                 
         except subprocess.TimeoutExpired:
-            print(f"⏰ TIMEOUT ({timeout}s)")
-            return "timeout", f"测试超时 ({timeout}s)", -1
+            return "timeout", f"测试超时 ({timeout}s)", -1, timeout, test_name
         except Exception as e:
-            print(f"💥 ERROR")
-            return "error", f"执行错误: {str(e)}", -1
+            return "error", f"执行错误: {str(e)}", -1, 0.0, test_name
     
-    def run_test_suite(self, test_pattern: str = "rv32ui-p-*", timeout: int = 10, ooo: bool = False) -> Dict:
+    def run_test_suite(self, test_pattern: str = "rv32ui-p-*", timeout: int = 10, ooo: bool = False, max_workers: int = 0) -> Dict:
         """运行测试套件"""
         print(f"查找测试文件: {test_pattern}")
         test_files = self.find_test_files(test_pattern)
@@ -95,19 +92,63 @@ class TestRunner:
             print(f"❌ 未找到匹配的测试文件: {test_pattern}")
             return self.results
         
-        print(f"找到 {len(test_files)} 个测试文件\n")
+        print(f"找到 {len(test_files)} 个测试文件")
         
-        # 运行每个测试
-        for test_file in test_files:
-            test_name = os.path.basename(test_file)
-            status, output, returncode = self.run_single_test(test_file, timeout, ooo)
+        # 设置默认线程数
+        if max_workers <= 0:
+            max_workers = min(len(test_files), os.cpu_count() or 4)
+        
+        print(f"使用 {max_workers} 个线程并行运行测试...\n")
+        
+        if ooo:
+            print("测试模式: OOO CPU")
+        print("-" * 50)
+        
+        completed_count = 0
+        total_tests = len(test_files)
+        
+        # 使用线程池并行运行测试
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交所有任务
+            future_to_test = {executor.submit(self.run_single_test, test_file, timeout, ooo): test_file 
+                             for test_file in test_files}
             
-            self.results[status].append({
-                'name': test_name,
-                'file': test_file,
-                'output': output,
-                'returncode': returncode
-            })
+            # 处理完成的任务
+            for future in as_completed(future_to_test):
+                test_file = future_to_test[future]
+                try:
+                    status, output, returncode, elapsed, test_name = future.result()
+                    
+                    # 线程安全地更新结果
+                    with self.lock:
+                        self.results[status].append({
+                            'name': test_name,
+                            'file': test_file,
+                            'output': output,
+                            'returncode': returncode
+                        })
+                        completed_count += 1
+                    
+                    # 打印结果（线程安全）
+                    status_emoji = {
+                        'passed': '✅ PASS',
+                        'failed': '❌ FAIL', 
+                        'timeout': '⏰ TIMEOUT',
+                        'error': '💥 ERROR'
+                    }
+                    print(f"[{completed_count:2d}/{total_tests}] {test_name}: {status_emoji.get(status, '⚠️  UNKNOWN')} ({elapsed:.2f}s)")
+                    
+                except Exception as exc:
+                    test_name = os.path.basename(test_file)
+                    with self.lock:
+                        self.results['error'].append({
+                            'name': test_name,
+                            'file': test_file,
+                            'output': f'线程执行异常: {exc}',
+                            'returncode': -1
+                        })
+                        completed_count += 1
+                    print(f"[{completed_count:2d}/{total_tests}] {test_name}: 💥 ERROR (线程异常)")
         
         return self.results
     
@@ -186,7 +227,34 @@ class TestRunner:
                     f.write("\n")
 
 def main():
-    parser = argparse.ArgumentParser(description='RISC-V 模拟器批量测试工具')
+    # 可用的测试模式说明
+    pattern_help = """
+可用的测试模式 (pattern):
+  rv32ui-p-*     - 用户级整数指令 (基础)
+  rv32um-p-*     - 用户级乘除法指令 (M扩展)
+  rv32ua-p-*     - 用户级原子指令 (A扩展)  
+  rv32uf-p-*     - 用户级单精度浮点 (F扩展)
+  rv32ud-p-*     - 用户级双精度浮点 (D扩展)
+  rv32uc-p-*     - 用户级压缩指令 (C扩展)
+  rv32uzfh-p-*   - 用户级半精度浮点 (Zfh扩展)
+  rv32uzba-p-*   - 位操作地址生成 (Zba扩展)
+  rv32uzbb-p-*   - 位操作基础 (Zbb扩展)
+  rv32uzbc-p-*   - 位操作进位 (Zbc扩展)
+  rv32uzbs-p-*   - 位操作单一 (Zbs扩展)
+  rv32mi-p-*     - 机器级整数指令
+  rv32si-p-*     - 监督级指令
+  
+常用示例:
+  --pattern "rv32ui-p-*"      # 所有基础整数测试
+  --pattern "rv32ui-p-add*"   # 加法相关测试
+  --pattern "rv32u*-p-*"      # 所有用户级测试
+    """
+    
+    parser = argparse.ArgumentParser(
+        description='RISC-V 模拟器批量测试工具',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=pattern_help
+    )
     parser.add_argument('--simulator', '-s', 
                        default='./build/risc-v-sim',
                        help='模拟器可执行文件路径')
@@ -207,6 +275,9 @@ def main():
     parser.add_argument('--ooo',
                        action='store_true',
                        help='测试OOO CPU')
+    parser.add_argument('--workers', '-w',
+                       type=int, default=4,
+                       help='并行测试的线程数 (默认: 4核心，0表示自动检测)')
     
     args = parser.parse_args()
     
@@ -231,7 +302,7 @@ def main():
     
     # 运行测试
     runner = TestRunner(args.simulator, args.tests_dir)
-    results = runner.run_test_suite(args.pattern, args.timeout, args.ooo)
+    results = runner.run_test_suite(args.pattern, args.timeout, args.ooo, args.workers)
     
     # 打印摘要
     runner.print_summary()

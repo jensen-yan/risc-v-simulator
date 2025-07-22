@@ -113,14 +113,14 @@ void CPU::reset() {
     instruction_count_ = 0;
 }
 
-uint32_t CPU::getRegister(RegNum reg) const {
+uint64_t CPU::getRegister(RegNum reg) const {
     if (reg >= NUM_REGISTERS) {
         throw SimulatorException("无效的寄存器编号: " + std::to_string(reg));
     }
     return registers_[reg];
 }
 
-void CPU::setRegister(RegNum reg, uint32_t value) {
+void CPU::setRegister(RegNum reg, uint64_t value) {
     if (reg >= NUM_REGISTERS) {
         throw SimulatorException("无效的寄存器编号: " + std::to_string(reg));
     }
@@ -183,20 +183,26 @@ void CPU::dumpState() const {
 }
 
 void CPU::executeImmediateOperations(const DecodedInstruction& inst) {
-    uint32_t rs1_val = getRegister(inst.rs1);
-    uint32_t result = InstructionExecutor::executeImmediateOperation(inst, rs1_val);
+    uint64_t rs1_val = getRegister(inst.rs1);
+    uint64_t result = InstructionExecutor::executeImmediateOperation(inst, rs1_val);
+    setRegister(inst.rd, result);
+}
+
+void CPU::executeImmediateOperations32(const DecodedInstruction& inst) {
+    uint64_t rs1_val = getRegister(inst.rs1);
+    uint64_t result = InstructionExecutor::executeImmediateOperation32(inst, rs1_val);
     setRegister(inst.rd, result);
 }
 
 void CPU::executeLoadOperations(const DecodedInstruction& inst) {
-    uint32_t addr = getRegister(inst.rs1) + inst.imm;
-    uint32_t value = InstructionExecutor::loadFromMemory(memory_, addr, inst.funct3);
+    uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+    uint64_t value = InstructionExecutor::loadFromMemory(memory_, addr, inst.funct3);
     setRegister(inst.rd, value);
 }
 
 void CPU::executeJALR(const DecodedInstruction& inst) {
-    uint32_t target = InstructionExecutor::calculateJumpAndLinkTarget(inst, pc_, getRegister(inst.rs1));
-    uint32_t return_addr = pc_ + (inst.is_compressed ? 2 : 4); // 根据指令长度确定返回地址
+    uint64_t target = InstructionExecutor::calculateJumpAndLinkTarget(inst, pc_, getRegister(inst.rs1));
+    uint64_t return_addr = pc_ + (inst.is_compressed ? 2 : 4); // 根据指令长度确定返回地址
     setRegister(inst.rd, return_addr);
     pc_ = target;
 }
@@ -214,9 +220,19 @@ void CPU::executeRType(const DecodedInstruction& inst) {
         return;
     }
     
-    uint32_t rs1_val = getRegister(inst.rs1);
-    uint32_t rs2_val = getRegister(inst.rs2);
-    uint32_t result = InstructionExecutor::executeRegisterOperation(inst, rs1_val, rs2_val);
+    uint64_t rs1_val = getRegister(inst.rs1);
+    uint64_t rs2_val = getRegister(inst.rs2);
+    uint64_t result;
+    
+    if (inst.opcode == Opcode::OP) {
+        result = InstructionExecutor::executeRegisterOperation(inst, rs1_val, rs2_val);
+    } else if (inst.opcode == Opcode::OP_32) {
+        // RV64I: 32位算术运算
+        result = InstructionExecutor::executeRegisterOperation32(inst, rs1_val, rs2_val);
+    } else {
+        throw IllegalInstructionException("不支持的R-type指令");
+    }
+    
     setRegister(inst.rd, result);
     incrementPC();
 }
@@ -225,6 +241,11 @@ void CPU::executeIType(const DecodedInstruction& inst) {
     switch (inst.opcode) {
         case Opcode::OP_IMM:
             executeImmediateOperations(inst);
+            incrementPC();
+            break;
+        case Opcode::OP_IMM_32:
+            // RV64I: 32位立即数运算
+            executeImmediateOperations32(inst);
             incrementPC();
             break;
         case Opcode::LOAD:
@@ -245,8 +266,8 @@ void CPU::executeIType(const DecodedInstruction& inst) {
 
 void CPU::executeSType(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::STORE) {
-        uint32_t addr = getRegister(inst.rs1) + inst.imm;
-        uint32_t value = getRegister(inst.rs2);
+        uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+        uint64_t value = getRegister(inst.rs2);
         InstructionExecutor::storeToMemory(memory_, addr, value, inst.funct3);
         incrementPC();
     } else {
@@ -256,13 +277,13 @@ void CPU::executeSType(const DecodedInstruction& inst) {
 
 void CPU::executeBType(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::BRANCH) {
-        uint32_t rs1_val = getRegister(inst.rs1);
-        uint32_t rs2_val = getRegister(inst.rs2);
+        uint64_t rs1_val = getRegister(inst.rs1);
+        uint64_t rs2_val = getRegister(inst.rs2);
         bool branch_taken = InstructionExecutor::evaluateBranchCondition(inst, rs1_val, rs2_val);
         
         if (branch_taken) {
             // 跳转到 PC + 符号扩展的立即数
-            pc_ = pc_ + inst.imm;
+            pc_ = pc_ + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
         } else {
             // 不跳转，正常递增PC
             incrementPC();
@@ -273,7 +294,7 @@ void CPU::executeBType(const DecodedInstruction& inst) {
 }
 
 void CPU::executeUType(const DecodedInstruction& inst) {
-    uint32_t result = InstructionExecutor::executeUpperImmediate(inst, pc_);
+    uint64_t result = InstructionExecutor::executeUpperImmediate(inst, pc_);
     setRegister(inst.rd, result);
     incrementPC();
 }
@@ -344,10 +365,10 @@ int32_t CPU::signExtend(uint32_t value, int bits) const {
 }
 
 void CPU::executeMExtension(const DecodedInstruction& inst) {
-    uint32_t rs1_val = getRegister(inst.rs1);
-    uint32_t rs2_val = getRegister(inst.rs2);
+    uint64_t rs1_val = getRegister(inst.rs1);
+    uint64_t rs2_val = getRegister(inst.rs2);
     
-    uint32_t result = InstructionExecutor::executeMExtension(inst, rs1_val, rs2_val);
+    uint64_t result = InstructionExecutor::executeMExtension(inst, rs1_val, rs2_val);
     setRegister(inst.rd, result);
     
     incrementPC();

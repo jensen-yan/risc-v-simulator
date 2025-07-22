@@ -127,8 +127,10 @@ InstructionType Decoder::determineType(Opcode opcode) {
     switch (opcode) {
         case Opcode::OP:
         case Opcode::OP_FP:
+        case Opcode::OP_32:      // RV64I: 32位算术运算
             return InstructionType::R_TYPE;
         case Opcode::OP_IMM:
+        case Opcode::OP_IMM_32:  // RV64I: 32位立即数运算
         case Opcode::LOAD:
         case Opcode::JALR:
         case Opcode::MISC_MEM:

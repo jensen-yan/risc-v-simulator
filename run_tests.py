@@ -54,6 +54,10 @@ class TestRunner:
             ]
             if ooo:
                 cmd.append("--ooo")
+            else:
+                cmd.append("--in-order")
+
+            print(f"cmd: {' '.join(cmd)}")
             
             # 运行测试
             start_time = time.time()

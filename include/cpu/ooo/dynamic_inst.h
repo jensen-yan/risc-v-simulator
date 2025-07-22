@@ -52,9 +52,9 @@ public:
     struct BranchInfo {
         bool is_branch;                        // 是否为分支指令
         bool predicted_taken;                  // 预测是否跳转
-        uint32_t predicted_target;             // 预测跳转目标
+        uint64_t predicted_target;             // 预测跳转目标
         bool actual_taken;                     // 实际是否跳转
-        uint32_t actual_target;                // 实际跳转目标
+        uint64_t actual_target;                // 实际跳转目标
         bool prediction_correct;               // 预测是否正确
         
         BranchInfo() : is_branch(false), predicted_taken(false), 
@@ -67,8 +67,8 @@ public:
         bool is_memory_op;                     // 是否为内存操作
         bool is_load;                          // 是否为加载指令
         bool is_store;                         // 是否为存储指令
-        uint32_t memory_address;               // 内存地址
-        uint32_t memory_value;                 // 内存值
+        uint64_t memory_address;               // 内存地址
+        uint64_t memory_value;                 // 内存值
         uint8_t memory_size;                   // 访问大小（字节）
         bool address_ready;                    // 地址是否准备好
         bool store_forwarded;                  // 是否通过Store-to-Load转发
@@ -82,7 +82,7 @@ private:
     // ========== 核心指令信息 ==========
     DecodedInstruction decoded_info_;          // 解码后的指令信息（只存储一份）
     uint64_t instruction_id_;                  // 全局唯一指令序号
-    uint32_t pc_;                             // 程序计数器
+    uint64_t pc_;                             // 程序计数器
     Status status_;                           // 指令当前状态
 
     // ========== 寄存器重命名信息 ==========
@@ -96,11 +96,11 @@ private:
     // ========== 操作数状态 ==========
     bool src1_ready_;                         // 源操作数1是否准备好
     bool src2_ready_;                         // 源操作数2是否准备好  
-    uint32_t src1_value_;                     // 源操作数1的值
-    uint32_t src2_value_;                     // 源操作数2的值
+    uint64_t src1_value_;                     // 源操作数1的值
+    uint64_t src2_value_;                     // 源操作数2的值
 
     // ========== 执行结果 ==========
-    uint32_t result_;                         // 执行结果
+    uint64_t result_;                         // 执行结果
     bool result_ready_;                       // 结果是否准备好
     bool has_exception_;                      // 是否有异常
     std::string exception_msg_;               // 异常信息
@@ -111,7 +111,7 @@ private:
 
     // ========== 跳转控制相关 ==========
     bool is_jump_;                            // 是否需要跳转
-    uint32_t jump_target_;                    // 跳转目标地址
+    uint64_t jump_target_;                    // 跳转目标地址
 
     // ========== 扩展信息（可选，支持未来功能） ==========
     std::optional<ExecutionInfo> exec_info_;  // 执行相关扩展信息
@@ -129,7 +129,7 @@ private:
 public:
     // ========== 构造函数和析构函数 ==========
     DynamicInst();
-    explicit DynamicInst(const DecodedInstruction& decoded_info, uint32_t pc, uint64_t instruction_id);
+    explicit DynamicInst(const DecodedInstruction& decoded_info, uint64_t pc, uint64_t instruction_id);
     ~DynamicInst() = default;
 
     // 禁用拷贝构造和赋值（使用shared_ptr管理）
@@ -143,7 +143,7 @@ public:
     // ========== 基础信息访问接口 ==========
     const DecodedInstruction& get_decoded_info() const { return decoded_info_; }
     uint64_t get_instruction_id() const { return instruction_id_; }
-    uint32_t get_pc() const { return pc_; }
+    uint64_t get_pc() const { return pc_; }
     Status get_status() const { return status_; }
     void set_status(Status status) { status_ = status; }
 
@@ -164,22 +164,22 @@ public:
     bool is_src2_ready() const { return src2_ready_; }
     bool is_ready_to_execute() const { return src1_ready_ && src2_ready_; }
     
-    uint32_t get_src1_value() const { return src1_value_; }
-    uint32_t get_src2_value() const { return src2_value_; }
+    uint64_t get_src1_value() const { return src1_value_; }
+    uint64_t get_src2_value() const { return src2_value_; }
     
-    void set_src1_ready(bool ready, uint32_t value = 0) { 
+    void set_src1_ready(bool ready, uint64_t value = 0) { 
         src1_ready_ = ready; 
         if (ready) src1_value_ = value; 
     }
-    void set_src2_ready(bool ready, uint32_t value = 0) { 
+    void set_src2_ready(bool ready, uint64_t value = 0) { 
         src2_ready_ = ready; 
         if (ready) src2_value_ = value; 
     }
 
     // ========== 执行结果接口 ==========
-    uint32_t get_result() const { return result_; }
+    uint64_t get_result() const { return result_; }
     bool is_result_ready() const { return result_ready_; }
-    void set_result(uint32_t result) { 
+    void set_result(uint64_t result) { 
         result_ = result; 
         result_ready_ = true; 
     }
@@ -205,8 +205,8 @@ public:
 
     // ========== 跳转控制接口 ==========
     bool is_jump() const { return is_jump_; }
-    uint32_t get_jump_target() const { return jump_target_; }
-    void set_jump_info(bool is_jump, uint32_t target = 0);
+    uint64_t get_jump_target() const { return jump_target_; }
+    void set_jump_info(bool is_jump, uint64_t target = 0);
 
     // ========== 扩展信息接口 ==========
     ExecutionInfo& get_execution_info() { 
@@ -292,6 +292,6 @@ using ConstDynamicInstPtr = std::shared_ptr<const DynamicInst>;
 
 // 工厂函数
 DynamicInstPtr create_dynamic_inst(const DecodedInstruction& decoded_info, 
-                                  uint32_t pc, uint64_t instruction_id);
+                                  uint64_t pc, uint64_t instruction_id);
 
 } // namespace riscv

@@ -93,8 +93,8 @@ bool ElfLoader::validateElfHeader(const std::vector<uint8_t>& data) {
         return false;
     }
 
-    // 检查32位
-    if (data[4] != ELFCLASS32) {
+    // 检查64位
+    if (data[4] != ELFCLASS64) {
         return false;
     }
 
@@ -127,7 +127,7 @@ Address ElfLoader::getEntryPoint(const std::vector<uint8_t>& data) {
     if (data.size() < sizeof(ElfHeader)) {
         return 0;
     }
-    return read32(data, 24);  // e_entry字段偏移
+    return read64(data, 24);  // e_entry字段偏移
 }
 
 std::vector<uint8_t> ElfLoader::loadFile(const std::string& filename) {
@@ -163,16 +163,16 @@ ElfLoader::ElfHeader ElfLoader::parseElfHeader(const std::vector<uint8_t>& data)
     header.e_type = read16(data, 16);
     header.e_machine = read16(data, 18);
     header.e_version = read32(data, 20);
-    header.e_entry = read32(data, 24);
-    header.e_phoff = read32(data, 28);
-    header.e_shoff = read32(data, 32);
-    header.e_flags = read32(data, 36);
-    header.e_ehsize = read16(data, 40);
-    header.e_phentsize = read16(data, 42);
-    header.e_phnum = read16(data, 44);
-    header.e_shentsize = read16(data, 46);
-    header.e_shnum = read16(data, 48);
-    header.e_shstrndx = read16(data, 50);
+    header.e_entry = read64(data, 24);    // 64位入口点
+    header.e_phoff = read64(data, 32);    // 64位程序头偏移
+    header.e_shoff = read64(data, 40);    // 64位节头偏移
+    header.e_flags = read32(data, 48);
+    header.e_ehsize = read16(data, 52);
+    header.e_phentsize = read16(data, 54);
+    header.e_phnum = read16(data, 56);
+    header.e_shentsize = read16(data, 58);
+    header.e_shnum = read16(data, 60);
+    header.e_shstrndx = read16(data, 62);
 
     return header;
 }
@@ -181,15 +181,31 @@ ElfLoader::ProgramHeader ElfLoader::parseProgramHeader(const std::vector<uint8_t
     ProgramHeader ph;
     
     ph.p_type = read32(data, offset + 0);
-    ph.p_offset = read32(data, offset + 4);
-    ph.p_vaddr = read32(data, offset + 8);
-    ph.p_paddr = read32(data, offset + 12);
-    ph.p_filesz = read32(data, offset + 16);
-    ph.p_memsz = read32(data, offset + 20);
-    ph.p_flags = read32(data, offset + 24);
-    ph.p_align = read32(data, offset + 28);
+    ph.p_flags = read32(data, offset + 4);    // 64位ELF中flags在第二个字段
+    ph.p_offset = read64(data, offset + 8);   // 64位文件偏移
+    ph.p_vaddr = read64(data, offset + 16);   // 64位虚拟地址
+    ph.p_paddr = read64(data, offset + 24);   // 64位物理地址
+    ph.p_filesz = read64(data, offset + 32);  // 64位文件大小
+    ph.p_memsz = read64(data, offset + 40);   // 64位内存大小
+    ph.p_align = read64(data, offset + 48);   // 64位对齐
 
     return ph;
+}
+
+uint64_t ElfLoader::read64(const std::vector<uint8_t>& data, size_t offset) {
+    if (offset + 8 > data.size()) {
+        throw SimulatorException("读取越界");
+    }
+    
+    // 小端字节序
+    return static_cast<uint64_t>(data[offset]) |
+           (static_cast<uint64_t>(data[offset + 1]) << 8) |
+           (static_cast<uint64_t>(data[offset + 2]) << 16) |
+           (static_cast<uint64_t>(data[offset + 3]) << 24) |
+           (static_cast<uint64_t>(data[offset + 4]) << 32) |
+           (static_cast<uint64_t>(data[offset + 5]) << 40) |
+           (static_cast<uint64_t>(data[offset + 6]) << 48) |
+           (static_cast<uint64_t>(data[offset + 7]) << 56);
 }
 
 uint32_t ElfLoader::read32(const std::vector<uint8_t>& data, size_t offset) {

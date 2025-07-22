@@ -34,8 +34,8 @@ public:
     void reset() override;                   // 重置CPU状态
     
     // 寄存器访问
-    uint32_t getRegister(RegNum reg) const override;
-    void setRegister(RegNum reg, uint32_t value) override;
+    uint64_t getRegister(RegNum reg) const override;
+    void setRegister(RegNum reg, uint64_t value) override;
     
     // 浮点寄存器访问
     uint32_t getFPRegister(RegNum reg) const override;
@@ -44,8 +44,8 @@ public:
     void setFPRegisterFloat(RegNum reg, float value) override;
     
     // 程序计数器
-    uint32_t getPC() const override { return pc_; }
-    void setPC(uint32_t pc) override { pc_ = pc; }
+    uint64_t getPC() const override { return pc_; }
+    void setPC(uint64_t pc) override { pc_ = pc; }
     
     // 状态查询
     bool isHalted() const override { return halted_; }
@@ -65,9 +65,9 @@ private:
     std::unique_ptr<SyscallHandler> syscall_handler_;
     
     // CPU 状态
-    std::array<uint32_t, NUM_REGISTERS> registers_;
+    std::array<uint64_t, NUM_REGISTERS> registers_;
     std::array<uint32_t, NUM_FP_REGISTERS> fp_registers_;
-    uint32_t pc_;                   // 程序计数器
+    uint64_t pc_;                   // 程序计数器
     bool halted_;                   // 停机标志
     uint64_t instruction_count_;    // 指令计数器
     uint32_t enabled_extensions_;   // 启用的扩展
@@ -88,6 +88,7 @@ private:
     
     // I-Type指令子方法
     void executeImmediateOperations(const DecodedInstruction& inst);
+    void executeImmediateOperations32(const DecodedInstruction& inst);  // RV64I
     void executeLoadOperations(const DecodedInstruction& inst);
     void executeJALR(const DecodedInstruction& inst);
     

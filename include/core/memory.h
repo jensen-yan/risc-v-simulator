@@ -33,6 +33,10 @@ public:
     uint32_t readWord(Address addr) const;
     void writeWord(Address addr, uint32_t value);
     
+    // 双字访问（64位）
+    uint64_t read64(Address addr) const;
+    void write64(Address addr, uint64_t value);
+    
     // 指令获取
     Instruction fetchInstruction(Address addr) const;
     

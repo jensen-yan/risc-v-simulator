@@ -33,14 +33,14 @@ struct ExecutionUnit {
     bool busy;
     int remaining_cycles;
     DynamicInstPtr instruction;    // 使用DynamicInst指针代替原来的副本
-    uint32_t result;
+    uint64_t result;
     bool has_exception;
     std::string exception_msg;
     // 跳转指令相关字段
-    uint32_t jump_target;
+    uint64_t jump_target;
     bool is_jump;
     // Load指令相关字段
-    uint32_t load_address;
+    uint64_t load_address;
     uint8_t load_size;
 };
 
@@ -50,7 +50,7 @@ struct ExecutionUnit {
  */
 struct CPUState {
     // 基本CPU状态
-    uint32_t pc;                    // 程序计数器（取指PC）
+    uint64_t pc;                    // 程序计数器（取指PC）
     bool halted;                    // 停机标志
     uint64_t instruction_count;     // 指令计数器
     uint64_t cycle_count;          // 周期计数器
@@ -60,9 +60,9 @@ struct CPUState {
     static constexpr size_t NUM_REGISTERS = 32;
     static constexpr size_t NUM_FP_REGISTERS = 32;
     
-    std::array<uint32_t, NUM_REGISTERS> arch_registers;     // 架构寄存器
+    std::array<uint64_t, NUM_REGISTERS> arch_registers;     // 架构寄存器
     std::array<uint32_t, NUM_FP_REGISTERS> arch_fp_registers; // 架构浮点寄存器
-    std::array<uint32_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_registers;    // 物理寄存器
+    std::array<uint64_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_registers;    // 物理寄存器
     std::array<uint32_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_fp_registers; // 物理浮点寄存器
     
     // 流水线缓冲区

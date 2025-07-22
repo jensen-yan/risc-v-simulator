@@ -17,7 +17,7 @@ DynamicInst::DynamicInst()
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
 }
 
-DynamicInst::DynamicInst(const DecodedInstruction& decoded_info, uint32_t pc, uint64_t instruction_id)
+DynamicInst::DynamicInst(const DecodedInstruction& decoded_info, uint64_t pc, uint64_t instruction_id)
     : decoded_info_(decoded_info), instruction_id_(instruction_id), pc_(pc), 
       status_(Status::ALLOCATED),
       logical_dest_(0), physical_dest_(0), logical_src1_(0), logical_src2_(0),
@@ -50,11 +50,11 @@ bool DynamicInst::is_jump_instruction() const {
 }
 
 // 设置跳转状态时的调试日志
-void DynamicInst::set_jump_info(bool is_jump, uint32_t target) {
+void DynamicInst::set_jump_info(bool is_jump, uint64_t target) {
     is_jump_ = is_jump;
     jump_target_ = target;
     if (is_jump_) {
-        dprintf(EXECUTE, "[JUMP_SET] Inst#%" PRId64 " PC=0x%x 设置为跳转指令，目标=0x%x", 
+        dprintf(EXECUTE, "[JUMP_SET] Inst#%" PRId64 " PC=0x%" PRIx64 " 设置为跳转指令，目标=0x%" PRIx64, 
                 instruction_id_, pc_, target);
     }
 }
@@ -282,7 +282,7 @@ void DynamicInst::setup_execution_requirements() {
 
 // ========== 工厂函数实现 ==========
 DynamicInstPtr create_dynamic_inst(const DecodedInstruction& decoded_info, 
-                                  uint32_t pc, uint64_t instruction_id) {
+                                  uint64_t pc, uint64_t instruction_id) {
     return std::make_shared<DynamicInst>(decoded_info, pc, instruction_id);
 }
 

@@ -60,6 +60,35 @@ void Memory::writeWord(Address addr, uint32_t value) {
     memory_[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
 }
 
+uint64_t Memory::read64(Address addr) const {
+    checkAddress(addr, 8);
+    
+    // 小端序读取
+    uint64_t result = memory_[addr];
+    result |= static_cast<uint64_t>(memory_[addr + 1]) << 8;
+    result |= static_cast<uint64_t>(memory_[addr + 2]) << 16;
+    result |= static_cast<uint64_t>(memory_[addr + 3]) << 24;
+    result |= static_cast<uint64_t>(memory_[addr + 4]) << 32;
+    result |= static_cast<uint64_t>(memory_[addr + 5]) << 40;
+    result |= static_cast<uint64_t>(memory_[addr + 6]) << 48;
+    result |= static_cast<uint64_t>(memory_[addr + 7]) << 56;
+    return result;
+}
+
+void Memory::write64(Address addr, uint64_t value) {
+    checkAddress(addr, 8);
+    
+    // 小端序存储
+    memory_[addr] = static_cast<uint8_t>(value & 0xFF);
+    memory_[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    memory_[addr + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    memory_[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+    memory_[addr + 4] = static_cast<uint8_t>((value >> 32) & 0xFF);
+    memory_[addr + 5] = static_cast<uint8_t>((value >> 40) & 0xFF);
+    memory_[addr + 6] = static_cast<uint8_t>((value >> 48) & 0xFF);
+    memory_[addr + 7] = static_cast<uint8_t>((value >> 56) & 0xFF);
+}
+
 Instruction Memory::fetchInstruction(Address addr) const {
     // 支持 C 扩展：指令只需要2字节对齐
     if (addr % 2 != 0) {

@@ -75,22 +75,33 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
         
         switch (inst.type) {
             case InstructionType::R_TYPE:
-                // 寄存器-寄存器运算
-                unit.result = InstructionExecutor::executeRegisterOperation(inst, instruction->get_src1_value(), instruction->get_src2_value());
+                if (inst.opcode == Opcode::OP) {
+                    // 寄存器-寄存器运算
+                    unit.result = InstructionExecutor::executeRegisterOperation(inst, instruction->get_src1_value(), instruction->get_src2_value());
+                } else if (inst.opcode == Opcode::OP_32) {
+                    // RV64I: 32位寄存器运算（W后缀）
+                    unit.result = InstructionExecutor::executeRegisterOperation32(inst, instruction->get_src1_value(), instruction->get_src2_value());
+                } else {
+                    // 其他R_TYPE指令（如M扩展、F扩展等）
+                    unit.result = InstructionExecutor::executeRegisterOperation(inst, instruction->get_src1_value(), instruction->get_src2_value());
+                }
                 break;
                 
             case InstructionType::I_TYPE:
                 if (inst.opcode == Opcode::OP_IMM) {
                     // 立即数运算
                     unit.result = InstructionExecutor::executeImmediateOperation(inst, instruction->get_src1_value());
+                } else if (inst.opcode == Opcode::OP_IMM_32) {
+                    // RV64I: 32位立即数运算（W后缀）
+                    unit.result = InstructionExecutor::executeImmediateOperation32(inst, instruction->get_src1_value());
                 } else if (inst.opcode == Opcode::LOAD) {
                     // 加载指令 - 使用预解析的静态信息
-                    uint32_t addr = instruction->get_src1_value() + inst.imm;
+                    uint64_t addr = instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
                     
                     // 异常已在解码时检测，这里直接使用预解析的信息
                     unit.load_address = addr;
                     unit.load_size = inst.memory_access_size;
-                    dprintf(EXECUTE, "Load指令开始执行，地址=0x%x，大小=%d字节", addr, inst.memory_access_size);
+                    dprintf(EXECUTE, "Load指令开始执行，地址=0x%lx，大小=%d字节", addr, inst.memory_access_size);
                     
                 } else if (inst.opcode == Opcode::JALR) {
                     // JALR 指令 - I-type 跳转指令
@@ -108,7 +119,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
 
             case InstructionType::SYSTEM_TYPE:
                 // CSR指令或系统调用 - 暂时作为NOP处理
-                dprintf(EXECUTE, "执行SYSTEM_TYPE指令(NOP): Inst#%" PRId64 " PC=0x%x", 
+                dprintf(EXECUTE, "执行SYSTEM_TYPE指令(NOP): Inst#%" PRId64 " PC=0x%lx", 
                        instruction->get_instruction_id(), instruction->get_pc());
                 unit.result = 0;
                 break;
@@ -161,10 +172,10 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
             case InstructionType::S_TYPE:
                 // 存储指令 - 使用预解析的静态信息
                 {
-                    uint32_t addr = instruction->get_src1_value() + inst.imm;
+                    uint64_t addr = instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
                     
                     // 异常已在解码时检测，这里直接使用预解析的信息
-                    dprintf(EXECUTE, "Store指令执行：地址=0x%x 值=0x%x 大小=%d字节", 
+                    dprintf(EXECUTE, "Store指令执行：地址=0x%lx 值=0x%lx 大小=%d字节", 
                             addr, instruction->get_src2_value(), inst.memory_access_size);
                     
                     // 执行Store到内存
@@ -485,7 +496,7 @@ bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) 
         
         unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
         
-        dprintf(EXECUTE, "内存Load完成：地址=0x%x 结果=0x%x", addr, unit.result);
+        dprintf(EXECUTE, "内存Load完成：地址=0x%lx 结果=0x%lx", addr, unit.result);
         return false; // 没有使用转发
     }
 }

@@ -137,28 +137,28 @@ void OutOfOrderCPU::reset() {
     std::cout << "乱序执行CPU重置完成" << std::endl;
 }
 
-uint32_t OutOfOrderCPU::get_physical_register_value(PhysRegNum reg) const {
+uint64_t OutOfOrderCPU::get_physical_register_value(PhysRegNum reg) const {
     if (reg < RegisterRenameUnit::NUM_PHYSICAL_REGS) {
         return cpu_state_.physical_registers[reg];
     }
     return 0;
 }
 
-void OutOfOrderCPU::set_physical_register_value(PhysRegNum reg, uint32_t value) {
+void OutOfOrderCPU::set_physical_register_value(PhysRegNum reg, uint64_t value) {
     if (reg < RegisterRenameUnit::NUM_PHYSICAL_REGS) {
         cpu_state_.physical_registers[reg] = value;
     }
 }
 
 // 接口兼容性方法
-uint32_t OutOfOrderCPU::getRegister(RegNum reg) const {
+uint64_t OutOfOrderCPU::getRegister(RegNum reg) const {
     if (reg >= NUM_REGISTERS) {
         throw SimulatorException("无效的寄存器编号: " + std::to_string(reg));
     }
     return cpu_state_.arch_registers[reg];
 }
 
-void OutOfOrderCPU::setRegister(RegNum reg, uint32_t value) {
+void OutOfOrderCPU::setRegister(RegNum reg, uint64_t value) {
     if (reg >= NUM_REGISTERS) {
         throw SimulatorException("无效的寄存器编号: " + std::to_string(reg));
     }
@@ -197,7 +197,7 @@ void OutOfOrderCPU::setFPRegisterFloat(RegNum reg, float value) {
     cpu_state_.arch_fp_registers[reg] = *reinterpret_cast<const uint32_t*>(&value);
 }
 
-void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint32_t pc) {
+void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint64_t pc) {
     std::cerr << "异常: " << exception_msg << ", PC=0x" << std::hex << pc << std::dec << std::endl;
     flush_pipeline();
     cpu_state_.halted = true;
@@ -224,12 +224,12 @@ void OutOfOrderCPU::flush_pipeline() {
     }
 }
 
-bool OutOfOrderCPU::predict_branch(uint32_t pc) {
+bool OutOfOrderCPU::predict_branch(uint64_t pc) {
     // 简化的分支预测：总是预测不跳转
     return false;
 }
 
-void OutOfOrderCPU::update_branch_predictor(uint32_t pc, bool taken) {
+void OutOfOrderCPU::update_branch_predictor(uint64_t pc, bool taken) {
     // 简化实现：不更新预测器
 }
 
@@ -246,11 +246,11 @@ void OutOfOrderCPU::handleEbreak() {
     cpu_state_.halted = true;
 }
 
-uint32_t OutOfOrderCPU::loadFromMemory(Address addr, Funct3 funct3) {
+uint64_t OutOfOrderCPU::loadFromMemory(Address addr, Funct3 funct3) {
     return InstructionExecutor::loadFromMemory(memory_, addr, funct3);
 }
 
-void OutOfOrderCPU::storeToMemory(Address addr, uint32_t value, Funct3 funct3) {
+void OutOfOrderCPU::storeToMemory(Address addr, uint64_t value, Funct3 funct3) {
     InstructionExecutor::storeToMemory(memory_, addr, value, funct3);
 }
 
@@ -271,7 +271,7 @@ void OutOfOrderCPU::dumpRegisters() const {
     for (int i = 0; i < NUM_REGISTERS; i += 4) {
         for (int j = 0; j < 4 && i + j < NUM_REGISTERS; ++j) {
             std::cout << "x" << std::setw(2) << (i + j) << ": 0x" 
-                      << std::hex << std::setfill('0') << std::setw(8) 
+                      << std::hex << std::setfill('0') << std::setw(16) 
                       << cpu_state_.arch_registers[i + j] << "  ";
         }
         std::cout << std::endl;
@@ -333,7 +333,7 @@ bool OutOfOrderCPU::isDiffTestEnabled() const {
     return difftest_ && difftest_->isEnabled();
 }
 
-void OutOfOrderCPU::performDiffTestWithCommittedPC(uint32_t committed_pc) {
+void OutOfOrderCPU::performDiffTestWithCommittedPC(uint64_t committed_pc) {
     if (difftest_ && difftest_->isEnabled()) {
         // 第一次调用时，同步参考CPU的完整状态
         static bool first_call = true;

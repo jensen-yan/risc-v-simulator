@@ -4,36 +4,37 @@
 
 namespace riscv {
 
-uint32_t InstructionExecutor::executeImmediateOperation(const DecodedInstruction& inst, uint32_t rs1_val) {
+uint64_t InstructionExecutor::executeImmediateOperation(const DecodedInstruction& inst, uint64_t rs1_val) {
     switch (inst.funct3) {
         case Funct3::ADD_SUB:
-            return rs1_val + static_cast<uint32_t>(inst.imm);
+            return rs1_val + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
             
         case Funct3::SLT:
-            return (static_cast<int32_t>(rs1_val) < inst.imm) ? 1 : 0;
+            return (static_cast<int64_t>(rs1_val) < static_cast<int64_t>(inst.imm)) ? 1 : 0;
             
         case Funct3::SLTU:
-            return (rs1_val < static_cast<uint32_t>(inst.imm)) ? 1 : 0;
+            return (rs1_val < static_cast<uint64_t>(static_cast<int64_t>(inst.imm))) ? 1 : 0;
             
         case Funct3::XOR:
-            return rs1_val ^ static_cast<uint32_t>(inst.imm);
+            return rs1_val ^ static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
             
         case Funct3::OR:
-            return rs1_val | static_cast<uint32_t>(inst.imm);
+            return rs1_val | static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
             
         case Funct3::AND:
-            return rs1_val & static_cast<uint32_t>(inst.imm);
+            return rs1_val & static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
             
         case Funct3::SLL:
-            return rs1_val << (inst.imm & 0x1F);
+            // RV64I: 使用imm的低6位作为移位量
+            return rs1_val << (inst.imm & 0x3F);
             
         case Funct3::SRL_SRA:
             if (inst.funct7 == Funct7::SUB_SRA) {
                 // 算术右移
-                return static_cast<uint32_t>(static_cast<int32_t>(rs1_val) >> (inst.imm & 0x1F));
+                return static_cast<uint64_t>(static_cast<int64_t>(rs1_val) >> (inst.imm & 0x3F));
             } else {
                 // 逻辑右移
-                return rs1_val >> (inst.imm & 0x1F);
+                return rs1_val >> (inst.imm & 0x3F);
             }
             
         default:
@@ -41,7 +42,7 @@ uint32_t InstructionExecutor::executeImmediateOperation(const DecodedInstruction
     }
 }
 
-uint32_t InstructionExecutor::executeRegisterOperation(const DecodedInstruction& inst, uint32_t rs1_val, uint32_t rs2_val) {
+uint64_t InstructionExecutor::executeRegisterOperation(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val) {
     switch (inst.funct3) {
         case Funct3::ADD_SUB:
             return performArithmeticOperation(rs1_val, rs2_val, inst.funct3, inst.funct7);
@@ -64,7 +65,7 @@ uint32_t InstructionExecutor::executeRegisterOperation(const DecodedInstruction&
     }
 }
 
-bool InstructionExecutor::evaluateBranchCondition(const DecodedInstruction& inst, uint32_t rs1_val, uint32_t rs2_val) {
+bool InstructionExecutor::evaluateBranchCondition(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val) {
     switch (inst.funct3) {
         case Funct3::BEQ:
             return rs1_val == rs2_val;
@@ -73,10 +74,10 @@ bool InstructionExecutor::evaluateBranchCondition(const DecodedInstruction& inst
             return rs1_val != rs2_val;
             
         case Funct3::BLT:
-            return static_cast<int32_t>(rs1_val) < static_cast<int32_t>(rs2_val);
+            return static_cast<int64_t>(rs1_val) < static_cast<int64_t>(rs2_val);
             
         case Funct3::BGE:
-            return static_cast<int32_t>(rs1_val) >= static_cast<int32_t>(rs2_val);
+            return static_cast<int64_t>(rs1_val) >= static_cast<int64_t>(rs2_val);
             
         case Funct3::BLTU:
             return rs1_val < rs2_val;
@@ -89,16 +90,16 @@ bool InstructionExecutor::evaluateBranchCondition(const DecodedInstruction& inst
     }
 }
 
-uint32_t InstructionExecutor::calculateJumpTarget(const DecodedInstruction& inst, uint32_t pc) {
-    return pc + static_cast<uint32_t>(inst.imm);
+uint64_t InstructionExecutor::calculateJumpTarget(const DecodedInstruction& inst, uint64_t pc) {
+    return pc + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
 }
 
-uint32_t InstructionExecutor::calculateJumpAndLinkTarget(const DecodedInstruction& inst, uint32_t pc, uint32_t rs1_val) {
-    uint32_t target = rs1_val + static_cast<uint32_t>(inst.imm);
-    return target & 0xFFFFFFFE;  // 清除最低位，确保地址对齐
+uint64_t InstructionExecutor::calculateJumpAndLinkTarget(const DecodedInstruction& inst, uint64_t pc, uint64_t rs1_val) {
+    uint64_t target = rs1_val + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+    return target & 0xFFFFFFFFFFFFFFFE;  // 清除最低位，确保地址对齐
 }
 
-uint32_t InstructionExecutor::loadFromMemory(std::shared_ptr<Memory> memory, uint32_t addr, Funct3 funct3) {
+uint64_t InstructionExecutor::loadFromMemory(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 funct3) {
     switch (funct3) {
         case Funct3::LB:
             return loadSignExtended(memory, addr, 1);
@@ -107,7 +108,10 @@ uint32_t InstructionExecutor::loadFromMemory(std::shared_ptr<Memory> memory, uin
             return loadSignExtended(memory, addr, 2);
             
         case Funct3::LW:
-            return memory->readWord(addr);
+            return loadSignExtended(memory, addr, 4);
+            
+        case Funct3::LD:  // RV64I: 加载双字
+            return memory->read64(addr);
             
         case Funct3::LBU:
             return loadZeroExtended(memory, addr, 1);
@@ -115,12 +119,15 @@ uint32_t InstructionExecutor::loadFromMemory(std::shared_ptr<Memory> memory, uin
         case Funct3::LHU:
             return loadZeroExtended(memory, addr, 2);
             
+        case Funct3::LWU:  // RV64I: 加载字零扩展
+            return loadZeroExtended(memory, addr, 4);
+            
         default:
             throw IllegalInstructionException("未知的加载指令功能码");
     }
 }
 
-void InstructionExecutor::storeToMemory(std::shared_ptr<Memory> memory, uint32_t addr, uint32_t value, Funct3 funct3) {
+void InstructionExecutor::storeToMemory(std::shared_ptr<Memory> memory, uint64_t addr, uint64_t value, Funct3 funct3) {
     switch (funct3) {
         case Funct3::SB:
             memory->writeByte(addr, static_cast<uint8_t>(value));
@@ -131,7 +138,11 @@ void InstructionExecutor::storeToMemory(std::shared_ptr<Memory> memory, uint32_t
             break;
             
         case Funct3::SW:
-            memory->writeWord(addr, value);
+            memory->writeWord(addr, static_cast<uint32_t>(value));
+            break;
+            
+        case Funct3::SD:  // RV64I: 存储双字
+            memory->write64(addr, value);
             break;
             
         default:
@@ -139,47 +150,115 @@ void InstructionExecutor::storeToMemory(std::shared_ptr<Memory> memory, uint32_t
     }
 }
 
-uint32_t InstructionExecutor::executeUpperImmediate(const DecodedInstruction& inst, uint32_t pc) {
+uint64_t InstructionExecutor::executeUpperImmediate(const DecodedInstruction& inst, uint64_t pc) {
     if (inst.opcode == Opcode::LUI) {
-        return static_cast<uint32_t>(inst.imm);
+        return static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
     } else if (inst.opcode == Opcode::AUIPC) {
-        return pc + static_cast<uint32_t>(inst.imm);
+        return pc + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
     } else {
         throw IllegalInstructionException("未知的上位立即数指令");
     }
 }
 
-uint32_t InstructionExecutor::executeMExtension(const DecodedInstruction& inst, uint32_t rs1_val, uint32_t rs2_val) {
+// RV64I 32位立即数运算（W后缀）
+uint64_t InstructionExecutor::executeImmediateOperation32(const DecodedInstruction& inst, uint64_t rs1_val) {
+    int32_t rs1_32 = static_cast<int32_t>(rs1_val);
+    int32_t result;
+    
+    switch (inst.funct3) {
+        case Funct3::ADD_SUB:  // ADDIW
+            result = rs1_32 + inst.imm;
+            break;
+            
+        case Funct3::SLL:  // SLLIW - 使用imm的低5位作为移位量
+            result = rs1_32 << (inst.imm & 0x1F);
+            break;
+            
+        case Funct3::SRL_SRA:
+            if (inst.funct7 == Funct7::SUB_SRA) {  // SRAIW
+                result = rs1_32 >> (inst.imm & 0x1F);
+            } else {  // SRLIW
+                result = static_cast<int32_t>(static_cast<uint32_t>(rs1_32) >> (inst.imm & 0x1F));
+            }
+            break;
+            
+        default:
+            throw IllegalInstructionException("未知的32位立即数指令功能码");
+    }
+    
+    // 符号扩展到64位
+    return static_cast<uint64_t>(static_cast<int64_t>(result));
+}
+
+// RV64I 32位寄存器运算（W后缀）
+uint64_t InstructionExecutor::executeRegisterOperation32(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val) {
+    int32_t rs1_32 = static_cast<int32_t>(rs1_val);
+    int32_t rs2_32 = static_cast<int32_t>(rs2_val);
+    int32_t result;
+    
+    switch (inst.funct3) {
+        case Funct3::ADD_SUB:
+            if (inst.funct7 == Funct7::SUB_SRA) {  // SUBW
+                result = rs1_32 - rs2_32;
+            } else {  // ADDW
+                result = rs1_32 + rs2_32;
+            }
+            break;
+            
+        case Funct3::SLL:  // SLLW - 使用rs2的低5位作为移位量
+            result = rs1_32 << (rs2_32 & 0x1F);
+            break;
+            
+        case Funct3::SRL_SRA:
+            if (inst.funct7 == Funct7::SUB_SRA) {  // SRAW
+                result = rs1_32 >> (rs2_32 & 0x1F);
+            } else {  // SRLW
+                result = static_cast<int32_t>(static_cast<uint32_t>(rs1_32) >> (rs2_32 & 0x1F));
+            }
+            break;
+            
+        default:
+            throw IllegalInstructionException("未知的32位寄存器指令功能码");
+    }
+    
+    // 符号扩展到64位
+    return static_cast<uint64_t>(static_cast<int64_t>(result));
+}
+
+uint64_t InstructionExecutor::executeMExtension(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val) {
     switch (inst.funct3) {
         case Funct3::MUL:
-            return static_cast<uint32_t>(static_cast<int32_t>(rs1_val) * static_cast<int32_t>(rs2_val));
+            return static_cast<uint64_t>(static_cast<int64_t>(rs1_val) * static_cast<int64_t>(rs2_val));
             
         case Funct3::MULH: {
-            int64_t result = static_cast<int64_t>(static_cast<int32_t>(rs1_val)) * 
-                           static_cast<int64_t>(static_cast<int32_t>(rs2_val));
-            return static_cast<uint32_t>(result >> 32);
+            // TODO: 需要实现128位乘法以获取高位
+            // 暂时使用简化实现
+            __int128 result = static_cast<__int128>(static_cast<int64_t>(rs1_val)) * 
+                            static_cast<__int128>(static_cast<int64_t>(rs2_val));
+            return static_cast<uint64_t>(result >> 64);
         }
         
         case Funct3::MULHSU: {
-            int64_t result = static_cast<int64_t>(static_cast<int32_t>(rs1_val)) * 
-                           static_cast<int64_t>(rs2_val);
-            return static_cast<uint32_t>(result >> 32);
+            __int128 result = static_cast<__int128>(static_cast<int64_t>(rs1_val)) * 
+                            static_cast<__int128>(rs2_val);
+            return static_cast<uint64_t>(result >> 64);
         }
         
         case Funct3::MULHU: {
-            uint64_t result = static_cast<uint64_t>(rs1_val) * static_cast<uint64_t>(rs2_val);
-            return static_cast<uint32_t>(result >> 32);
+            unsigned __int128 result = static_cast<unsigned __int128>(rs1_val) * 
+                                     static_cast<unsigned __int128>(rs2_val);
+            return static_cast<uint64_t>(result >> 64);
         }
         
         case Funct3::DIV:
             if (rs2_val == 0) {
-                return 0xFFFFFFFF;  // 除零结果
+                return 0xFFFFFFFFFFFFFFFF;  // 除零结果
             }
-            return static_cast<uint32_t>(static_cast<int32_t>(rs1_val) / static_cast<int32_t>(rs2_val));
+            return static_cast<uint64_t>(static_cast<int64_t>(rs1_val) / static_cast<int64_t>(rs2_val));
             
         case Funct3::DIVU:
             if (rs2_val == 0) {
-                return 0xFFFFFFFF;  // 除零结果
+                return 0xFFFFFFFFFFFFFFFF;  // 除零结果
             }
             return rs1_val / rs2_val;
             
@@ -187,7 +266,7 @@ uint32_t InstructionExecutor::executeMExtension(const DecodedInstruction& inst, 
             if (rs2_val == 0) {
                 return rs1_val;  // 除零情况下返回被除数
             }
-            return static_cast<uint32_t>(static_cast<int32_t>(rs1_val) % static_cast<int32_t>(rs2_val));
+            return static_cast<uint64_t>(static_cast<int64_t>(rs1_val) % static_cast<int64_t>(rs2_val));
             
         case Funct3::REMU:
             if (rs2_val == 0) {
@@ -291,8 +370,8 @@ bool InstructionExecutor::isUserReturn(const DecodedInstruction& inst) {
 
 // 私有辅助方法实现
 
-uint32_t InstructionExecutor::performShiftOperation(uint32_t value, uint32_t shift_amount, Funct3 funct3, Funct7 funct7) {
-    uint32_t shamt = shift_amount & 0x1F;  // 只使用低5位
+uint64_t InstructionExecutor::performShiftOperation(uint64_t value, uint64_t shift_amount, Funct3 funct3, Funct7 funct7) {
+    uint64_t shamt = shift_amount & 0x3F;  // RV64使用低6位
     
     switch (funct3) {
         case Funct3::SLL:
@@ -300,7 +379,7 @@ uint32_t InstructionExecutor::performShiftOperation(uint32_t value, uint32_t shi
             
         case Funct3::SRL_SRA:
             if (funct7 == Funct7::SUB_SRA) {
-                return static_cast<uint32_t>(static_cast<int32_t>(value) >> shamt);
+                return static_cast<uint64_t>(static_cast<int64_t>(value) >> shamt);
             } else {
                 return value >> shamt;
             }
@@ -310,7 +389,33 @@ uint32_t InstructionExecutor::performShiftOperation(uint32_t value, uint32_t shi
     }
 }
 
-uint32_t InstructionExecutor::performArithmeticOperation(uint32_t rs1_val, uint32_t rs2_val, Funct3 funct3, Funct7 funct7) {
+// 32位移位操作（用于W后缀指令）
+uint64_t InstructionExecutor::performShiftOperation32(uint64_t value, uint64_t shift_amount, Funct3 funct3, Funct7 funct7) {
+    uint32_t shamt = shift_amount & 0x1F;  // W后缀指令使用低5位
+    int32_t val32 = static_cast<int32_t>(value);
+    int32_t result;
+    
+    switch (funct3) {
+        case Funct3::SLL:
+            result = val32 << shamt;
+            break;
+            
+        case Funct3::SRL_SRA:
+            if (funct7 == Funct7::SUB_SRA) {
+                result = val32 >> shamt;
+            } else {
+                result = static_cast<int32_t>(static_cast<uint32_t>(val32) >> shamt);
+            }
+            break;
+            
+        default:
+            throw IllegalInstructionException("未知的32位移位操作");
+    }
+    
+    return static_cast<uint64_t>(static_cast<int64_t>(result));
+}
+
+uint64_t InstructionExecutor::performArithmeticOperation(uint64_t rs1_val, uint64_t rs2_val, Funct3 funct3, Funct7 funct7) {
     if (funct3 == Funct3::ADD_SUB) {
         if (funct7 == Funct7::SUB_SRA) {
             return rs1_val - rs2_val;
@@ -321,7 +426,26 @@ uint32_t InstructionExecutor::performArithmeticOperation(uint32_t rs1_val, uint3
     throw IllegalInstructionException("未知的算术操作");
 }
 
-uint32_t InstructionExecutor::performLogicalOperation(uint32_t rs1_val, uint32_t rs2_val, Funct3 funct3) {
+// 32位算术操作（用于W后缀指令）
+uint64_t InstructionExecutor::performArithmeticOperation32(uint64_t rs1_val, uint64_t rs2_val, Funct3 funct3, Funct7 funct7) {
+    int32_t rs1_32 = static_cast<int32_t>(rs1_val);
+    int32_t rs2_32 = static_cast<int32_t>(rs2_val);
+    int32_t result;
+    
+    if (funct3 == Funct3::ADD_SUB) {
+        if (funct7 == Funct7::SUB_SRA) {
+            result = rs1_32 - rs2_32;
+        } else {
+            result = rs1_32 + rs2_32;
+        }
+    } else {
+        throw IllegalInstructionException("未知的32位算术操作");
+    }
+    
+    return static_cast<uint64_t>(static_cast<int64_t>(result));
+}
+
+uint64_t InstructionExecutor::performLogicalOperation(uint64_t rs1_val, uint64_t rs2_val, Funct3 funct3) {
     switch (funct3) {
         case Funct3::XOR:
             return rs1_val ^ rs2_val;
@@ -337,10 +461,10 @@ uint32_t InstructionExecutor::performLogicalOperation(uint32_t rs1_val, uint32_t
     }
 }
 
-uint32_t InstructionExecutor::performComparisonOperation(uint32_t rs1_val, uint32_t rs2_val, Funct3 funct3) {
+uint64_t InstructionExecutor::performComparisonOperation(uint64_t rs1_val, uint64_t rs2_val, Funct3 funct3) {
     switch (funct3) {
         case Funct3::SLT:
-            return (static_cast<int32_t>(rs1_val) < static_cast<int32_t>(rs2_val)) ? 1 : 0;
+            return (static_cast<int64_t>(rs1_val) < static_cast<int64_t>(rs2_val)) ? 1 : 0;
             
         case Funct3::SLTU:
             return (rs1_val < rs2_val) ? 1 : 0;
@@ -362,27 +486,31 @@ uint32_t InstructionExecutor::floatToUint32(float value) {
     return converter.i;
 }
 
-uint32_t InstructionExecutor::loadSignExtended(std::shared_ptr<Memory> memory, uint32_t addr, int bytes) {
+uint64_t InstructionExecutor::loadSignExtended(std::shared_ptr<Memory> memory, uint64_t addr, int bytes) {
     switch (bytes) {
         case 1:
-            return static_cast<uint32_t>(static_cast<int8_t>(memory->readByte(addr)));
+            return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int8_t>(memory->readByte(addr))));
         case 2:
-            return static_cast<uint32_t>(static_cast<int16_t>(memory->readHalfWord(addr)));
+            return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int16_t>(memory->readHalfWord(addr))));
         case 4:
-            return memory->readWord(addr);
+            return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(memory->readWord(addr))));
+        case 8:
+            return memory->read64(addr);
         default:
             throw IllegalInstructionException("不支持的加载字节数");
     }
 }
 
-uint32_t InstructionExecutor::loadZeroExtended(std::shared_ptr<Memory> memory, uint32_t addr, int bytes) {
+uint64_t InstructionExecutor::loadZeroExtended(std::shared_ptr<Memory> memory, uint64_t addr, int bytes) {
     switch (bytes) {
         case 1:
-            return static_cast<uint32_t>(memory->readByte(addr));
+            return static_cast<uint64_t>(memory->readByte(addr));
         case 2:
-            return static_cast<uint32_t>(memory->readHalfWord(addr));
+            return static_cast<uint64_t>(memory->readHalfWord(addr));
         case 4:
-            return memory->readWord(addr);
+            return static_cast<uint64_t>(memory->readWord(addr));
+        case 8:
+            return memory->read64(addr);
         default:
             throw IllegalInstructionException("不支持的加载字节数");
     }

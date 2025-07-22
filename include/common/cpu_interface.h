@@ -22,8 +22,8 @@ public:
     virtual void reset() = 0;
     
     // 寄存器访问
-    virtual uint32_t getRegister(RegNum reg) const = 0;
-    virtual void setRegister(RegNum reg, uint32_t value) = 0;
+    virtual uint64_t getRegister(RegNum reg) const = 0;
+    virtual void setRegister(RegNum reg, uint64_t value) = 0;
     
     // 浮点寄存器访问
     virtual uint32_t getFPRegister(RegNum reg) const = 0;
@@ -32,8 +32,8 @@ public:
     virtual void setFPRegisterFloat(RegNum reg, float value) = 0;
     
     // 程序计数器
-    virtual uint32_t getPC() const = 0;
-    virtual void setPC(uint32_t pc) = 0;
+    virtual uint64_t getPC() const = 0;
+    virtual void setPC(uint64_t pc) = 0;
     
     // 状态查询
     virtual bool isHalted() const = 0;
@@ -49,7 +49,7 @@ public:
     
     // DiffTest功能（默认实现为空，只有OOO CPU需要实现）
     virtual void setDiffTest(class DiffTest* difftest) {} // 设置DiffTest引用
-    virtual void performDiffTestWithCommittedPC(uint32_t committed_pc) {}
+    virtual void performDiffTestWithCommittedPC(uint64_t committed_pc) {}
     virtual bool isDiffTestEnabled() const { return false; }
 };
 

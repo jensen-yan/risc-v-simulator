@@ -7,6 +7,8 @@
 namespace riscv {
 
 // 基本数据类型定义
+using uint64_t = std::uint64_t;
+using int64_t = std::int64_t;
 using uint32_t = std::uint32_t;
 using int32_t = std::int32_t;
 using uint16_t = std::uint16_t;
@@ -18,7 +20,10 @@ using int8_t = std::int8_t;
 using RegNum = uint8_t;
 
 // 内存地址类型
-using Address = uint32_t;
+using Address = uint64_t;
+
+// 寄存器值类型
+using RegValue = uint64_t;
 
 // 指令类型
 using Instruction = uint32_t;
@@ -57,6 +62,10 @@ enum class Opcode : uint8_t {
     
     // J-type
     JAL         = 0b1101111,    // JAL
+    
+    // RV64I新增操作码
+    OP_IMM_32   = 0b0011011,    // ADDIW, SLLIW, SRLIW, SRAIW
+    OP_32       = 0b0111011,    // ADDW, SUBW, SLLW, SRLW, SRAW
     
     // 浮点运算指令 (F/D扩展)
     OP_FP       = 0b1010011,    // 浮点运算指令
@@ -102,13 +111,16 @@ enum class Funct3 : uint8_t {
     LB      = 0b000,
     LH      = 0b001,
     LW      = 0b010,
+    LD      = 0b011,    // RV64I: 加载双字(64位)
     LBU     = 0b100,
     LHU     = 0b101,
+    LWU     = 0b110,    // RV64I: 加载字(32位)零扩展
     
     // 存储指令
     SB      = 0b000,
     SH      = 0b001,
     SW      = 0b010,
+    SD      = 0b011,    // RV64I: 存储双字(64位)
     
     // 系统调用和特权指令
     ECALL_EBREAK = 0b000,

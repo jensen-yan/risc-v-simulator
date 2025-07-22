@@ -22,7 +22,11 @@ void DecodedInstruction::initialize_execution_properties() {
                 break;
             case static_cast<Funct3>(2): // LW
                 memory_access_size = 4;
-                is_signed_load = true; // LW符号扩展到32位（但对32位系统无影响）
+                is_signed_load = true; // RV64中LW需要符号扩展到64位
+                break;
+            case static_cast<Funct3>(3): // LD (RV64I)
+                memory_access_size = 8;
+                is_signed_load = true;  // 虽然是64位，但这里标记为true以保持一致性
                 break;
             case static_cast<Funct3>(4): // LBU
                 memory_access_size = 1;
@@ -32,8 +36,12 @@ void DecodedInstruction::initialize_execution_properties() {
                 memory_access_size = 2;
                 is_signed_load = false;
                 break;
+            case static_cast<Funct3>(6): // LWU (RV64I)
+                memory_access_size = 4;
+                is_signed_load = false; // 零扩展到64位
+                break;
             default:
-                // 非法的Load指令funct3值 (3, 6, 7等)
+                // 非法的Load指令funct3值 (7等)
                 memory_access_size = 0;
                 is_signed_load = false;
                 has_decode_exception = true;
@@ -53,8 +61,11 @@ void DecodedInstruction::initialize_execution_properties() {
             case static_cast<Funct3>(2): // SW
                 memory_access_size = 4;
                 break;
+            case static_cast<Funct3>(3): // SD (RV64I)
+                memory_access_size = 8;
+                break;
             default:
-                // 非法的Store指令funct3值 (3, 4, 5, 6, 7等)
+                // 非法的Store指令funct3值 (4, 5, 6, 7等)
                 memory_access_size = 0;
                 has_decode_exception = true;
                 decode_exception_msg = "非法的Store指令funct3值: " + std::to_string(static_cast<int>(funct3));

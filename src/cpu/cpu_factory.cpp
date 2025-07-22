@@ -21,16 +21,16 @@ public:
     void run() override { cpu_->run(); }
     void reset() override { cpu_->reset(); }
     
-    uint32_t getRegister(RegNum reg) const override { return cpu_->getRegister(reg); }
-    void setRegister(RegNum reg, uint32_t value) override { cpu_->setRegister(reg, value); }
+    uint64_t getRegister(RegNum reg) const override { return cpu_->getRegister(reg); }
+    void setRegister(RegNum reg, uint64_t value) override { cpu_->setRegister(reg, value); }
     
     uint32_t getFPRegister(RegNum reg) const override { return cpu_->getFPRegister(reg); }
     void setFPRegister(RegNum reg, uint32_t value) override { cpu_->setFPRegister(reg, value); }
     float getFPRegisterFloat(RegNum reg) const override { return cpu_->getFPRegisterFloat(reg); }
     void setFPRegisterFloat(RegNum reg, float value) override { cpu_->setFPRegisterFloat(reg, value); }
     
-    uint32_t getPC() const override { return cpu_->getPC(); }
-    void setPC(uint32_t pc) override { cpu_->setPC(pc); }
+    uint64_t getPC() const override { return cpu_->getPC(); }
+    void setPC(uint64_t pc) override { cpu_->setPC(pc); }
     
     bool isHalted() const override { return cpu_->isHalted(); }
     uint64_t getInstructionCount() const override { return cpu_->getInstructionCount(); }
@@ -58,16 +58,16 @@ public:
     void run() override { cpu_->run(); }
     void reset() override { cpu_->reset(); }
     
-    uint32_t getRegister(RegNum reg) const override { return cpu_->getRegister(reg); }
-    void setRegister(RegNum reg, uint32_t value) override { cpu_->setRegister(reg, value); }
+    uint64_t getRegister(RegNum reg) const override { return cpu_->getRegister(reg); }
+    void setRegister(RegNum reg, uint64_t value) override { cpu_->setRegister(reg, value); }
     
     uint32_t getFPRegister(RegNum reg) const override { return cpu_->getFPRegister(reg); }
     void setFPRegister(RegNum reg, uint32_t value) override { cpu_->setFPRegister(reg, value); }
     float getFPRegisterFloat(RegNum reg) const override { return cpu_->getFPRegisterFloat(reg); }
     void setFPRegisterFloat(RegNum reg, float value) override { cpu_->setFPRegisterFloat(reg, value); }
     
-    uint32_t getPC() const override { return cpu_->getPC(); }
-    void setPC(uint32_t pc) override { cpu_->setPC(pc); }
+    uint64_t getPC() const override { return cpu_->getPC(); }
+    void setPC(uint64_t pc) override { cpu_->setPC(pc); }
     
     bool isHalted() const override { return cpu_->isHalted(); }
     uint64_t getInstructionCount() const override { return cpu_->getInstructionCount(); }
@@ -80,7 +80,7 @@ public:
     
     // DiffTest功能重写
     void setDiffTest(class DiffTest* difftest) override { cpu_->setDiffTest(difftest); }
-    void performDiffTestWithCommittedPC(uint32_t committed_pc) override { cpu_->performDiffTestWithCommittedPC(committed_pc); }
+    void performDiffTestWithCommittedPC(uint64_t committed_pc) override { cpu_->performDiffTestWithCommittedPC(committed_pc); }
     bool isDiffTestEnabled() const override { return cpu_->isDiffTestEnabled(); }
     
     // 乱序执行CPU特有的功能

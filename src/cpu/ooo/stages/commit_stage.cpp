@@ -50,7 +50,7 @@ void CommitStage::execute(CPUState& state) {
     }
     
     if (head_entry) {
-        dprintf(COMMIT, "头部指令 ROB[%d] Inst#%lu 状态: %s 结果准备: %s",
+        dprintf(COMMIT, "头部指令 ROB[%d] Inst#%" PRId64 " 状态: %s 结果准备: %s",
                 head_entry_id, head_entry->get_instruction_id(), state_str,
                 (head_entry->is_completed() ? "是" : "否"));
     }
@@ -80,11 +80,11 @@ void CommitStage::execute(CPUState& state) {
         // 提交到架构寄存器
         if (committed_inst->get_decoded_info().rd != 0) {  // x0寄存器不能写入
             state.arch_registers[committed_inst->get_decoded_info().rd] = committed_inst->get_result();
-            dprintf(COMMIT, "Inst#%lu PC=0x%x x%d = 0x%x", 
+            dprintf(COMMIT, "Inst#%" PRId64 " PC=0x%x x%d = 0x%x", 
                 committed_inst->get_instruction_id(), committed_inst->get_pc(), 
                 committed_inst->get_decoded_info().rd, committed_inst->get_result());
         } else {
-            dprintf(COMMIT, "Inst#%lu PC=0x%x (无目标寄存器)", 
+            dprintf(COMMIT, "Inst#%" PRId64 " PC=0x%x (无目标寄存器)", 
                 committed_inst->get_instruction_id(), committed_inst->get_pc());
         }
         
@@ -107,7 +107,7 @@ void CommitStage::execute(CPUState& state) {
         
         // DiffTest: 当乱序CPU提交一条指令时，同步执行参考CPU并比较状态
         if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
-            dprintf(DIFFTEST, "[COMMIT_TRACK] 提交指令: PC=0x%x, 指令ID=%lu, 指令计数=%lu", 
+            dprintf(DIFFTEST, "[COMMIT_TRACK] 提交指令: PC=0x%x, 指令ID=%" PRId64 ", 指令计数=%" PRId64, 
                     committed_inst->get_pc(), committed_inst->get_instruction_id(), state.instruction_count);
             // 使用提交指令的PC进行DiffTest
             state.cpu_interface->performDiffTestWithCommittedPC(committed_inst->get_pc());
@@ -117,7 +117,7 @@ void CommitStage::execute(CPUState& state) {
         // 处理跳转指令：只有is_jump=true的指令才会改变PC
         if (committed_inst->is_jump()) {
             state.pc = committed_inst->get_jump_target();
-            dprintf(COMMIT, "Inst#%lu 跳转到 0x%x", 
+            dprintf(COMMIT, "Inst#%" PRId64 " 跳转到 0x%x", 
                committed_inst->get_instruction_id(), committed_inst->get_jump_target());
             
             // 跳转指令提交后，刷新流水线中错误推测的指令

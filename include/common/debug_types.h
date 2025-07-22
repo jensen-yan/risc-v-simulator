@@ -10,6 +10,7 @@
 #include <iostream>
 #include <fstream>
 #include <fmt/format.h>
+#include <cinttypes>
 
 namespace riscv {
 

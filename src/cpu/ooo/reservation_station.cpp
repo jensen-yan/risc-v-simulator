@@ -62,7 +62,7 @@ ReservationStation::IssueResult ReservationStation::issue_instruction(DynamicIns
     result.rs_entry = rs_id;
     issued_count++;
     
-    dprintf(RS, "发射指令到保留站 RS%d, PC=0x%x, InstID=%lu", 
+    dprintf(RS, "发射指令到保留站 RS%d, PC=0x%x, InstID=%" PRId64, 
            (int)rs_id, dynamic_inst->get_pc(), dynamic_inst->get_instruction_id());
     
     return result;
@@ -117,7 +117,7 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
     
     dispatched_count++;
     
-    dprintf(RS, "调度指令到执行单元 %s%d, PC=0x%x, InstID=%lu", 
+    dprintf(RS, "调度指令到执行单元 %s%d, PC=0x%x, InstID=%" PRId64, 
            (unit_type == ExecutionUnitType::ALU ? "ALU" :
             unit_type == ExecutionUnitType::BRANCH ? "BRANCH" :
             unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE"),

@@ -3,8 +3,6 @@
 #include "common/debug_types.h"
 #include "common/types.h"
 #include "core/instruction_executor.h"
-#include <iostream>
-#include <sstream>
 
 namespace riscv {
 
@@ -19,7 +17,7 @@ void ExecuteStage::execute(CPUState& state) {
     // 尝试从保留站调度指令到执行单元
     auto dispatch_result = state.reservation_station->dispatch_instruction();
     if (dispatch_result.success) {
-        dprintf(EXECUTE, "从保留站调度指令 RS[%d] Inst#%lu 到执行单元", 
+        dprintf(EXECUTE, "从保留站调度指令 RS[%d] Inst#%" PRId64 " 到执行单元", 
                             dispatch_result.rs_entry, dispatch_result.instruction->get_instruction_id());
         
         ExecutionUnit* unit = get_available_unit(dispatch_result.unit_type, state);
@@ -100,6 +98,12 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                         case static_cast<Funct3>(2): // LW
                             access_size = 4;
                             break;
+                        default:
+                            // 非法的Load指令funct3值 (3, 6, 7等)
+                            unit.has_exception = true;
+                            unit.exception_msg = "非法的Load指令funct3值: " + std::to_string(static_cast<int>(inst.funct3));
+                            dprintf(EXECUTE, "非法的Load指令funct3值: %d", static_cast<int>(inst.funct3));
+                            return; // 提前返回，不继续执行
                     }
                     
                     // 在execute_instruction中，Load指令只计算地址，实际的转发和内存访问在update_execution_units中进行
@@ -123,7 +127,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
 
             case InstructionType::SYSTEM_TYPE:
                 // CSR指令或系统调用 - 暂时作为NOP处理
-                dprintf(EXECUTE, "执行SYSTEM_TYPE指令(NOP): Inst#%lu PC=0x%x", 
+                dprintf(EXECUTE, "执行SYSTEM_TYPE指令(NOP): Inst#%" PRId64 " PC=0x%x", 
                        instruction->get_instruction_id(), instruction->get_pc());
                 unit.result = 0;
                 break;
@@ -190,6 +194,12 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                         case static_cast<Funct3>(2): // SW
                             access_size = 4;
                             break;
+                        default:
+                            // 非法的Store指令funct3值 (3, 4, 5, 6, 7等)
+                            unit.has_exception = true;
+                            unit.exception_msg = "非法的Store指令funct3值: " + std::to_string(static_cast<int>(inst.funct3));
+                            dprintf(EXECUTE, "非法的Store指令funct3值: %d", static_cast<int>(inst.funct3));
+                            return; // 提前返回，不继续执行
                     }
                     
                     dprintf(EXECUTE, "Store指令执行：地址=0x%x 值=0x%x", addr, instruction->get_src2_value());
@@ -247,7 +257,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             dprintf(EXECUTE, "ALU%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                dprintf(EXECUTE, "ALU%zu 执行完成，Inst#%lu 结果 0x%x 发送到CDB", 
+                dprintf(EXECUTE, "ALU%zu 执行完成，Inst#%" PRId64 " 结果 0x%x 发送到CDB", 
                                     i, unit.instruction->get_instruction_id(), unit.result);
                 
                 complete_execution_unit(unit, ExecutionUnitType::ALU, i, state);
@@ -263,7 +273,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             dprintf(EXECUTE, "BRANCH%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                dprintf(EXECUTE, "BRANCH%zu 跳转指令执行完成，Inst#%lu 结果发送到CDB", 
+                dprintf(EXECUTE, "BRANCH%zu 跳转指令执行完成，Inst#%" PRId64 " 结果发送到CDB", 
                                         i, unit.instruction->get_instruction_id());
                 complete_execution_unit(unit, ExecutionUnitType::BRANCH, i, state);
             }
@@ -292,7 +302,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 // 尝试Store-to-Load Forwarding
                 bool used_forwarding = perform_load_execution(unit, state);
                 
-                dprintf(EXECUTE, "LOAD%zu 执行完成，Inst#%lu %s 结果=0x%x 发送到CDB",
+                dprintf(EXECUTE, "LOAD%zu 执行完成，Inst#%" PRId64 " %s 结果=0x%x 发送到CDB",
                                            i, unit.instruction->get_instruction_id(),
                                            (used_forwarding ? "(使用Store转发)" : "(从内存读取)"),
                                            unit.result);
@@ -313,7 +323,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 // 存储指令结果为0
                 unit.result = 0;
                 
-                dprintf(EXECUTE, "STORE%zu 执行完成，Inst#%lu 通知ROB完成", 
+                dprintf(EXECUTE, "STORE%zu 执行完成，Inst#%" PRId64 " 通知ROB完成", 
                                     i, unit.instruction->get_instruction_id());
                 
                 complete_execution_unit(unit, ExecutionUnitType::STORE, i, state);

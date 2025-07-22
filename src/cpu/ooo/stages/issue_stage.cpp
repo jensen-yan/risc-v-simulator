@@ -30,7 +30,7 @@ void IssueStage::execute(CPUState& state) {
         return;
     }
     
-    dprintf(ISSUE, "尝试发射 Inst#%lu (ROB[%d])", 
+    dprintf(ISSUE, "尝试发射 Inst#%" PRId64 " (ROB[%d])", 
                         dispatchable_entry->get_instruction_id(), dispatchable_entry->get_rob_entry());
     
     // 检查保留站是否有空闲表项
@@ -66,7 +66,7 @@ void IssueStage::execute(CPUState& state) {
         return;
     }
     
-    dprintf(ISSUE, "Inst#%lu 成功发射到保留站RS[%d]", 
+    dprintf(ISSUE, "Inst#%" PRId64 " 成功发射到保留站RS[%d]", 
                         dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
     
     // 更新指令状态，标记为已发射到保留站

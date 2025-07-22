@@ -90,6 +90,11 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
         case InstructionType::SYSTEM_TYPE:
             needs_src2 = false; // 这些类型只需要一个源操作数或不需要源操作数
             break;
+        default:
+            // UNKNOWN指令类型，应该在解码阶段就被捕获
+            dprintf(RENAME, "警告: 遇到未知指令类型，假设不需要第二个源操作数");
+            needs_src2 = false;
+            break;
     }
     
     if (needs_src2 && instruction.rs2 < NUM_LOGICAL_REGS) {

@@ -51,7 +51,7 @@ void DecodeStage::execute(CPUState& state) {
         return;
     }
     
-    dprintf(DECODE, "分配到ROB[%d] PC=0x%x 指令ID=%lu", 
+    dprintf(DECODE, "分配到ROB[%d] PC=0x%x 指令ID=%" PRId64, 
         dynamic_inst->get_rob_entry(), fetched.pc, instruction_id);
     
     // 继续到发射阶段的处理将在issue_stage中完成

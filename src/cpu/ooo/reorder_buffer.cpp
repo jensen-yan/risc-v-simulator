@@ -66,7 +66,7 @@ DynamicInstPtr ReorderBuffer::allocate_entry(
     allocated_count++;
     
     // 使用新的dprintf宏 - 类似GEM5风格
-    dprintf(ROB, "分配ROB表项 %d, PC=0x%x, InstID=%lu", rob_entry, pc, instruction_id);
+    dprintf(ROB, "分配ROB表项 %d, PC=0x%x, InstID=%" PRId64, rob_entry, pc, instruction_id);
     
     return dynamic_inst;
 }
@@ -121,7 +121,7 @@ void ReorderBuffer::mark_as_dispatched(DynamicInstPtr inst) {
     if (!inst) return;
     
     inst->set_status(DynamicInst::Status::ISSUED);
-    dprintf(ROB, "标记指令 %lu 已发射到保留站", inst->get_instruction_id());
+    dprintf(ROB, "标记指令 %" PRId64 " 已发射到保留站", inst->get_instruction_id());
 }
 
 ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
@@ -164,7 +164,7 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
         head_ptr = next_index(head_ptr);
         entry_count--;
         
-        dprintf(ROB, "提交异常指令 %lu, PC=0x%x", 
+        dprintf(ROB, "提交异常指令 %" PRId64 ", PC=0x%x", 
                head_inst->get_instruction_id(), head_inst->get_pc());
         
         return result;
@@ -184,7 +184,7 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
     head_ptr = next_index(head_ptr);
     entry_count--;
     
-    dprintf(ROB, "提交指令 %lu, PC=0x%x, 结果=0x%x", 
+    dprintf(ROB, "提交指令 %" PRId64 ", PC=0x%x, 结果=0x%x", 
            head_inst->get_instruction_id(), head_inst->get_pc(), head_inst->get_result());
     
     return result;

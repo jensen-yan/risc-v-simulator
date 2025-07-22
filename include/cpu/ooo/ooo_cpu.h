@@ -85,7 +85,7 @@ public:
     void dumpPipelineState() const;
     
     // DiffTest控制接口
-    void setDiffTest(class DiffTest* difftest);  // 由Simulator设置DiffTest引用
+    void setDiffTest(class DiffTest* difftest) override;  // 由Simulator设置DiffTest引用
     void enableDiffTest(bool enable);
     bool isDiffTestEnabled() const override;
     void performDiffTestWithCommittedPC(uint32_t committed_pc) override;

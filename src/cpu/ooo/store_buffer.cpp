@@ -1,8 +1,6 @@
 #include "cpu/ooo/store_buffer.h"
 #include "common/debug_types.h"
 #include "common/types.h"
-#include <iostream>
-#include <iomanip>
 
 namespace riscv {
 
@@ -22,7 +20,7 @@ void StoreBuffer::add_store(DynamicInstPtr instruction, uint32_t address, uint32
     entry.value = value;
     entry.size = size;
     
-    dprintf(EXECUTE, "Store Buffer添加条目[%d]: 地址=0x%x, 值=0x%x, 大小=%d, Inst#%lu, PC=0x%x", 
+    dprintf(EXECUTE, "Store Buffer添加条目[%d]: 地址=0x%x, 值=0x%x, 大小=%d, Inst#%" PRId64 ", PC=0x%x", 
             next_allocate_index, address, value, size, instruction->get_instruction_id(), instruction->get_pc());
     
     // 移动到下一个分配位置（循环）
@@ -43,7 +41,7 @@ bool StoreBuffer::forward_load(uint32_t address, uint8_t size, uint32_t& result_
             // 如果完全匹配，可以直接转发
             if (entry.address == address && entry.size == size) {
                 result_value = entry.value;
-                dprintf(EXECUTE, "Store-to-Load Forwarding: 完全匹配 地址=0x%x, 大小=%d, 转发值=0x%x (来自Inst#%lu)", 
+                dprintf(EXECUTE, "Store-to-Load Forwarding: 完全匹配 地址=0x%x, 大小=%d, 转发值=0x%x (来自Inst#%" PRId64 ")", 
                         address, size, result_value, entry.instruction->get_instruction_id());
                 return true;
             }
@@ -51,12 +49,12 @@ bool StoreBuffer::forward_load(uint32_t address, uint8_t size, uint32_t& result_
             // 部分重叠的情况 - 需要提取正确的数据
             if (can_extract_load_data(entry, address, size)) {
                 result_value = extract_load_data(entry, address, size);
-                dprintf(EXECUTE, "Store-to-Load Forwarding: 部分匹配 Load地址=0x%x, Load大小=%d, Store地址=0x%x, Store大小=%d, 转发值=0x%x (来自Inst#%lu)", 
+                dprintf(EXECUTE, "Store-to-Load Forwarding: 部分匹配 Load地址=0x%x, Load大小=%d, Store地址=0x%x, Store大小=%d, 转发值=0x%x (来自Inst#%" PRId64 ")", 
                         address, size, entry.address, entry.size, result_value, entry.instruction->get_instruction_id());
                 return true;
             } else {
                 // 有重叠但无法转发（如部分字节写入）- 这种情况下Load必须等待Store提交到内存
-                dprintf(EXECUTE, "Store-to-Load Forwarding: 地址重叠但无法转发 Load地址=0x%x, Load大小=%d, Store地址=0x%x, Store大小=%d (来自Inst#%lu)", 
+                dprintf(EXECUTE, "Store-to-Load Forwarding: 地址重叠但无法转发 Load地址=0x%x, Load大小=%d, Store地址=0x%x, Store大小=%d (来自Inst#%" PRId64 ")", 
                         address, size, entry.address, entry.size, entry.instruction->get_instruction_id());
                 return false; // 无法转发，Load需要等待
             }
@@ -73,7 +71,7 @@ void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
     
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         if (entries[i].valid && entries[i].instruction && entries[i].instruction->get_instruction_id() <= instruction_id) {
-            dprintf(EXECUTE, "Store Buffer退休条目[%d]: Inst#%lu, 地址=0x%x", 
+            dprintf(EXECUTE, "Store Buffer退休条目[%d]: Inst#%" PRId64 ", 地址=0x%x", 
                     i, entries[i].instruction->get_instruction_id(), entries[i].address);
             entries[i].valid = false;
             entries[i].instruction = nullptr; // 清除指令指针
@@ -82,7 +80,7 @@ void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
     }
     
     if (retired_count > 0) {
-        dprintf(EXECUTE, "Store Buffer退休了%d个条目，指令ID <= %lu", retired_count, instruction_id);
+        dprintf(EXECUTE, "Store Buffer退休了%d个条目，指令ID <= %" PRId64, retired_count, instruction_id);
     }
 }
 
@@ -103,7 +101,7 @@ void StoreBuffer::dump() const {
     bool has_valid = false;
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         if (entries[i].valid && entries[i].instruction) {
-            dprintf(EXECUTE, "  [%d] 地址=0x%x, 值=0x%x, 大小=%d, Inst#%lu, PC=0x%x", 
+            dprintf(EXECUTE, "  [%d] 地址=0x%x, 值=0x%x, 大小=%d, Inst#%" PRId64 ", PC=0x%x", 
                     i, entries[i].address, entries[i].value, entries[i].size, 
                     entries[i].instruction->get_instruction_id(), entries[i].instruction->get_pc());
             has_valid = true;

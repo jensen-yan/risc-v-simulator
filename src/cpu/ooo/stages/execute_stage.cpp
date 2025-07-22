@@ -27,34 +27,29 @@ void ExecuteStage::execute(CPUState& state) {
             unit->has_exception = false;
             
             const char* unit_type_str = "";
-            int cycle_count = 0;
             
-            // 根据指令类型设置执行周期
+            // 使用预解析的执行周期数，无需重复判断指令类型
+            const auto& decoded_info = dispatch_result.instruction->get_decoded_info();
+            unit->remaining_cycles = decoded_info.execution_cycles;
+            
+            // 根据执行单元类型设置调试信息
             switch (dispatch_result.unit_type) {
                 case ExecutionUnitType::ALU:
                     unit_type_str = "ALU";
-                    unit->remaining_cycles = 1;
-                    cycle_count = 1;
                     break;
                 case ExecutionUnitType::BRANCH:
                     unit_type_str = "BRANCH";
-                    unit->remaining_cycles = 1;
-                    cycle_count = 1;
                     break;
                 case ExecutionUnitType::LOAD:
                     unit_type_str = "LOAD";
-                    unit->remaining_cycles = 2;  // 加载指令需要2个周期
-                    cycle_count = 2;
                     break;
                 case ExecutionUnitType::STORE:
                     unit_type_str = "STORE";
-                    unit->remaining_cycles = 1;
-                    cycle_count = 1;
                     break;
             }
             
             dprintf(EXECUTE, "指令开始在 %s 单元执行，需要 %d 个周期", 
-                                unit_type_str, cycle_count);
+                                unit_type_str, unit->remaining_cycles);
             
             // 开始执行指令
             execute_instruction(*unit, dispatch_result.instruction, state);
@@ -70,6 +65,14 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
     try {
         const auto& inst = instruction->get_decoded_info();
         
+        // 首先检查解码时发现的异常
+        if (inst.has_decode_exception) {
+            unit.has_exception = true;
+            unit.exception_msg = inst.decode_exception_msg;
+            dprintf(EXECUTE, "解码异常: %s", inst.decode_exception_msg.c_str());
+            return;
+        }
+        
         switch (inst.type) {
             case InstructionType::R_TYPE:
                 // 寄存器-寄存器运算
@@ -81,35 +84,13 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     // 立即数运算
                     unit.result = InstructionExecutor::executeImmediateOperation(inst, instruction->get_src1_value());
                 } else if (inst.opcode == Opcode::LOAD) {
-                    // 加载指令
+                    // 加载指令 - 使用预解析的静态信息
                     uint32_t addr = instruction->get_src1_value() + inst.imm;
                     
-                    // 确定访问大小
-                    uint8_t access_size = 1; // 默认字节访问
-                    switch (inst.funct3) {
-                        case static_cast<Funct3>(0): // LB
-                        case static_cast<Funct3>(4): // LBU
-                            access_size = 1;
-                            break;
-                        case static_cast<Funct3>(1): // LH
-                        case static_cast<Funct3>(5): // LHU
-                            access_size = 2;
-                            break;
-                        case static_cast<Funct3>(2): // LW
-                            access_size = 4;
-                            break;
-                        default:
-                            // 非法的Load指令funct3值 (3, 6, 7等)
-                            unit.has_exception = true;
-                            unit.exception_msg = "非法的Load指令funct3值: " + std::to_string(static_cast<int>(inst.funct3));
-                            dprintf(EXECUTE, "非法的Load指令funct3值: %d", static_cast<int>(inst.funct3));
-                            return; // 提前返回，不继续执行
-                    }
-                    
-                    // 在execute_instruction中，Load指令只计算地址，实际的转发和内存访问在update_execution_units中进行
+                    // 异常已在解码时检测，这里直接使用预解析的信息
                     unit.load_address = addr;
-                    unit.load_size = access_size;
-                    dprintf(EXECUTE, "Load指令开始执行，地址=0x%x", addr);
+                    unit.load_size = inst.memory_access_size;
+                    dprintf(EXECUTE, "Load指令开始执行，地址=0x%x，大小=%d字节", addr, inst.memory_access_size);
                     
                 } else if (inst.opcode == Opcode::JALR) {
                     // JALR 指令 - I-type 跳转指令
@@ -178,37 +159,19 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                 break;
                 
             case InstructionType::S_TYPE:
-                // 存储指令
+                // 存储指令 - 使用预解析的静态信息
                 {
                     uint32_t addr = instruction->get_src1_value() + inst.imm;
                     
-                    // 确定访问大小
-                    uint8_t access_size = 1; // 默认字节访问
-                    switch (inst.funct3) {
-                        case static_cast<Funct3>(0): // SB
-                            access_size = 1;
-                            break;
-                        case static_cast<Funct3>(1): // SH
-                            access_size = 2;
-                            break;
-                        case static_cast<Funct3>(2): // SW
-                            access_size = 4;
-                            break;
-                        default:
-                            // 非法的Store指令funct3值 (3, 4, 5, 6, 7等)
-                            unit.has_exception = true;
-                            unit.exception_msg = "非法的Store指令funct3值: " + std::to_string(static_cast<int>(inst.funct3));
-                            dprintf(EXECUTE, "非法的Store指令funct3值: %d", static_cast<int>(inst.funct3));
-                            return; // 提前返回，不继续执行
-                    }
-                    
-                    dprintf(EXECUTE, "Store指令执行：地址=0x%x 值=0x%x", addr, instruction->get_src2_value());
+                    // 异常已在解码时检测，这里直接使用预解析的信息
+                    dprintf(EXECUTE, "Store指令执行：地址=0x%x 值=0x%x 大小=%d字节", 
+                            addr, instruction->get_src2_value(), inst.memory_access_size);
                     
                     // 执行Store到内存
                     InstructionExecutor::storeToMemory(state.memory, addr, instruction->get_src2_value(), inst.funct3);
                     
                     // 同时添加到Store Buffer用于Store-to-Load Forwarding
-                    state.store_buffer->add_store(instruction, addr, instruction->get_src2_value(), access_size);
+                    state.store_buffer->add_store(instruction, addr, instruction->get_src2_value(), inst.memory_access_size);
                 }
                 break;
                 
@@ -481,30 +444,40 @@ bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) 
     bool forwarded = state.store_buffer->forward_load(addr, access_size, forwarded_value);
     
     if (forwarded) {
-        // 从Store Buffer获得转发数据，还需要进行符号扩展处理
-        switch (inst.funct3) {
-            case static_cast<Funct3>(0): // LB - 符号扩展字节
-                unit.result = static_cast<uint32_t>(static_cast<int8_t>(forwarded_value & 0xFF));
-                break;
-            case static_cast<Funct3>(1): // LH - 符号扩展半字
-                unit.result = static_cast<uint32_t>(static_cast<int16_t>(forwarded_value & 0xFFFF));
-                break;
-            case static_cast<Funct3>(2): // LW - 字
-                unit.result = forwarded_value;
-                break;
-            case static_cast<Funct3>(4): // LBU - 零扩展字节
-                unit.result = forwarded_value & 0xFF;
-                break;
-            case static_cast<Funct3>(5): // LHU - 零扩展半字
-                unit.result = forwarded_value & 0xFFFF;
-                break;
-            default:
-                unit.result = forwarded_value;
-                break;
+        // 从Store Buffer获得转发数据，根据预解析的符号扩展信息处理
+        if (inst.is_signed_load) {
+            // 符号扩展Load指令：LB, LH, LW
+            switch (access_size) {
+                case 1: // LB
+                    unit.result = static_cast<uint32_t>(static_cast<int8_t>(forwarded_value & 0xFF));
+                    break;
+                case 2: // LH
+                    unit.result = static_cast<uint32_t>(static_cast<int16_t>(forwarded_value & 0xFFFF));
+                    break;
+                case 4: // LW
+                    unit.result = forwarded_value;
+                    break;
+                default:
+                    unit.result = forwarded_value;
+                    break;
+            }
+        } else {
+            // 零扩展Load指令：LBU, LHU
+            switch (access_size) {
+                case 1: // LBU
+                    unit.result = forwarded_value & 0xFF;
+                    break;
+                case 2: // LHU
+                    unit.result = forwarded_value & 0xFFFF;
+                    break;
+                default:
+                    unit.result = forwarded_value;
+                    break;
+            }
         }
         
-        dprintf(EXECUTE, "Store-to-Load Forwarding成功: 地址=0x%x 转发值=0x%x", 
-                       addr, unit.result);
+        dprintf(EXECUTE, "Store-to-Load Forwarding成功: 地址=0x%x 转发值=0x%x %s扩展", 
+                       addr, unit.result, inst.is_signed_load ? "符号" : "零");
         return true; // 使用了转发
     } else {
         // 没有转发，从内存读取

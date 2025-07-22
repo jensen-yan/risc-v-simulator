@@ -55,6 +55,9 @@ DecodedInstruction Decoder::decode(Instruction instruction, uint32_t enabled_ext
         decoded.rd = 0;  // SYSTEM指令不写回寄存器
     }
     
+    // 初始化静态执行属性 - 避免ExecuteStage重复解析
+    decoded.initialize_execution_properties();
+    
     return decoded;
 }
 
@@ -174,6 +177,10 @@ DecodedInstruction Decoder::decodeCompressed(uint16_t instruction, uint32_t enab
     
     DecodedInstruction decoded = expandCompressedInstruction(instruction);
     decoded.is_compressed = true;
+    
+    // 初始化静态执行属性 - 避免ExecuteStage重复解析
+    decoded.initialize_execution_properties();
+    
     validateInstruction(decoded, enabled_extensions);
     return decoded;
 }

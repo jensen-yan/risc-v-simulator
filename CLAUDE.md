@@ -78,3 +78,4 @@ riscv64-unknown-elf-objcopy -O binary test_simple.elf test_simple.bin
 ## 调试记忆
 
 - 你当前可能再build 目录下，所以找不到函数和文件，查找文件请回到主目录！
+- 记住用 python3 run_tests.py --ooo 来回归测试程序是否通过

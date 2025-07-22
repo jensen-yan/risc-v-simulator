@@ -185,10 +185,22 @@ struct DecodedInstruction {
     FPRoundingMode rm;  // 浮点舍入模式
     bool is_compressed; // 是否为压缩指令
     
+    // 静态执行属性 - 由解码器一次性计算，避免运行时重复解析
+    uint8_t memory_access_size; // 内存访问大小（字节），0表示非内存指令
+    bool is_signed_load;        // 是否为符号扩展的加载指令
+    uint8_t execution_cycles;   // 预期执行周期数
+    bool has_decode_exception;  // 解码时发现的异常（如非法funct3）
+    std::string decode_exception_msg; // 解码异常消息
+    
     DecodedInstruction() : type(InstructionType::UNKNOWN), opcode(static_cast<Opcode>(0)),
                           rd(0), rs1(0), rs2(0), rs3(0), imm(0), 
                           funct3(static_cast<Funct3>(0)), funct7(static_cast<Funct7>(0)),
-                          rm(FPRoundingMode::RNE), is_compressed(false) {}
+                          rm(FPRoundingMode::RNE), is_compressed(false),
+                          memory_access_size(0), is_signed_load(false), execution_cycles(1),
+                          has_decode_exception(false) {}
+    
+    // 初始化静态执行属性 - 在解码器中调用
+    void initialize_execution_properties();
 };
 
 // 异常类型

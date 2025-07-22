@@ -67,11 +67,15 @@ make -j
 git submodule update --init --recursive
 
 # only for ubuntu 22.04
-source setup_riscv_env.sh
+sudo apt install gcc-riscv64-unknown-elf    
+sudo apt install picolibc-riscv64-unknown-elf
+# source setup_riscv_env.sh
 
 cd riscv-tests
 
 # see README.md in riscv-tests
+autoconf
+./configure
 make -j 
 
 ```

@@ -19,11 +19,20 @@ export C_INCLUDE_PATH="/usr/lib/picolibc/riscv64-unknown-elf/include:$C_INCLUDE_
 # 设置库文件搜索路径
 export LIBRARY_PATH="/usr/lib/picolibc/riscv64-unknown-elf/lib/rv64imafdc/lp64d:$LIBRARY_PATH"
 
+# 定义便捷编译函数
+make_riscv_tests() {
+    make "$@" RISCV_GCC="riscv64-unknown-elf-gcc -specs=picolibc.specs"
+}
+
 # 显示配置信息
 echo "✅ RISC-V 环境配置完成"
 echo "   RISCV = $RISCV"
 echo "   头文件路径 = /usr/lib/picolibc/riscv64-unknown-elf/include"
 echo "   库文件路径 = /usr/lib/picolibc/riscv64-unknown-elf/lib/rv64imafdc/lp64d"
+echo "   已定义make_riscv_tests函数，使用picolibc规格编译"
 echo ""
 echo "现在可以编译 riscv-tests："
-echo "   cd riscv-tests && make" 
+echo "   cd riscv-tests"
+echo "   make_riscv_tests         # 编译全部"
+echo "   make_riscv_tests benchmarks  # 仅编译benchmarks"
+echo "   make_riscv_tests isa        # 仅编译isa" 

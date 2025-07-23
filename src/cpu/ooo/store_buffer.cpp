@@ -10,7 +10,7 @@ StoreBuffer::StoreBuffer() : next_allocate_index(0) {
     }
 }
 
-void StoreBuffer::add_store(DynamicInstPtr instruction, uint32_t address, uint32_t value, uint8_t size) {
+void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64_t value, uint8_t size) {
     // 找到下一个可用的条目（可能覆盖旧条目）
     StoreBufferEntry& entry = entries[next_allocate_index];
     
@@ -20,14 +20,14 @@ void StoreBuffer::add_store(DynamicInstPtr instruction, uint32_t address, uint32
     entry.value = value;
     entry.size = size;
     
-    dprintf(EXECUTE, "Store Buffer添加条目[%d]: 地址=0x%x, 值=0x%x, 大小=%d, Inst#%" PRId64 ", PC=0x%x", 
+    dprintf(EXECUTE, "Store Buffer添加条目[%d]: 地址=0x%" PRIx64 ", 值=0x%" PRIx64 ", 大小=%d, Inst#%" PRId64 ", PC=0x%" PRIx64, 
             next_allocate_index, address, value, size, instruction->get_instruction_id(), instruction->get_pc());
     
     // 移动到下一个分配位置（循环）
     next_allocate_index = (next_allocate_index + 1) % MAX_ENTRIES;
 }
 
-bool StoreBuffer::forward_load(uint32_t address, uint8_t size, uint32_t& result_value) const {
+bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value) const {
     // 从最新的Store开始向前搜索（最近的Store优先）
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         // 从最近分配的位置开始向前搜索
@@ -41,7 +41,7 @@ bool StoreBuffer::forward_load(uint32_t address, uint8_t size, uint32_t& result_
             // 如果完全匹配，可以直接转发
             if (entry.address == address && entry.size == size) {
                 result_value = entry.value;
-                dprintf(EXECUTE, "Store-to-Load Forwarding: 完全匹配 地址=0x%x, 大小=%d, 转发值=0x%x (来自Inst#%" PRId64 ")", 
+                dprintf(EXECUTE, "Store-to-Load Forwarding: 完全匹配 地址=0x%" PRIx64 ", 大小=%d, 转发值=0x%" PRIx64 " (来自Inst#%" PRId64 ")", 
                         address, size, result_value, entry.instruction->get_instruction_id());
                 return true;
             }
@@ -49,12 +49,12 @@ bool StoreBuffer::forward_load(uint32_t address, uint8_t size, uint32_t& result_
             // 部分重叠的情况 - 需要提取正确的数据
             if (can_extract_load_data(entry, address, size)) {
                 result_value = extract_load_data(entry, address, size);
-                dprintf(EXECUTE, "Store-to-Load Forwarding: 部分匹配 Load地址=0x%x, Load大小=%d, Store地址=0x%x, Store大小=%d, 转发值=0x%x (来自Inst#%" PRId64 ")", 
+                dprintf(EXECUTE, "Store-to-Load Forwarding: 部分匹配 Load地址=0x%" PRIx64 ", Load大小=%d, Store地址=0x%" PRIx64 ", Store大小=%d, 转发值=0x%" PRIx64 " (来自Inst#%" PRId64 ")", 
                         address, size, entry.address, entry.size, result_value, entry.instruction->get_instruction_id());
                 return true;
             } else {
                 // 有重叠但无法转发（如部分字节写入）- 这种情况下Load必须等待Store提交到内存
-                dprintf(EXECUTE, "Store-to-Load Forwarding: 地址重叠但无法转发 Load地址=0x%x, Load大小=%d, Store地址=0x%x, Store大小=%d (来自Inst#%" PRId64 ")", 
+                dprintf(EXECUTE, "Store-to-Load Forwarding: 地址重叠但无法转发 Load地址=0x%" PRIx64 ", Load大小=%d, Store地址=0x%" PRIx64 ", Store大小=%d (来自Inst#%" PRId64 ")", 
                         address, size, entry.address, entry.size, entry.instruction->get_instruction_id());
                 return false; // 无法转发，Load需要等待
             }
@@ -62,7 +62,7 @@ bool StoreBuffer::forward_load(uint32_t address, uint8_t size, uint32_t& result_
     }
     
     // 没有找到匹配的Store，Load可以直接从内存读取
-    dprintf(EXECUTE, "Store-to-Load Forwarding: 没有找到匹配的Store，地址=0x%x, 大小=%d", address, size);
+    dprintf(EXECUTE, "Store-to-Load Forwarding: 没有找到匹配的Store，地址=0x%" PRIx64 ", 大小=%d", address, size);
     return false; // 表示没有匹配，不是转发失败
 }
 
@@ -71,7 +71,7 @@ void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
     
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         if (entries[i].valid && entries[i].instruction && entries[i].instruction->get_instruction_id() <= instruction_id) {
-            dprintf(EXECUTE, "Store Buffer退休条目[%d]: Inst#%" PRId64 ", 地址=0x%x", 
+            dprintf(EXECUTE, "Store Buffer退休条目[%d]: Inst#%" PRId64 ", 地址=0x%" PRIx64, 
                     i, entries[i].instruction->get_instruction_id(), entries[i].address);
             entries[i].valid = false;
             entries[i].instruction = nullptr; // 清除指令指针
@@ -101,7 +101,7 @@ void StoreBuffer::dump() const {
     bool has_valid = false;
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         if (entries[i].valid && entries[i].instruction) {
-            dprintf(EXECUTE, "  [%d] 地址=0x%x, 值=0x%x, 大小=%d, Inst#%" PRId64 ", PC=0x%x", 
+            dprintf(EXECUTE, "  [%d] 地址=0x%" PRIx64 ", 值=0x%" PRIx64 ", 大小=%d, Inst#%" PRId64 ", PC=0x%" PRIx64, 
                     i, entries[i].address, entries[i].value, entries[i].size, 
                     entries[i].instruction->get_instruction_id(), entries[i].instruction->get_pc());
             has_valid = true;
@@ -113,29 +113,29 @@ void StoreBuffer::dump() const {
     }
 }
 
-bool StoreBuffer::addresses_overlap(uint32_t addr1, uint8_t size1, uint32_t addr2, uint8_t size2) const {
-    uint32_t end1 = addr1 + size1 - 1;
-    uint32_t end2 = addr2 + size2 - 1;
+bool StoreBuffer::addresses_overlap(uint64_t addr1, uint8_t size1, uint64_t addr2, uint8_t size2) const {
+    uint64_t end1 = addr1 + size1 - 1;
+    uint64_t end2 = addr2 + size2 - 1;
     
     // 两个内存区域有重叠当且仅当：
     // addr1 <= end2 && addr2 <= end1
     return (addr1 <= end2) && (addr2 <= end1);
 }
 
-bool StoreBuffer::can_extract_load_data(const StoreBufferEntry& store_entry, uint32_t load_addr, uint8_t load_size) const {
+bool StoreBuffer::can_extract_load_data(const StoreBufferEntry& store_entry, uint64_t load_addr, uint8_t load_size) const {
     // 检查Load访问是否完全在Store的范围内
-    uint32_t store_end = store_entry.address + store_entry.size - 1;
-    uint32_t load_end = load_addr + load_size - 1;
+    uint64_t store_end = store_entry.address + store_entry.size - 1;
+    uint64_t load_end = load_addr + load_size - 1;
     
     return (load_addr >= store_entry.address) && (load_end <= store_end);
 }
 
-uint32_t StoreBuffer::extract_load_data(const StoreBufferEntry& store_entry, uint32_t load_addr, uint8_t load_size) const {
+uint64_t StoreBuffer::extract_load_data(const StoreBufferEntry& store_entry, uint64_t load_addr, uint8_t load_size) const {
     // 计算Load在Store数据中的偏移
-    uint32_t offset = load_addr - store_entry.address;
+    uint64_t offset = load_addr - store_entry.address;
     
     // 根据偏移和大小提取数据
-    uint32_t result = 0;
+    uint64_t result = 0;
     
     switch (load_size) {
         case 1: // 字节访问
@@ -151,8 +151,16 @@ uint32_t StoreBuffer::extract_load_data(const StoreBufferEntry& store_entry, uin
             break;
             
         case 4: // 字访问
+            if (offset % 4 != 0) {
+                // 字访问必须4字节对齐
+                return 0;
+            }
+            result = (store_entry.value >> (offset * 8)) & 0xFFFFFFFF;
+            break;
+            
+        case 8: // 双字访问 (64位)
             if (offset != 0) {
-                // 字访问必须完全对齐
+                // 双字访问必须完全对齐
                 return 0;
             }
             result = store_entry.value;

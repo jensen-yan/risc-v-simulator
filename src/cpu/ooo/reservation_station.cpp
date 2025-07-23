@@ -62,7 +62,7 @@ ReservationStation::IssueResult ReservationStation::issue_instruction(DynamicIns
     result.rs_entry = rs_id;
     issued_count++;
     
-    dprintf(RS, "发射指令到保留站 RS%d, PC=0x%x, InstID=%" PRId64, 
+    dprintf(RS, "发射指令到保留站 RS%d, PC=0x%" PRIx64 ", InstID=%" PRId64, 
            (int)rs_id, dynamic_inst->get_pc(), dynamic_inst->get_instruction_id());
     
     return result;
@@ -117,7 +117,7 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
     
     dispatched_count++;
     
-    dprintf(RS, "调度指令到执行单元 %s%d, PC=0x%x, InstID=%" PRId64, 
+    dprintf(RS, "调度指令到执行单元 %s%d, PC=0x%" PRIx64 ", InstID=%" PRId64, 
            (unit_type == ExecutionUnitType::ALU ? "ALU" :
             unit_type == ExecutionUnitType::BRANCH ? "BRANCH" :
             unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE"),
@@ -143,13 +143,13 @@ void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry) {
             // 检查源操作数1
             if (!inst->is_src1_ready() && inst->get_physical_src1() == phys_dest) {
                 inst->set_src1_ready(true, result);
-                dprintf(RS, "RS%d 源操作数1就绪: p%d = 0x%x", i, phys_dest, result);
+                dprintf(RS, "RS%d 源操作数1就绪: p%d = 0x%" PRIx64, i, phys_dest, result);
             }
             
             // 检查源操作数2
             if (!inst->is_src2_ready() && inst->get_physical_src2() == phys_dest) {
                 inst->set_src2_ready(true, result);
-                dprintf(RS, "RS%d 源操作数2就绪: p%d = 0x%x", i, phys_dest, result);
+                dprintf(RS, "RS%d 源操作数2就绪: p%d = 0x%" PRIx64, i, phys_dest, result);
             }
         }
     }

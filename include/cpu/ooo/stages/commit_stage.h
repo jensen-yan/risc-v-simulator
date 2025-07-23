@@ -22,18 +22,18 @@ public:
 
 private:
     // 处理系统调用
-    void handle_ecall(CPUState& state, uint32_t instruction_pc);
+    void handle_ecall(CPUState& state, uint64_t instruction_pc);
     void handle_ebreak(CPUState& state);
     
     // 异常处理
-    void handle_exception(CPUState& state, const std::string& exception_msg, uint32_t pc);
+    void handle_exception(CPUState& state, const std::string& exception_msg, uint64_t pc);
     
     // 流水线刷新（用于跳转指令提交后）
     void flush_pipeline_after_commit(CPUState& state);
     void reset_execution_units(CPUState& state);
     
     // 调试辅助方法
-    void print_stage_activity(const std::string& activity, uint64_t cycle, uint32_t pc);
+    void print_stage_activity(const std::string& activity, uint64_t cycle, uint64_t pc);
 };
 
 } // namespace riscv 

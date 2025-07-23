@@ -164,7 +164,7 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
         head_ptr = next_index(head_ptr);
         entry_count--;
         
-        dprintf(ROB, "提交异常指令 %" PRId64 ", PC=0x%x", 
+        dprintf(ROB, "提交异常指令 %" PRId64 ", PC=0x%" PRIx64, 
                head_inst->get_instruction_id(), head_inst->get_pc());
         
         return result;
@@ -184,7 +184,7 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
     head_ptr = next_index(head_ptr);
     entry_count--;
     
-    dprintf(ROB, "提交指令 %" PRId64 ", PC=0x%x, 结果=0x%x", 
+    dprintf(ROB, "提交指令 %" PRId64 ", PC=0x%" PRIx64 ", 结果=0x%" PRIx64, 
            head_inst->get_instruction_id(), head_inst->get_pc(), head_inst->get_result());
     
     return result;

@@ -101,7 +101,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     // 异常已在解码时检测，这里直接使用预解析的信息
                     unit.load_address = addr;
                     unit.load_size = inst.memory_access_size;
-                    dprintf(EXECUTE, "Load指令开始执行，地址=0x%lx，大小=%d字节", addr, inst.memory_access_size);
+                    dprintf(EXECUTE, "Load指令开始执行，地址=0x%" PRIx64 "，大小=%d字节", addr, inst.memory_access_size);
                     
                 } else if (inst.opcode == Opcode::JALR) {
                     // JALR 指令 - I-type 跳转指令
@@ -119,7 +119,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
 
             case InstructionType::SYSTEM_TYPE:
                 // CSR指令或系统调用 - 暂时作为NOP处理
-                dprintf(EXECUTE, "执行SYSTEM_TYPE指令(NOP): Inst#%" PRId64 " PC=0x%lx", 
+                dprintf(EXECUTE, "执行SYSTEM_TYPE指令(NOP): Inst#%" PRId64 " PC=0x%" PRIx64, 
                        instruction->get_instruction_id(), instruction->get_pc());
                 unit.result = 0;
                 break;
@@ -143,13 +143,13 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                         
                         if (!predicted_taken) {
                             // 预测不跳转，但实际跳转 -> 预测错误
-                            dprintf(EXECUTE, "分支指令 taken，目标地址: 0x%x (PC=0x%x + IMM=%d) (将在提交阶段刷新)",
+                            dprintf(EXECUTE, "分支指令 taken，目标地址: 0x%" PRIx64 " (PC=0x%" PRIx64 " + IMM=%d) (将在提交阶段刷新)",
                                    unit.jump_target, instruction->get_pc(), inst.imm);
                             // 注意：不在执行阶段刷新，让指令正常完成并提交
                             state.branch_mispredicts++;
                         } else {
                             // 预测跳转，实际跳转 -> 预测正确
-                            dprintf(EXECUTE, "分支指令 taken，目标地址: 0x%x (分支预测正确)", unit.jump_target);
+                            dprintf(EXECUTE, "分支指令 taken，目标地址: 0x%" PRIx64 " (分支预测正确)", unit.jump_target);
                         }
                     } else {
                         // 分支not taken：条件不成立，继续顺序执行
@@ -175,7 +175,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     uint64_t addr = instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
                     
                     // 异常已在解码时检测，这里直接使用预解析的信息
-                    dprintf(EXECUTE, "Store指令执行：地址=0x%lx 值=0x%lx 大小=%d字节", 
+                    dprintf(EXECUTE, "Store指令执行：地址=0x%" PRIx64 " 值=0x%" PRIx64 " 大小=%d字节", 
                             addr, instruction->get_src2_value(), inst.memory_access_size);
                     
                     // 执行Store到内存
@@ -200,7 +200,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     instruction->set_jump_info(true, unit.jump_target);
                     
                     // 无条件跳转指令：记录预测错误但不在执行阶段刷新
-                    dprintf(EXECUTE, "无条件跳转指令，目标地址: 0x%x (PC=0x%x) (将在提交阶段刷新流水线)",
+                    dprintf(EXECUTE, "无条件跳转指令，目标地址: 0x%" PRIx64 " (PC=0x%" PRIx64 ") (将在提交阶段刷新流水线)",
                            unit.jump_target, instruction->get_pc());
                     
                     // 注意：不在执行阶段刷新，让指令正常完成并提交
@@ -231,7 +231,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             dprintf(EXECUTE, "ALU%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                dprintf(EXECUTE, "ALU%zu 执行完成，Inst#%" PRId64 " 结果 0x%x 发送到CDB", 
+                dprintf(EXECUTE, "ALU%zu 执行完成，Inst#%" PRId64 " 结果 0x%" PRIx64 " 发送到CDB", 
                                     i, unit.instruction->get_instruction_id(), unit.result);
                 
                 complete_execution_unit(unit, ExecutionUnitType::ALU, i, state);
@@ -276,7 +276,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 // 尝试Store-to-Load Forwarding
                 bool used_forwarding = perform_load_execution(unit, state);
                 
-                dprintf(EXECUTE, "LOAD%zu 执行完成，Inst#%" PRId64 " %s 结果=0x%x 发送到CDB",
+                dprintf(EXECUTE, "LOAD%zu 执行完成，Inst#%" PRId64 " %s 结果=0x%" PRIx64 " 发送到CDB",
                                            i, unit.instruction->get_instruction_id(),
                                            (used_forwarding ? "(使用Store转发)" : "(从内存读取)"),
                                            unit.result);
@@ -332,7 +332,7 @@ ExecutionUnit* ExecuteStage::get_available_unit(ExecutionUnitType type, CPUState
     return nullptr;
 }
 
-bool ExecuteStage::execute_branch_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2, CPUState& state) {
+bool ExecuteStage::execute_branch_operation(const DecodedInstruction& inst, uint64_t src1, uint64_t src2, CPUState& state) {
     bool should_branch = InstructionExecutor::evaluateBranchCondition(inst, src1, src2);
     
     // 简化的分支预测检查
@@ -349,17 +349,17 @@ bool ExecuteStage::execute_branch_operation(const DecodedInstruction& inst, uint
     return false;
 }
 
-void ExecuteStage::execute_store_operation(const DecodedInstruction& inst, uint32_t src1, uint32_t src2, CPUState& state) {
-    uint32_t addr = src1 + inst.imm;
+void ExecuteStage::execute_store_operation(const DecodedInstruction& inst, uint64_t src1, uint64_t src2, CPUState& state) {
+    uint64_t addr = src1 + inst.imm;
     InstructionExecutor::storeToMemory(state.memory, addr, src2, inst.funct3);
 }
 
-bool ExecuteStage::predict_branch(uint32_t pc) {
+bool ExecuteStage::predict_branch(uint64_t pc) {
     // 简化的分支预测：总是预测不跳转
     return false;
 }
 
-void ExecuteStage::update_branch_predictor(uint32_t pc, bool taken) {
+void ExecuteStage::update_branch_predictor(uint64_t pc, bool taken) {
     // 简化实现：不更新预测器
 }
 
@@ -447,11 +447,11 @@ void ExecuteStage::reset() {
 
 bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) {
     const auto& inst = unit.instruction->get_decoded_info();
-    uint32_t addr = unit.load_address;
+    uint64_t addr = unit.load_address;
     uint8_t access_size = unit.load_size;
     
     // 尝试Store-to-Load Forwarding
-    uint32_t forwarded_value;
+    uint64_t forwarded_value;
     bool forwarded = state.store_buffer->forward_load(addr, access_size, forwarded_value);
     
     if (forwarded) {
@@ -460,12 +460,15 @@ bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) 
             // 符号扩展Load指令：LB, LH, LW
             switch (access_size) {
                 case 1: // LB
-                    unit.result = static_cast<uint32_t>(static_cast<int8_t>(forwarded_value & 0xFF));
+                    unit.result = static_cast<uint64_t>(static_cast<int8_t>(forwarded_value & 0xFF));
                     break;
                 case 2: // LH
-                    unit.result = static_cast<uint32_t>(static_cast<int16_t>(forwarded_value & 0xFFFF));
+                    unit.result = static_cast<uint64_t>(static_cast<int16_t>(forwarded_value & 0xFFFF));
                     break;
                 case 4: // LW
+                    unit.result = static_cast<uint64_t>(static_cast<int32_t>(forwarded_value & 0xFFFFFFFF));
+                    break;
+                case 8: // LD (64位)
                     unit.result = forwarded_value;
                     break;
                 default:
@@ -473,7 +476,7 @@ bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) 
                     break;
             }
         } else {
-            // 零扩展Load指令：LBU, LHU
+            // 零扩展Load指令：LBU, LHU, LWU
             switch (access_size) {
                 case 1: // LBU
                     unit.result = forwarded_value & 0xFF;
@@ -481,13 +484,19 @@ bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) 
                 case 2: // LHU
                     unit.result = forwarded_value & 0xFFFF;
                     break;
+                case 4: // LWU (RV64新增)
+                    unit.result = forwarded_value & 0xFFFFFFFF;
+                    break;
+                case 8: // LD (64位)
+                    unit.result = forwarded_value;
+                    break;
                 default:
                     unit.result = forwarded_value;
                     break;
             }
         }
         
-        dprintf(EXECUTE, "Store-to-Load Forwarding成功: 地址=0x%x 转发值=0x%x %s扩展", 
+        dprintf(EXECUTE, "Store-to-Load Forwarding成功: 地址=0x%" PRIx64 " 转发值=0x%" PRIx64 " %s扩展", 
                        addr, unit.result, inst.is_signed_load ? "符号" : "零");
         return true; // 使用了转发
     } else {
@@ -496,7 +505,7 @@ bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) 
         
         unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
         
-        dprintf(EXECUTE, "内存Load完成：地址=0x%lx 结果=0x%lx", addr, unit.result);
+        dprintf(EXECUTE, "内存Load完成：地址=0x%" PRIx64 " 结果=0x%" PRIx64, addr, unit.result);
         return false; // 没有使用转发
     }
 }

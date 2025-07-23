@@ -60,7 +60,7 @@ TEST_F(StoreBufferTest, ForwardingExactMatch) {
     store_buffer->add_store(instruction, address, store_value, size);
 
     // 尝试Load相同地址和大小
-    uint32_t load_result;
+    uint64_t load_result;
     bool forwarded = store_buffer->forward_load(address, size, load_result);
 
     EXPECT_TRUE(forwarded);
@@ -81,7 +81,7 @@ TEST_F(StoreBufferTest, ForwardingByteAccess) {
     store_buffer->add_store(instruction, address, store_value, store_size);
 
     // 尝试Load字节（地址+0）
-    uint32_t load_result;
+    uint64_t load_result;
     bool forwarded = store_buffer->forward_load(address, 1, load_result);
 
     EXPECT_TRUE(forwarded);
@@ -117,7 +117,7 @@ TEST_F(StoreBufferTest, ForwardingNoMatch) {
     store_buffer->add_store(instruction, store_address, store_value, store_size);
 
     // 尝试Load不同地址
-    uint32_t load_result;
+    uint64_t load_result;
     bool forwarded = store_buffer->forward_load(0x2000, 4, load_result);
 
     EXPECT_FALSE(forwarded);
@@ -139,7 +139,7 @@ TEST_F(StoreBufferTest, RetireStores) {
     store_buffer->add_store(instruction2, address2, value, size);
 
     // 两个Store都应该能转发
-    uint32_t load_result;
+    uint64_t load_result;
     EXPECT_TRUE(store_buffer->forward_load(address1, size, load_result));
     EXPECT_TRUE(store_buffer->forward_load(address2, size, load_result));
 
@@ -172,7 +172,7 @@ TEST_F(StoreBufferTest, CircularOverwrite) {
     }
 
     // 最早的Store条目应该被覆盖
-    uint32_t load_result;
+    uint64_t load_result;
     
     // 最新的几个条目应该仍然存在
     EXPECT_TRUE(store_buffer->forward_load(base_address + 9 * 4, size, load_result));
@@ -196,7 +196,7 @@ TEST_F(StoreBufferTest, FlushBuffer) {
     store_buffer->add_store(instruction, address, value, size);
 
     // 验证Store条目存在
-    uint32_t load_result;
+    uint64_t load_result;
     EXPECT_TRUE(store_buffer->forward_load(address, size, load_result));
 
     // 刷新Buffer
@@ -222,7 +222,7 @@ TEST_F(StoreBufferTest, MultipleWritesToSameAddress) {
     store_buffer->add_store(instruction3, address, 0x33333333, size);
 
     // 应该转发最新的值
-    uint32_t load_result;
+    uint64_t load_result;
     bool forwarded = store_buffer->forward_load(address, size, load_result);
 
     EXPECT_TRUE(forwarded);
@@ -243,7 +243,7 @@ TEST_F(StoreBufferTest, OverlapNoForwarding) {
     store_buffer->add_store(instruction, store_address, store_value, store_size);
 
     // 尝试Load字（覆盖更大范围）
-    uint32_t load_result;
+    uint64_t load_result;
     bool forwarded = store_buffer->forward_load(store_address, 4, load_result);
 
     // 应该无法转发，因为Load需要的数据超出了Store的范围

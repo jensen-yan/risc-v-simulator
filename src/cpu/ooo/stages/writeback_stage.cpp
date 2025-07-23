@@ -25,7 +25,7 @@ void WritebackStage::execute(CPUState& state) {
         auto phys_dest = instruction->get_physical_dest();
         auto result = instruction->get_result();
         
-        dprintf(WRITEBACK, "CDB writeback: ROB[%d] p%d = 0x%x",
+        dprintf(WRITEBACK, "CDB writeback: ROB[%d] p%d = 0x%" PRIx64,
                 rob_entry, static_cast<int>(phys_dest), result);
         
         // 更新保留站中的操作数

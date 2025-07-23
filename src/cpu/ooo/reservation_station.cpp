@@ -280,12 +280,12 @@ void ReservationStation::get_statistics(uint64_t& issued, uint64_t& dispatched, 
 void ReservationStation::dump_reservation_station() const {
     std::cout << "=== 保留站状态转储 ===" << std::endl;
     
-    for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
-        if (rs_entries[i]) {
-            std::cout << "[RS" << std::setw(2) << i << "] " 
-                     << rs_entries[i]->to_string() << std::endl;
-        }
-    }
+    // for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
+    //     if (rs_entries[i]) {
+    //         std::cout << "[RS" << std::setw(2) << i << "] " 
+    //                  << rs_entries[i]->to_string() << std::endl;
+    //     }
+    // }
     
     std::cout << "===================" << std::endl;
 }

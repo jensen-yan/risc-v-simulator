@@ -1,5 +1,6 @@
 # 构建目录
 build/
+build_coverage/
 cmake-build-*/
 
 # 编译输出

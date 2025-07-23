@@ -104,3 +104,10 @@ python3 run_tests.py -p "rv32uc-p-*"
 ./risc-v-sim -e -d -m 2164260864 ../riscv-tests/isa/rv32uc-p-rvc
 
 可以运行C 扩展指令测试
+
+### 测试覆盖率
+
+sudo apt install lcov
+./run_coverage.sh 会生成测试覆盖率数据
+wsl 中通过file:///\\wsl$\Ubuntu\home\yanyue\workspace\risc-v-simul
+  ator\build_coverage\coverage_html\index.html 打开网页

@@ -21,8 +21,7 @@ public:
     const char* get_stage_name() const override { return "WRITEBACK"; }
 
 private:
-    // 调试辅助方法
-    void print_stage_activity(const std::string& activity, uint64_t cycle, uint32_t pc);
+
 };
 
 } // namespace riscv 

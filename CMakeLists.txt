@@ -41,7 +41,6 @@ set(COMMON_SOURCES
 
 set(CORE_SOURCES
     src/core/memory.cpp
-    src/core/alu.cpp
     src/core/decoder.cpp
     src/core/instruction_executor.cpp
 )

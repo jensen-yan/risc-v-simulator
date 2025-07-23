@@ -55,7 +55,7 @@ private:
     void writeStringToMemory(Address addr, const std::string& str);
     
     // 调试输出
-    void printSyscallInfo(uint32_t syscallNum, uint32_t a0, uint32_t a1, uint32_t a2) const;
+    void printSyscallInfo(uint64_t syscallNum, uint64_t a0, uint64_t a1, uint64_t a2) const;
 };
 
 } // namespace riscv

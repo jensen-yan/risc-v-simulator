@@ -8,7 +8,7 @@ namespace riscv {
 
 // 物理寄存器状态
 struct PhysicalRegister {
-    uint32_t value;
+    uint64_t value;
     bool ready;             // 是否准备好
     ROBEntry producer_rob;  // 产生这个值的ROB表项
     
@@ -65,21 +65,21 @@ public:
         bool success;
         bool src1_ready;
         bool src2_ready;
-        uint32_t src1_value;
-        uint32_t src2_value;
+        uint64_t src1_value;
+        uint64_t src2_value;
     };
     
     // 对指令进行重命名
     RenameResult rename_instruction(const DecodedInstruction& instruction);
     
     // 更新物理寄存器值
-    void update_physical_register(PhysRegNum reg, uint32_t value, ROBEntry rob_entry);
+    void update_physical_register(PhysRegNum reg, uint64_t value, ROBEntry rob_entry);
     
     // 释放物理寄存器
     void release_physical_register(PhysRegNum reg);
     
     // 获取物理寄存器值
-    uint32_t get_physical_register_value(PhysRegNum reg) const;
+    uint64_t get_physical_register_value(PhysRegNum reg) const;
     
     // 检查物理寄存器是否准备好
     bool is_physical_register_ready(PhysRegNum reg) const;
@@ -94,7 +94,7 @@ public:
     void get_statistics(uint64_t& renames, uint64_t& stalls) const;
     
     // 更新架构寄存器值（用于DiffTest同步）
-    void update_architecture_register(RegNum logical_reg, uint32_t value);
+    void update_architecture_register(RegNum logical_reg, uint64_t value);
     
     // 调试输出
     void dump_rename_table() const;

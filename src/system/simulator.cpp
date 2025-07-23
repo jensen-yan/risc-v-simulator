@@ -96,38 +96,6 @@ void Simulator::reset() {
     memory_->clear();
 }
 
-uint32_t Simulator::getRegister(RegNum reg) const {
-    return cpu_->getRegister(reg);
-}
-
-void Simulator::setRegister(RegNum reg, uint32_t value) {
-    cpu_->setRegister(reg, value);
-}
-
-uint32_t Simulator::getPC() const {
-    return cpu_->getPC();
-}
-
-void Simulator::setPC(uint32_t pc) {
-    cpu_->setPC(pc);
-}
-
-uint8_t Simulator::readMemoryByte(Address addr) const {
-    return memory_->readByte(addr);
-}
-
-uint32_t Simulator::readMemoryWord(Address addr) const {
-    return memory_->readWord(addr);
-}
-
-void Simulator::writeMemoryByte(Address addr, uint8_t value) {
-    memory_->writeByte(addr, value);
-}
-
-void Simulator::writeMemoryWord(Address addr, uint32_t value) {
-    memory_->writeWord(addr, value);
-}
-
 bool Simulator::isHalted() const {
     return cpu_->isHalted();
 }
@@ -151,7 +119,7 @@ void Simulator::dumpState() const {
 void Simulator::printStatistics() const {
     std::cout << "\n=== 执行统计 ===\n";
     std::cout << "总执行指令数: " << getInstructionCount() << "\n";
-    std::cout << "最终PC: 0x" << std::hex << getPC() << std::dec << "\n";
+    std::cout << "最终PC: 0x" << std::hex << cpu_->getPC() << std::dec << "\n";
     std::cout << "程序状态: " << (isHalted() ? "已停机" : "运行中") << "\n";
 }
 

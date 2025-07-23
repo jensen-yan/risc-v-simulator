@@ -26,8 +26,8 @@ public:
     virtual void setRegister(RegNum reg, uint64_t value) = 0;
     
     // 浮点寄存器访问
-    virtual uint32_t getFPRegister(RegNum reg) const = 0;
-    virtual void setFPRegister(RegNum reg, uint32_t value) = 0;
+    virtual uint64_t getFPRegister(RegNum reg) const = 0;
+    virtual void setFPRegister(RegNum reg, uint64_t value) = 0;
     virtual float getFPRegisterFloat(RegNum reg) const = 0;
     virtual void setFPRegisterFloat(RegNum reg, float value) = 0;
     

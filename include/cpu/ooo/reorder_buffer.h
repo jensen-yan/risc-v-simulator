@@ -64,17 +64,17 @@ public:
     };
     
     // 分配ROB表项（返回DynamicInst指针）
-    DynamicInstPtr allocate_entry(const DecodedInstruction& instruction, uint32_t pc, uint64_t instruction_id);
+    DynamicInstPtr allocate_entry(const DecodedInstruction& instruction, uint64_t pc, uint64_t instruction_id);
     
     // 更新ROB表项执行结果（通过DynamicInst指针）
-    void update_entry(DynamicInstPtr inst, uint32_t result, bool has_exception = false, 
+    void update_entry(DynamicInstPtr inst, uint64_t result, bool has_exception = false, 
                      const std::string& exception_msg = "", bool is_jump = false, 
-                     uint32_t jump_target = 0);
+                     uint64_t jump_target = 0);
     
     // 通过ROB索引更新（兼容性接口）
-    void update_entry_by_index(ROBEntry rob_entry, uint32_t result, bool has_exception = false, 
+    void update_entry_by_index(ROBEntry rob_entry, uint64_t result, bool has_exception = false, 
                               const std::string& exception_msg = "", bool is_jump = false, 
-                              uint32_t jump_target = 0);
+                              uint64_t jump_target = 0);
     
     // 获取可以发射的指令
     DynamicInstPtr get_dispatchable_entry() const;
@@ -134,7 +134,7 @@ public:
         bool has_exception;
         DynamicInstPtr instruction;
         std::string exception_message;
-        uint32_t pc;
+        uint64_t pc;
     };
     ExceptionInfo get_oldest_exception() const;
     

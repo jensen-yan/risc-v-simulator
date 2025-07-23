@@ -52,7 +52,7 @@ struct DebugInfo {
     std::string stage;        // 阶段名称 (FETCH, DECODE, ISSUE, EXECUTE, WRITEBACK, COMMIT, ROB, RS, RENAME)
     std::string message;      // 调试消息
     uint64_t cycle = 0;       // 当前周期
-    uint32_t pc = 0;          // 程序计数器（可选）
+    uint64_t pc = 0;          // 程序计数器（可选）
     
     // 简单构造函数
     DebugInfo() = default;
@@ -61,7 +61,7 @@ struct DebugInfo {
         : stage(stage), message(message) {}
     
     DebugInfo(const std::string& stage, const std::string& message, 
-              uint64_t cycle, uint32_t pc = 0)
+              uint64_t cycle, uint64_t pc = 0)
         : stage(stage), message(message), cycle(cycle), pc(pc) {}
 };
 
@@ -270,7 +270,7 @@ public:
     
     // 输出调试信息
     void printf(const std::string& stage, const std::string& message, 
-                uint64_t cycle = 0, uint32_t pc = 0) {
+                uint64_t cycle = 0, uint64_t pc = 0) {
         if (shouldOutput(stage, cycle)) {
             DebugInfo info(stage, message, cycle, pc);
             std::string formatted = DebugFormatter::format(info, output_mode_);

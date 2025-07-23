@@ -143,18 +143,12 @@ uint64_t StoreBuffer::extract_load_data(const StoreBufferEntry& store_entry, uin
             break;
             
         case 2: // 半字访问
-            if (offset % 2 != 0) {
-                // 非对齐访问，暂时不支持
-                return 0;
-            }
+            // 从任何偏移都可以提取2字节数据，不需要对齐限制
             result = (store_entry.value >> (offset * 8)) & 0xFFFF;
             break;
             
         case 4: // 字访问
-            if (offset % 4 != 0) {
-                // 字访问必须4字节对齐
-                return 0;
-            }
+            // 从任何偏移都可以提取4字节数据，不需要对齐限制
             result = (store_entry.value >> (offset * 8)) & 0xFFFFFFFF;
             break;
             

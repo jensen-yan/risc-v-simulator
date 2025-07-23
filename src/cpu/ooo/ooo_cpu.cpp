@@ -169,14 +169,14 @@ void OutOfOrderCPU::setRegister(RegNum reg, uint64_t value) {
     }
 }
 
-uint32_t OutOfOrderCPU::getFPRegister(RegNum reg) const {
+uint64_t OutOfOrderCPU::getFPRegister(RegNum reg) const {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }
     return cpu_state_.arch_fp_registers[reg];
 }
 
-void OutOfOrderCPU::setFPRegister(RegNum reg, uint32_t value) {
+void OutOfOrderCPU::setFPRegister(RegNum reg, uint64_t value) {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }

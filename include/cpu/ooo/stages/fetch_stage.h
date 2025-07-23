@@ -22,9 +22,6 @@ public:
 
 private:
     static constexpr size_t MAX_FETCH_BUFFER_SIZE = 4;  // 取指缓冲区最大大小
-    
-    // 调试辅助方法
-    void print_stage_activity(const std::string& activity, uint64_t cycle, uint32_t pc);
 };
 
 } // namespace riscv 

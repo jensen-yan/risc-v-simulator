@@ -21,7 +21,7 @@ namespace riscv {
  * 取指后的指令结构
  */
 struct FetchedInstruction {
-    uint32_t pc;
+    uint64_t pc;
     Instruction instruction;
     bool is_compressed;
 };

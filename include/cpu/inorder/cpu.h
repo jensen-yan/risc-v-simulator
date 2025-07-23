@@ -3,7 +3,6 @@
 #include "common/types.h"
 #include "core/memory.h"
 #include "core/decoder.h"
-#include "core/alu.h"
 #include "common/cpu_interface.h"
 #include <array>
 #include <memory>
@@ -38,8 +37,8 @@ public:
     void setRegister(RegNum reg, uint64_t value) override;
     
     // 浮点寄存器访问
-    uint32_t getFPRegister(RegNum reg) const override;
-    void setFPRegister(RegNum reg, uint32_t value) override;
+    uint64_t getFPRegister(RegNum reg) const override;
+    void setFPRegister(RegNum reg, uint64_t value) override;
     float getFPRegisterFloat(RegNum reg) const override;
     void setFPRegisterFloat(RegNum reg, float value) override;
     
@@ -91,10 +90,6 @@ private:
     void executeImmediateOperations32(const DecodedInstruction& inst);  // RV64I
     void executeLoadOperations(const DecodedInstruction& inst);
     void executeJALR(const DecodedInstruction& inst);
-    
-    // 内存访问辅助方法
-    uint32_t loadFromMemory(Address addr, Funct3 funct3);
-    void storeToMemory(Address addr, uint32_t value, Funct3 funct3);
     
     // 系统调用处理
     void handleEcall();

@@ -43,7 +43,7 @@ struct CommonDataBusEntry {
 // 分支预测结果
 struct BranchPrediction {
     bool taken;
-    uint32_t target;
+    uint64_t target;
     
     BranchPrediction() : taken(false), target(0) {}
 };

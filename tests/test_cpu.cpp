@@ -198,7 +198,7 @@ TEST_F(CPUTest, XOR_Instruction) {
 
 TEST_F(CPUTest, SLT_Instruction) {
     // 设置寄存器值
-    cpu->setRegister(1, static_cast<uint32_t>(-10)); // 负数
+    cpu->setRegister(1, static_cast<uint64_t>(-10)); // 负数
     cpu->setRegister(2, 5);
     
     // 测试 SLT x3, x1, x2  (-10 < 5, 结果应该是1)
@@ -212,10 +212,10 @@ TEST_F(CPUTest, SLT_Instruction) {
 
 TEST_F(CPUTest, SLTU_Instruction) {
     // 设置寄存器值
-    cpu->setRegister(1, static_cast<uint32_t>(-10)); // 作为无符号数很大
+    cpu->setRegister(1, static_cast<uint64_t>(-10)); // 作为无符号数很大
     cpu->setRegister(2, 5);
     
-    // 测试 SLTU x3, x1, x2  (4294967286 < 5, 结果应该是0)
+    // 测试 SLTU x3, x1, x2  (18446744073709551606 < 5, 结果应该是0)
     uint32_t inst = createRType(Opcode::OP, 3, 1, 2, Funct3::SLTU, Funct7::NORMAL);
     memory->writeWord(0, inst);
     
@@ -267,8 +267,8 @@ TEST_F(CPUTest, LoadByte_Instruction) {
     
     cpu->step();
     
-    // 0x80应该符号扩展为0xFFFFFF80
-    EXPECT_EQ(cpu->getRegister(2), 0xFFFFFF80);
+    // 0x80应该符号扩展为0xFFFFFFFFFFFFFF80 (64位)
+    EXPECT_EQ(cpu->getRegister(2), 0xFFFFFFFFFFFFFF80ULL);
 }
 
 TEST_F(CPUTest, LoadByteUnsigned_Instruction) {
@@ -336,8 +336,9 @@ TEST_F(CPUTest, LoadStore_Combined) {
     memory->writeWord(4, load_inst);
     cpu->step();
     
-    // 验证加载的值
-    EXPECT_EQ(cpu->getRegister(3), 0x9876FEDC);
+    // 验证加载的值 (32位数据在64位寄存器中需要符号扩展)
+    // 0x9876FEDC 作为有符号数为负数，需要符号扩展到64位
+    EXPECT_EQ(cpu->getRegister(3), 0xFFFFFFFF9876FEDCULL);
     EXPECT_EQ(cpu->getRegister(2), 0);  // x2应该保持为0
 }
 
@@ -417,7 +418,7 @@ TEST_F(CPUTest, BEQ_Instruction_NotTaken) {
 
 TEST_F(CPUTest, BLT_Instruction) {
     // 设置寄存器值：-10 < 5
-    cpu->setRegister(1, static_cast<uint32_t>(-10));
+    cpu->setRegister(1, static_cast<uint64_t>(-10));
     cpu->setRegister(2, 5);
     cpu->setPC(0);
     
@@ -433,7 +434,7 @@ TEST_F(CPUTest, BLT_Instruction) {
 
 TEST_F(CPUTest, BLTU_Instruction) {
     // 设置寄存器值：作为无符号数，-10实际是很大的正数
-    cpu->setRegister(1, static_cast<uint32_t>(-10));
+    cpu->setRegister(1, static_cast<uint64_t>(-10));
     cpu->setRegister(2, 5);
     cpu->setPC(0);
     

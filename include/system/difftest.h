@@ -1,9 +1,6 @@
 #pragma once
 
 #include "common/cpu_interface.h"
-#include "core/memory.h"
-#include <memory>
-#include <string>
 
 namespace riscv {
 
@@ -53,7 +50,7 @@ public:
      * @param committed_pc 提交指令的PC
      * @return true如果状态一致，false如果发现不一致
      */
-    bool stepAndCompareWithCommittedPC(ICpuInterface* ooo_cpu, uint32_t committed_pc);
+    bool stepAndCompareWithCommittedPC(ICpuInterface* ooo_cpu, uint64_t committed_pc);
     
     /**
      * 重置difftest状态

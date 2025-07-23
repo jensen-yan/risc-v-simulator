@@ -40,5 +40,6 @@ Thumbs.db
 # 测试输出
 *.log
 test_results/
+*.out
 
 .cache/

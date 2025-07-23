@@ -24,8 +24,8 @@ public:
     uint64_t getRegister(RegNum reg) const override { return cpu_->getRegister(reg); }
     void setRegister(RegNum reg, uint64_t value) override { cpu_->setRegister(reg, value); }
     
-    uint32_t getFPRegister(RegNum reg) const override { return cpu_->getFPRegister(reg); }
-    void setFPRegister(RegNum reg, uint32_t value) override { cpu_->setFPRegister(reg, value); }
+    uint64_t getFPRegister(RegNum reg) const override { return cpu_->getFPRegister(reg); }
+    void setFPRegister(RegNum reg, uint64_t value) override { cpu_->setFPRegister(reg, value); }
     float getFPRegisterFloat(RegNum reg) const override { return cpu_->getFPRegisterFloat(reg); }
     void setFPRegisterFloat(RegNum reg, float value) override { cpu_->setFPRegisterFloat(reg, value); }
     
@@ -61,8 +61,8 @@ public:
     uint64_t getRegister(RegNum reg) const override { return cpu_->getRegister(reg); }
     void setRegister(RegNum reg, uint64_t value) override { cpu_->setRegister(reg, value); }
     
-    uint32_t getFPRegister(RegNum reg) const override { return cpu_->getFPRegister(reg); }
-    void setFPRegister(RegNum reg, uint32_t value) override { cpu_->setFPRegister(reg, value); }
+    uint64_t getFPRegister(RegNum reg) const override { return cpu_->getFPRegister(reg); }
+    void setFPRegister(RegNum reg, uint64_t value) override { cpu_->setFPRegister(reg, value); }
     float getFPRegisterFloat(RegNum reg) const override { return cpu_->getFPRegisterFloat(reg); }
     void setFPRegisterFloat(RegNum reg, float value) override { cpu_->setFPRegisterFloat(reg, value); }
     

@@ -1,7 +1,5 @@
 #include "cpu/ooo/register_rename.h"
 #include "common/debug_types.h"
-#include <iostream>
-#include <iomanip>
 #include <cassert>
 #include <set> // Added for std::set
 
@@ -158,14 +156,14 @@ PhysRegNum RegisterRenameUnit::allocate_physical_register() {
     return reg;
 }
 
-void RegisterRenameUnit::update_physical_register(PhysRegNum reg, uint32_t value, ROBEntry rob_entry) {
+void RegisterRenameUnit::update_physical_register(PhysRegNum reg, uint64_t value, ROBEntry rob_entry) {
     if (reg == 0) return;  // x0寄存器不能修改
     
     physical_registers[reg].value = value;
     physical_registers[reg].ready = true;
     physical_registers[reg].producer_rob = rob_entry;
     
-    dprintf(RENAME, "更新物理寄存器 p%d = 0x%x", (int)reg, value);
+    dprintf(RENAME, "更新物理寄存器 p%d = 0x%" PRIx64, (int)reg, value);
 }
 
 void RegisterRenameUnit::release_physical_register(PhysRegNum reg) {
@@ -178,7 +176,7 @@ void RegisterRenameUnit::release_physical_register(PhysRegNum reg) {
     dprintf(RENAME, "释放物理寄存器 p%d", (int)reg);
 }
 
-uint32_t RegisterRenameUnit::get_physical_register_value(PhysRegNum reg) const {
+uint64_t RegisterRenameUnit::get_physical_register_value(PhysRegNum reg) const {
     return physical_registers[reg].value;
 }
 
@@ -244,7 +242,7 @@ void RegisterRenameUnit::get_statistics(uint64_t& renames, uint64_t& stalls) con
     stalls = stall_count;
 }
 
-void RegisterRenameUnit::update_architecture_register(RegNum logical_reg, uint32_t value) {
+void RegisterRenameUnit::update_architecture_register(RegNum logical_reg, uint64_t value) {
     if (logical_reg == 0) return;  // x0寄存器不更新
     
     // 直接更新架构寄存器映射中的值
@@ -255,7 +253,7 @@ void RegisterRenameUnit::update_architecture_register(RegNum logical_reg, uint32
         physical_registers[current_arch_reg].value = value;
     }
     
-    dprintf(RENAME, "更新架构寄存器 x%d = 0x%x", (int)logical_reg, value);
+    dprintf(RENAME, "更新架构寄存器 x%d = 0x%" PRIx64, (int)logical_reg, value);
 }
 
 bool RegisterRenameUnit::has_free_register() const {
@@ -277,7 +275,7 @@ void RegisterRenameUnit::dump_physical_registers() const {
     dprintf(RENAME, "物理寄存器状态");
     for (int i = 0; i < NUM_PHYSICAL_REGS && i < 64; ++i) {  // 只显示前64个
         if (physical_registers[i].ready) {
-            dprintf(RENAME, "p%d:0x%x", i, physical_registers[i].value);
+            dprintf(RENAME, "p%d:0x%" PRIx64, i, physical_registers[i].value);
         } else {
             dprintf(RENAME, "p%d:  等待中  ", i);
         }

@@ -237,7 +237,7 @@ void DynamicInst::extract_register_info() {
         decoded_info_.type == InstructionType::U_TYPE ||
         decoded_info_.type == InstructionType::J_TYPE) {
         src2_ready_ = true;
-        src2_value_ = static_cast<uint32_t>(decoded_info_.imm);
+        src2_value_ = static_cast<uint64_t>(decoded_info_.imm);
     }
 }
 

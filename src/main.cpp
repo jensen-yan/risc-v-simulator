@@ -219,7 +219,7 @@ int main(int argc, char* argv[]) {
             std::string input;
             
             while (!simulator.isHalted()) {
-                std::cout << "PC: 0x" << std::hex << simulator.getPC() << std::dec << " > ";
+                std::cout << "PC: 0x" << std::hex << simulator.getCpu()->getPC() << std::dec << " > ";
                 std::getline(std::cin, input);
                 
                 if (input == "q" || input == "quit") {

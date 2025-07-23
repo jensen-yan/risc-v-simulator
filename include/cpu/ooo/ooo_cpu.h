@@ -57,8 +57,8 @@ public:
     void setRegister(RegNum reg, uint64_t value) override;
     
     // 浮点寄存器访问
-    uint32_t getFPRegister(RegNum reg) const override;
-    void setFPRegister(RegNum reg, uint32_t value) override;
+    uint64_t getFPRegister(RegNum reg) const override;
+    void setFPRegister(RegNum reg, uint64_t value) override;
     float getFPRegisterFloat(RegNum reg) const override;
     void setFPRegisterFloat(RegNum reg, float value) override;
     

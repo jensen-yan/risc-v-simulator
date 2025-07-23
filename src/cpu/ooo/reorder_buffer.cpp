@@ -45,7 +45,7 @@ void ReorderBuffer::initialize_rob() {
 }
 
 DynamicInstPtr ReorderBuffer::allocate_entry(
-    const DecodedInstruction& instruction, uint32_t pc, uint64_t instruction_id) {
+    const DecodedInstruction& instruction, uint64_t pc, uint64_t instruction_id) {
     
     if (is_full()) {
         dprintf(ROB, "ROB已满，无法分配表项");
@@ -66,14 +66,14 @@ DynamicInstPtr ReorderBuffer::allocate_entry(
     allocated_count++;
     
     // 使用新的dprintf宏 - 类似GEM5风格
-    dprintf(ROB, "分配ROB表项 %d, PC=0x%x, InstID=%" PRId64, rob_entry, pc, instruction_id);
+    dprintf(ROB, "分配ROB表项 %d, PC=0x%" PRIx64 ", InstID=%" PRId64, rob_entry, pc, instruction_id);
     
     return dynamic_inst;
 }
 
-void ReorderBuffer::update_entry(DynamicInstPtr inst, uint32_t result, bool has_exception, 
+void ReorderBuffer::update_entry(DynamicInstPtr inst, uint64_t result, bool has_exception, 
                                 const std::string& exception_msg, bool is_jump, 
-                                uint32_t jump_target) {
+                                uint64_t jump_target) {
     if (!inst) {
         dprintf(ROB, "无效的DynamicInst指针");
         return;
@@ -94,12 +94,12 @@ void ReorderBuffer::update_entry(DynamicInstPtr inst, uint32_t result, bool has_
     // 标记为执行完成
     inst->set_status(DynamicInst::Status::COMPLETED);
     
-    dprintf(ROB, "更新ROB表项 %d 执行结果: 0x%x", inst->get_rob_entry(), result);
+    dprintf(ROB, "更新ROB表项 %d 执行结果: 0x%" PRIx64, inst->get_rob_entry(), result);
 }
 
-void ReorderBuffer::update_entry_by_index(ROBEntry rob_entry, uint32_t result, bool has_exception, 
+void ReorderBuffer::update_entry_by_index(ROBEntry rob_entry, uint64_t result, bool has_exception, 
                                          const std::string& exception_msg, bool is_jump, 
-                                         uint32_t jump_target) {
+                                         uint64_t jump_target) {
     DynamicInstPtr inst = get_entry(rob_entry);
     if (inst) {
         update_entry(inst, result, has_exception, exception_msg, is_jump, jump_target);

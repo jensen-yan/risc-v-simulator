@@ -131,14 +131,14 @@ void CPU::setRegister(RegNum reg, uint64_t value) {
     }
 }
 
-uint32_t CPU::getFPRegister(RegNum reg) const {
+uint64_t CPU::getFPRegister(RegNum reg) const {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }
     return fp_registers_[reg];
 }
 
-void CPU::setFPRegister(RegNum reg, uint32_t value) {
+void CPU::setFPRegister(RegNum reg, uint64_t value) {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }

@@ -37,18 +37,6 @@ public:
     void run();                     // 运行到结束
     void reset();                   // 重置模拟器
     
-    // 状态访问
-    uint32_t getRegister(RegNum reg) const;
-    void setRegister(RegNum reg, uint32_t value);
-    uint32_t getPC() const;
-    void setPC(uint32_t pc);
-    
-    // 内存访问
-    uint8_t readMemoryByte(Address addr) const;
-    uint32_t readMemoryWord(Address addr) const;
-    void writeMemoryByte(Address addr, uint8_t value);
-    void writeMemoryWord(Address addr, uint32_t value);
-    
     // 状态查询
     bool isHalted() const;
     uint64_t getInstructionCount() const;

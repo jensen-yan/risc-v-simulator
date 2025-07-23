@@ -11,10 +11,10 @@ SyscallHandler::SyscallHandler(std::shared_ptr<Memory> memory) : memory_(memory)
 
 bool SyscallHandler::handleSyscall(ICpuInterface* cpu) {
     // RISC-V ABI: 系统调用号在 a7 (x17), 参数在 a0-a6 (x10-x16)
-    uint32_t syscallNum = cpu->getRegister(17);  // a7
-    uint32_t a0 = cpu->getRegister(10);  // a0
-    uint32_t a1 = cpu->getRegister(11);  // a1
-    uint32_t a2 = cpu->getRegister(12);  // a2
+    uint64_t syscallNum = cpu->getRegister(17);  // a7
+    uint64_t a0 = cpu->getRegister(10);  // a0
+    uint64_t a1 = cpu->getRegister(11);  // a1
+    uint64_t a2 = cpu->getRegister(12);  // a2
     
     // printSyscallInfo(syscallNum, a0, a1, a2);
     
@@ -46,7 +46,7 @@ bool SyscallHandler::handleSyscall(ICpuInterface* cpu) {
 }
 
 void SyscallHandler::handleExit(ICpuInterface* cpu) {
-    uint32_t exitCode = cpu->getRegister(10);  // a0
+    uint64_t exitCode = cpu->getRegister(10);  // a0
     
     // riscv-tests使用退出码表示测试结果
     if (exitCode == 0) {
@@ -66,9 +66,9 @@ void SyscallHandler::handleExit(ICpuInterface* cpu) {
 }
 
 void SyscallHandler::handleWrite(ICpuInterface* cpu) {
-    uint32_t fd = cpu->getRegister(10);      // a0: 文件描述符
-    uint32_t bufAddr = cpu->getRegister(11); // a1: 缓冲区地址
-    uint32_t count = cpu->getRegister(12);   // a2: 写入字节数
+    uint64_t fd = cpu->getRegister(10);      // a0: 文件描述符
+    uint64_t bufAddr = cpu->getRegister(11); // a1: 缓冲区地址
+    uint64_t count = cpu->getRegister(12);   // a2: 写入字节数
     
     try {
         if (fd == STDOUT || fd == STDERR) {
@@ -92,18 +92,18 @@ void SyscallHandler::handleWrite(ICpuInterface* cpu) {
         } else {
             // 不支持的文件描述符
             std::cerr << "不支持的文件描述符: " << fd << std::endl;
-            cpu->setRegister(10, static_cast<uint32_t>(-1));
+            cpu->setRegister(10, static_cast<uint64_t>(-1));
         }
     } catch (const std::exception& e) {
         std::cerr << "写入失败: " << e.what() << std::endl;
-        cpu->setRegister(10, static_cast<uint32_t>(-1));
+        cpu->setRegister(10, static_cast<uint64_t>(-1));
     }
 }
 
 void SyscallHandler::handleRead(ICpuInterface* cpu) {
-    uint32_t fd = cpu->getRegister(10);      // a0: 文件描述符
-    uint32_t bufAddr = cpu->getRegister(11); // a1: 缓冲区地址
-    uint32_t count = cpu->getRegister(12);   // a2: 读取字节数
+    uint64_t fd = cpu->getRegister(10);      // a0: 文件描述符
+    uint64_t bufAddr = cpu->getRegister(11); // a1: 缓冲区地址
+    uint64_t count = cpu->getRegister(12);   // a2: 读取字节数
     
     if (fd == STDIN) {
         // 从标准输入读取（简化实现）
@@ -119,16 +119,16 @@ void SyscallHandler::handleRead(ICpuInterface* cpu) {
         }
         
         // 返回读取的字节数
-        cpu->setRegister(10, static_cast<uint32_t>(readLen));
+        cpu->setRegister(10, static_cast<uint64_t>(readLen));
     } else {
         // 不支持的文件描述符
         std::cerr << "不支持的文件描述符: " << fd << std::endl;
-        cpu->setRegister(10, static_cast<uint32_t>(-1));
+        cpu->setRegister(10, static_cast<uint64_t>(-1));
     }
 }
 
 void SyscallHandler::handleBrk(ICpuInterface* cpu) {
-    uint32_t addr = cpu->getRegister(10);  // a0: 新的程序断点
+    uint64_t addr = cpu->getRegister(10);  // a0: 新的程序断点
     
     // 简化实现：总是返回请求的地址
     // 实际实现应该管理堆内存
@@ -156,7 +156,7 @@ void SyscallHandler::writeStringToMemory(Address addr, const std::string& str) {
     memory_->writeByte(addr + str.length(), 0);  // 添加字符串结束符
 }
 
-void SyscallHandler::printSyscallInfo(uint32_t syscallNum, uint32_t a0, uint32_t a1, uint32_t a2) const {
+void SyscallHandler::printSyscallInfo(uint64_t syscallNum, uint64_t a0, uint64_t a1, uint64_t a2) const {
     std::cout << "[SYSCALL] 调用号: " << syscallNum 
               << " 参数: a0=0x" << std::hex << a0 
               << " a1=0x" << a1 

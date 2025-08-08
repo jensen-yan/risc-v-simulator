@@ -53,10 +53,14 @@ DecodedInstruction Decoder::decode(Instruction instruction, uint32_t enabled_ext
         // BRANCH和STORE指令（B_TYPE和S_TYPE）没有rd字段，bit[11:7]是立即数的一部分
         decoded.rd = 0;  // 这些指令不写回寄存器
     } else if (decoded.opcode == Opcode::SYSTEM) {
-        // 对于ECALL/EBREAK/mret等系统指令，不应写回寄存器
-        // 对于CSRRW/CSRRS/CSRRC等CSR指令，需要根据具体指令决定是否写回
-        // 简化处理：所有SYSTEM指令都不写回寄存器
-        decoded.rd = 0;  // SYSTEM指令不写回寄存器
+        // 对于SYSTEM指令，需要区分：
+        // - ECALL/EBREAK/MRET等系统指令不写回寄存器
+        // - CSR指令需要写回寄存器
+        // 根据funct3判断：如果funct3 != 0，则是CSR指令，保留rd字段
+        if (decoded.funct3 == Funct3::ECALL_EBREAK) {
+            decoded.rd = 0;  // ECALL/EBREAK指令不写回寄存器
+        }
+        // CSR指令保留原始的rd字段
     }
     
     // 初始化静态执行属性 - 避免ExecuteStage重复解析
@@ -136,10 +140,12 @@ InstructionType Decoder::determineType(Opcode opcode) {
         case Opcode::OP_IMM:
         case Opcode::OP_IMM_32:  // RV64I: 32位立即数运算
         case Opcode::LOAD:
+        case Opcode::LOAD_FP:    // 浮点加载指令
         case Opcode::JALR:
         case Opcode::MISC_MEM:
             return InstructionType::I_TYPE;
         case Opcode::STORE:
+        case Opcode::STORE_FP:   // 浮点存储指令
             return InstructionType::S_TYPE;
         case Opcode::BRANCH:
             return InstructionType::B_TYPE;
@@ -197,6 +203,24 @@ void Decoder::validateInstruction(const DecodedInstruction& decoded, uint32_t en
     }
     
     // 检查浮点加载/存储指令
+    if (decoded.opcode == Opcode::LOAD_FP) {
+        if (decoded.funct3 == Funct3::FLW && !isExtensionEnabled(enabled_extensions, Extension::F)) {
+            throw IllegalInstructionException("FLW指令需要F扩展");
+        }
+        if (decoded.funct3 == Funct3::FLD && !isExtensionEnabled(enabled_extensions, Extension::D)) {
+            throw IllegalInstructionException("FLD指令需要D扩展");
+        }
+    }
+    if (decoded.opcode == Opcode::STORE_FP) {
+        if (decoded.funct3 == Funct3::FSW && !isExtensionEnabled(enabled_extensions, Extension::F)) {
+            throw IllegalInstructionException("FSW指令需要F扩展");
+        }
+        if (decoded.funct3 == Funct3::FSD && !isExtensionEnabled(enabled_extensions, Extension::D)) {
+            throw IllegalInstructionException("FSD指令需要D扩展");
+        }
+    }
+    
+    // 兼容性检查：旧的LOAD/STORE操作码下的浮点指令（如果存在）
     if (decoded.opcode == Opcode::LOAD && 
         (decoded.funct3 == Funct3::FLW || decoded.funct3 == Funct3::FLD)) {
         if (decoded.funct3 == Funct3::FLW && !isExtensionEnabled(enabled_extensions, Extension::F)) {

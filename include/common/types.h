@@ -48,11 +48,13 @@ enum class Opcode : uint8_t {
     
     // I-type
     OP_IMM      = 0b0010011,    // ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI, SLTI, SLTIU
-    LOAD        = 0b0000011,    // LW, LH, LB, LBU, LHU, FLW
+    LOAD        = 0b0000011,    // LB, LH, LW, LD, LBU, LHU, LWU
+    LOAD_FP     = 0b0000111,    // FLW, FLD (浮点加载指令)
     JALR        = 0b1100111,    // JALR
     
     // S-type
-    STORE       = 0b0100011,    // SW, SH, SB, FSW
+    STORE       = 0b0100011,    // SB, SH, SW, SD
+    STORE_FP    = 0b0100111,    // FSW, FSD (浮点存储指令)
     
     // B-type
     BRANCH      = 0b1100011,    // BEQ, BNE, BLT, BGE, BLTU, BGEU

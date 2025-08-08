@@ -77,6 +77,7 @@ private:
     uint64_t instruction_count_;    // 指令计数器
     uint32_t enabled_extensions_;   // 启用的扩展
     bool last_instruction_compressed_; // 上一条指令是否为压缩指令
+    uint64_t fp_exception_flags_;   // 浮点异常标志
     
     // 指令执行方法
     void executeRType(const DecodedInstruction& inst);
@@ -85,11 +86,18 @@ private:
     void executeBType(const DecodedInstruction& inst);
     void executeUType(const DecodedInstruction& inst);
     void executeJType(const DecodedInstruction& inst);
+    void executeR4Type(const DecodedInstruction& inst);
     void executeSystem(const DecodedInstruction& inst);
     
     // 扩展指令执行方法
     void executeMExtension(const DecodedInstruction& inst);
     void executeFPExtension(const DecodedInstruction& inst);
+    void executeFPExtensionDouble(const DecodedInstruction& inst);
+    void executeFusedMultiplyAdd(const DecodedInstruction& inst);
+    
+    // 浮点加载/存储指令方法
+    void executeFPLoadOperations(const DecodedInstruction& inst);
+    void executeFPStoreOperations(const DecodedInstruction& inst);
     
     // I-Type指令子方法
     void executeImmediateOperations(const DecodedInstruction& inst);
@@ -101,11 +109,15 @@ private:
     void handleEcall();
     void handleEbreak();
     
+    // CSR指令处理
+    void executeCSRInstruction(const DecodedInstruction& inst);
+    
     // 辅助方法
     void incrementPC() { 
         pc_ += last_instruction_compressed_ ? 2 : 4; 
     }
     int32_t signExtend(uint32_t value, int bits) const;
+    void setFPExceptionFlag(uint64_t flag) { fp_exception_flags_ |= flag; }
 }; 
 
 } // namespace riscv

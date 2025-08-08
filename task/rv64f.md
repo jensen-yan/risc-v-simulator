@@ -165,17 +165,55 @@
 - ✅ 双精度融合乘加：FMADD.D, FMSUB.D, FNMSUB.D, FNMADD.D
 - ✅ 精度转换：FCVT.S.D, FCVT.D.S
 
-### 第四阶段：内存系统支持 ⏳ PENDING
-1. **加载/存储指令**：
-   - FLW/FSW指令实现
-   - FLD/FSD指令实现  
-   - 内存对齐检查
+### 第四阶段：内存系统支持 ✅ COMPLETED
+**当前状态**：所有浮点加载/存储指令都已完成实现
 
-### 第五阶段：顺序CPU集成 ⏳ PENDING
-1. **CPU类修改**：
-   - 集成新的浮点执行逻辑
-   - 更新寄存器访问方法
-   - 添加CSR访问支持
+**已完成**：
+1. **✅ 扩展InstructionExecutor类**：
+   - 添加了浮点内存操作方法：`loadFloatFromMemory()`, `loadDoubleFromMemory()`
+   - 添加了浮点存储方法：`storeFloatToMemory()`, `storeDoubleToMemory()`
+   - 实现了内存对齐检查（FLW/FSW: 4字节对齐，FLD/FSD: 8字节对齐）
+
+2. **✅ 更新现有内存操作**：
+   - 在`loadFromMemory()`中集成FLW/FLD支持（合并相同funct3值）
+   - 在`storeToMemory()`中集成FSW/FSD支持（合并相同funct3值）
+   - 验证Memory类已支持所需的32位和64位操作方法
+
+3. **✅ 处理指令编码重复**：
+   - 正确处理LW/FLW和LD/FLD共享相同funct3值的情况
+   - 正确处理SW/FSW和SD/FSD共享相同funct3值的情况
+   - 统一使用底层内存操作，CPU层负责解释数据类型
+
+### 第五阶段：顺序CPU集成 ✅ COMPLETED
+**当前状态**：顺序CPU已完全集成所有浮点指令支持
+
+**已完成**：
+1. **✅ 添加R4_TYPE指令类型支持**：
+   - 在step()方法中添加了R4_TYPE指令的执行分支
+   - 实现了executeR4Type()方法来处理融合乘加指令
+
+2. **✅ 重写浮点指令执行方法**：
+   - 完全重构了executeFPExtension()方法，支持单精度和双精度自动识别
+   - 新增executeFPExtensionDouble()方法专门处理双精度浮点指令
+   - 正确处理不同指令类型的结果存储（整数寄存器 vs 浮点寄存器）
+
+3. **✅ 实现融合乘加指令支持**：
+   - 新增executeFusedMultiplyAdd()方法
+   - 支持单精度和双精度融合乘加指令的自动识别和执行
+   - 处理FMADD、FMSUB、FNMSUB、FNMADD四种融合乘加操作
+
+4. **✅ 集成浮点内存操作**：
+   - 扩展executeLoadOperations()方法支持FLW/FLD浮点加载指令
+   - 扩展executeSType()方法支持FSW/FSD浮点存储指令
+   - 新增executeFPLoadOperations()和executeFPStoreOperations()专用方法
+
+5. **✅ 更新CPU扩展配置**：
+   - 在CPU构造函数中启用F和D扩展
+   - 确保所有浮点指令都能被正确解码和执行
+
+6. **✅ 方法声明和实现完整性**：
+   - 在头文件中添加了所有新方法的声明
+   - 所有方法都有完整的实现并通过编译验证
 
 ### 第六阶段：乱序CPU集成 ⏳ PENDING
 1. **OOO CPU修改**：
@@ -251,23 +289,41 @@
    - 添加了R4型指令支持
    - 完善了F/D扩展验证逻辑
 
-10. **✅ `src/core/instruction_executor.cpp`** - 完成所有浮点指令实现
+10. **✅ `src/core/instruction_executor.cpp`** - 完成所有浮点指令和内存操作实现
     - ✅ 实现了所有RV64F单精度指令
     - ✅ 实现了所有RV64D双精度指令
     - ✅ 实现了融合乘加指令执行
     - ✅ 实现了FMV.W.X指令
     - ✅ 解决了Funct7枚举冲突问题（FMV_X_W/FCLASS_S, FMV_X_D/FCLASS_D）
+    - ✅ 添加了浮点内存操作方法：`loadFloatFromMemory()`, `loadDoubleFromMemory()`, `storeFloatToMemory()`, `storeDoubleToMemory()`
+    - ✅ 更新了`loadFromMemory()`和`storeToMemory()`以支持FLW/FLD/FSW/FSD指令
 
-11. **✅ `include/core/instruction_executor.h`** - 完成浮点执行方法声明
+11. **✅ `include/core/instruction_executor.h`** - 完成浮点执行和内存方法声明
     - ✅ 添加了双精度浮点指令执行方法：`executeFPExtensionDouble()`
     - ✅ 添加了融合乘加方法：`executeFusedMultiplyAddSingle()`, `executeFusedMultiplyAddDouble()`
     - ✅ 添加了双精度浮点辅助方法：`uint64ToDouble()`, `doubleToUint64()`
+    - ✅ 添加了浮点内存操作方法声明：`loadFloatFromMemory()`, `loadDoubleFromMemory()`, `storeFloatToMemory()`, `storeDoubleToMemory()`
 
 12. **✅ `tests/test_syscall_handler.cpp`** - 更新测试占位符
     - 添加了双精度和CSR测试占位符实现
 
 13. **✅ `tests/test_instruction_executor.cpp`** - 修复测试用例
     - 更新了测试用例以使用新的Funct7枚举
+
+14. **✅ `include/cpu/inorder/cpu.h`** - 扩展顺序CPU方法声明（第五阶段）
+    - ✅ 添加了executeR4Type()方法声明
+    - ✅ 添加了executeFPExtensionDouble()方法声明
+    - ✅ 添加了executeFusedMultiplyAdd()方法声明
+    - ✅ 添加了executeFPLoadOperations()和executeFPStoreOperations()方法声明
+
+15. **✅ `src/cpu/inorder/cpu.cpp`** - 完成顺序CPU浮点指令集成（第五阶段）
+    - ✅ 在step()方法中添加了R4_TYPE指令执行支持
+    - ✅ 重构了executeFPExtension()方法，支持单精度和双精度自动识别
+    - ✅ 新增executeFPExtensionDouble()方法处理双精度浮点指令
+    - ✅ 新增executeR4Type()和executeFusedMultiplyAdd()方法处理融合乘加指令
+    - ✅ 扩展executeLoadOperations()和executeSType()方法支持浮点内存操作
+    - ✅ 新增executeFPLoadOperations()和executeFPStoreOperations()专用方法
+    - ✅ 在构造函数中启用F和D扩展
 
 ### 待修改文件 ⏳
 1. **⏳ 内存系统文件（待确定）** - 支持浮点加载/存储

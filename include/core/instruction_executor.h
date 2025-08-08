@@ -30,6 +30,12 @@ public:
     static uint64_t loadFromMemory(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 funct3);
     static void storeToMemory(std::shared_ptr<Memory> memory, uint64_t addr, uint64_t value, Funct3 funct3);
     
+    // 浮点内存操作
+    static uint32_t loadFloatFromMemory(std::shared_ptr<Memory> memory, uint64_t addr);
+    static uint64_t loadDoubleFromMemory(std::shared_ptr<Memory> memory, uint64_t addr);
+    static void storeFloatToMemory(std::shared_ptr<Memory> memory, uint64_t addr, uint32_t value);
+    static void storeDoubleToMemory(std::shared_ptr<Memory> memory, uint64_t addr, uint64_t value);
+    
     // 上位立即数指令
     static uint64_t executeUpperImmediate(const DecodedInstruction& inst, uint64_t pc);
     

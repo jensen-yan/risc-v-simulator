@@ -1,6 +1,18 @@
 #include "core/instruction_executor.h"
 #include "common/types.h"
 #include <cmath>
+#include <iostream>
+
+namespace {
+    // 检查单精度浮点数是否为signaling NaN
+    bool isSignalingNaN(float value) {
+        uint32_t bits = *reinterpret_cast<const uint32_t*>(&value);
+        // IEEE 754: signaling NaN的指数部分全为1，尾数最高位为0，但尾数不全为0
+        uint32_t exponent = (bits >> 23) & 0xFF;
+        uint32_t mantissa = bits & 0x7FFFFF;
+        return (exponent == 0xFF) && (mantissa != 0) && ((mantissa & 0x400000) == 0);
+    }
+}
 
 namespace riscv {
 
@@ -107,10 +119,17 @@ uint64_t InstructionExecutor::loadFromMemory(std::shared_ptr<Memory> memory, uin
         case Funct3::LH:
             return loadSignExtended(memory, addr, 2);
             
-        case Funct3::LW:
+        case Funct3::LW:  // 也用于 FLW (相同的 funct3 值)
+            // 对于整数加载指令 LW：加载32位有符号数，符号扩展到64位
+            // 对于浮点加载指令 FLW：加载32位浮点数，零扩展到64位
+            // 由于在指令执行时我们无法区分LW和FLW，统一使用符号扩展
+            // CPU层会根据指令类型正确处理结果
             return loadSignExtended(memory, addr, 4);
             
-        case Funct3::LD:  // RV64I: 加载双字
+        case Funct3::LD:  // 也用于 FLD (相同的 funct3 值)
+            // LD: 加载64位整数
+            // FLD: 加载64位浮点数，作为位模式返回
+            // 两者都可以用相同的加载逻辑
             return memory->read64(addr);
             
         case Funct3::LBU:
@@ -137,11 +156,13 @@ void InstructionExecutor::storeToMemory(std::shared_ptr<Memory> memory, uint64_t
             memory->writeHalfWord(addr, static_cast<uint16_t>(value));
             break;
             
-        case Funct3::SW:
+        case Funct3::SW:  // 也用于 FSW (相同的 funct3 值)
+            // SW 和 FSW 使用相同的存储逻辑，都是存储32位数据
             memory->writeWord(addr, static_cast<uint32_t>(value));
             break;
             
-        case Funct3::SD:  // RV64I: 存储双字
+        case Funct3::SD:  // 也用于 FSD (相同的 funct3 值)  
+            // SD 和 FSD 使用相同的存储逻辑，都是存储64位数据
             memory->write64(addr, value);
             break;
             
@@ -281,8 +302,13 @@ uint64_t InstructionExecutor::executeMExtension(const DecodedInstruction& inst, 
 
 uint32_t InstructionExecutor::executeFPExtension(const DecodedInstruction& inst, float rs1_val, float rs2_val) {
     switch (inst.funct7) {
-        case Funct7::FADD_S:
-            return floatToUint32(rs1_val + rs2_val);
+        case Funct7::FADD_S: {
+            // 使用long double进行计算以检测精度损失
+            long double extended_result = static_cast<long double>(rs1_val) + static_cast<long double>(rs2_val);
+            float result = rs1_val + rs2_val;
+            
+            return floatToUint32(result);
+        }
             
         case Funct7::FSUB_S:
             return floatToUint32(rs1_val - rs2_val);
@@ -290,20 +316,56 @@ uint32_t InstructionExecutor::executeFPExtension(const DecodedInstruction& inst,
         case Funct7::FMUL_S:
             return floatToUint32(rs1_val * rs2_val);
             
-        case Funct7::FDIV_S:
-            if (rs2_val == 0.0f) {
-                return floatToUint32(rs1_val > 0 ? INFINITY : -INFINITY);
+        case Funct7::FDIV_S: {
+            // 处理0/0和inf/inf等无效情形，以及除零
+            bool rs1_zero = (rs1_val == 0.0f);
+            bool rs2_zero = (rs2_val == 0.0f);
+            bool rs1_inf = std::isinf(rs1_val);
+            bool rs2_inf = std::isinf(rs2_val);
+            if ((rs1_zero && rs2_zero) || (rs1_inf && rs2_inf)) {
+                float qnan = std::numeric_limits<float>::quiet_NaN();
+                return floatToUint32(qnan);
+            }
+            if (rs2_zero && !std::isnan(rs1_val)) {
+                float inf = std::numeric_limits<float>::infinity();
+                bool sign = std::signbit(rs1_val) ^ std::signbit(rs2_val);
+                return floatToUint32(std::copysign(inf, sign ? -1.0f : 1.0f));
             }
             return floatToUint32(rs1_val / rs2_val);
+        }
             
         case Funct7::FCMP_S:
             // 根据funct3来区分比较类型
             switch (inst.funct3) {
-                case Funct3::FEQ:
-                    return (rs1_val == rs2_val) ? 1 : 0;
+                case Funct3::FEQ: {
+                    // FEQ.S指令：对于quiet NaN不产生异常，对于signaling NaN产生异常
+                    uint32_t result;
+                    bool has_snan = isSignalingNaN(rs1_val) || isSignalingNaN(rs2_val);
+                    
+                    if (std::isnan(rs1_val) || std::isnan(rs2_val)) {
+                        result = 0;  // NaN与任何值比较都不相等
+                        // 对于signaling NaN，需要在CPU层设置异常标志
+                    } else {
+                        result = (rs1_val == rs2_val) ? 1 : 0;
+                    }
+                    
+                    
+                    
+                    return result;
+                }
                 case Funct3::FLT:
+                    // FLT.S指令：NaN参与比较会产生Invalid Operation异常
+                    if (std::isnan(rs1_val) || std::isnan(rs2_val)) {
+                        // 这里需要在CPU层设置异常标志，暂时返回0
+                        return 0;
+                    }
                     return (rs1_val < rs2_val) ? 1 : 0;
                 case Funct3::FLE:
+                    // FLE.S指令：NaN参与比较会产生Invalid Operation异常
+                    if (std::isnan(rs1_val) || std::isnan(rs2_val)) {
+                        // 这里需要在CPU层设置异常标志，暂时返回0
+                        return 0;
+                    }
                     return (rs1_val <= rs2_val) ? 1 : 0;
                 default:
                     throw IllegalInstructionException("未知的浮点比较指令");
@@ -343,12 +405,28 @@ uint32_t InstructionExecutor::executeFPExtension(const DecodedInstruction& inst,
             return floatToUint32(std::sqrt(rs1_val));
             
         case Funct7::FMIN_FMAX_S:
-            // 根据funct3来区分
+            // 遵循RISC-V：任一为NaN，返回NaN；两者都为0且符号不同，FMIN返回负零，FMAX返回正零
             switch (inst.funct3) {
-                case Funct3::FMIN:
+                case Funct3::FMIN: {
+                    if (std::isnan(rs1_val) || std::isnan(rs2_val)) {
+                        return floatToUint32(std::numeric_limits<float>::quiet_NaN());
+                    }
+                    if (rs1_val == 0.0f && rs2_val == 0.0f) {
+                        // 返回 -0.0
+                        return floatToUint32(-0.0f);
+                    }
                     return floatToUint32(std::fmin(rs1_val, rs2_val));
-                case Funct3::FMAX:
+                }
+                case Funct3::FMAX: {
+                    if (std::isnan(rs1_val) || std::isnan(rs2_val)) {
+                        return floatToUint32(std::numeric_limits<float>::quiet_NaN());
+                    }
+                    if (rs1_val == 0.0f && rs2_val == 0.0f) {
+                        // 返回 +0.0
+                        return floatToUint32(0.0f);
+                    }
                     return floatToUint32(std::fmax(rs1_val, rs2_val));
+                }
                 default:
                     throw IllegalInstructionException("未知的FMIN/FMAX指令");
             }
@@ -394,9 +472,9 @@ uint32_t InstructionExecutor::executeFPExtension(const DecodedInstruction& inst,
                     
                     if (std::isnan(rs1_val)) {
                         if ((bits & 0x00400000) == 0) {
-                            result = 1 << 8;  // 安静NaN
+                            result = 1 << 9;  // 信号NaN（payload MSB 为0）
                         } else {
-                            result = 1 << 9;  // 信号NaN
+                            result = 1 << 8;  // 安静NaN（payload MSB 为1）
                         }
                     } else if (std::isinf(rs1_val)) {
                         if (rs1_val < 0) {
@@ -870,6 +948,38 @@ uint64_t InstructionExecutor::loadZeroExtended(std::shared_ptr<Memory> memory, u
         default:
             throw IllegalInstructionException("不支持的加载字节数");
     }
+}
+
+uint32_t InstructionExecutor::loadFloatFromMemory(std::shared_ptr<Memory> memory, uint64_t addr) {
+    // FLW: 加载32位单精度浮点数，使用32位边界对齐
+    if (addr % 4 != 0) {
+        throw IllegalInstructionException("FLW地址未对齐到4字节边界");
+    }
+    return memory->readWord(addr);
+}
+
+uint64_t InstructionExecutor::loadDoubleFromMemory(std::shared_ptr<Memory> memory, uint64_t addr) {
+    // FLD: 加载64位双精度浮点数，使用64位边界对齐
+    if (addr % 8 != 0) {
+        throw IllegalInstructionException("FLD地址未对齐到8字节边界");
+    }
+    return memory->read64(addr);
+}
+
+void InstructionExecutor::storeFloatToMemory(std::shared_ptr<Memory> memory, uint64_t addr, uint32_t value) {
+    // FSW: 存储32位单精度浮点数，使用32位边界对齐
+    if (addr % 4 != 0) {
+        throw IllegalInstructionException("FSW地址未对齐到4字节边界");
+    }
+    memory->writeWord(addr, value);
+}
+
+void InstructionExecutor::storeDoubleToMemory(std::shared_ptr<Memory> memory, uint64_t addr, uint64_t value) {
+    // FSD: 存储64位双精度浮点数，使用64位边界对齐
+    if (addr % 8 != 0) {
+        throw IllegalInstructionException("FSD地址未对齐到8字节边界");
+    }
+    memory->write64(addr, value);
 }
 
 } // namespace riscv

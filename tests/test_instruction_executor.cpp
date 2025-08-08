@@ -432,7 +432,7 @@ TEST_F(InstructionExecutorTest, FloatingPointOperations) {
 
 TEST_F(InstructionExecutorTest, FloatingPointComparison) {
     // FEQ.S (浮点相等比较)
-    auto feq_inst = createDecodedInst(Opcode::OP_FP, Funct3::ADD_SUB, Funct7::FEQ_S, 1, 2, 3);
+    auto feq_inst = createDecodedInst(Opcode::OP_FP, Funct3::FEQ, Funct7::FCMP_S, 1, 2, 3);
     uint32_t feq_result1 = InstructionExecutor::executeFPExtension(feq_inst, 3.14f, 3.14f);
     EXPECT_EQ(feq_result1, 1) << "FEQ.S: 相等的浮点数应该返回1";
     
@@ -440,7 +440,7 @@ TEST_F(InstructionExecutorTest, FloatingPointComparison) {
     EXPECT_EQ(feq_result2, 0) << "FEQ.S: 不等的浮点数应该返回0";
     
     // FLT.S (浮点小于比较)
-    auto flt_inst = createDecodedInst(Opcode::OP_FP, Funct3::ADD_SUB, Funct7::FLT_S, 1, 2, 3);
+    auto flt_inst = createDecodedInst(Opcode::OP_FP, Funct3::FLT, Funct7::FCMP_S, 1, 2, 3);
     uint32_t flt_result1 = InstructionExecutor::executeFPExtension(flt_inst, 2.0f, 3.0f);
     EXPECT_EQ(flt_result1, 1) << "FLT.S: 2.0 < 3.0 应该返回1";
     
@@ -448,7 +448,7 @@ TEST_F(InstructionExecutorTest, FloatingPointComparison) {
     EXPECT_EQ(flt_result2, 0) << "FLT.S: 3.0 < 2.0 应该返回0";
     
     // FLE.S (浮点小于等于比较)
-    auto fle_inst = createDecodedInst(Opcode::OP_FP, Funct3::ADD_SUB, Funct7::FLE_S, 1, 2, 3);
+    auto fle_inst = createDecodedInst(Opcode::OP_FP, Funct3::FLE, Funct7::FCMP_S, 1, 2, 3);
     uint32_t fle_result1 = InstructionExecutor::executeFPExtension(fle_inst, 2.0f, 2.0f);
     EXPECT_EQ(fle_result1, 1) << "FLE.S: 2.0 <= 2.0 应该返回1";
     

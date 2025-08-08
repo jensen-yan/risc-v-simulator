@@ -36,6 +36,7 @@ enum class InstructionType {
     B_TYPE,     // 分支指令
     U_TYPE,     // 上位立即数指令
     J_TYPE,     // 跳转指令
+    R4_TYPE,    // R4型指令（融合乘加指令，4个源寄存器）
     SYSTEM_TYPE, // 系统指令
     UNKNOWN
 };
@@ -69,6 +70,12 @@ enum class Opcode : uint8_t {
     
     // 浮点运算指令 (F/D扩展)
     OP_FP       = 0b1010011,    // 浮点运算指令
+    
+    // R4型融合乘加指令
+    FMADD       = 0b1000011,    // 融合乘加 (FMADD.S/D)
+    FMSUB       = 0b1000111,    // 融合乘减 (FMSUB.S/D)
+    FNMSUB      = 0b1001011,    // 融合负乘减 (FNMSUB.S/D)
+    FNMADD      = 0b1001111,    // 融合负乘加 (FNMADD.S/D)
     
     // 同步指令
     MISC_MEM    = 0b0001111,    // FENCE指令
@@ -115,12 +122,18 @@ enum class Funct3 : uint8_t {
     LBU     = 0b100,
     LHU     = 0b101,
     LWU     = 0b110,    // RV64I: 加载字(32位)零扩展
+    // 浮点加载指令
+    FLW     = 0b010,    // 加载单精度浮点数
+    FLD     = 0b011,    // 加载双精度浮点数
     
     // 存储指令
     SB      = 0b000,
     SH      = 0b001,
     SW      = 0b010,
     SD      = 0b011,    // RV64I: 存储双字(64位)
+    // 浮点存储指令
+    FSW     = 0b010,    // 存储单精度浮点数
+    FSD     = 0b011,    // 存储双精度浮点数
     
     // 系统调用和特权指令
     ECALL_EBREAK = 0b000,
@@ -128,7 +141,20 @@ enum class Funct3 : uint8_t {
     // 浮点比较指令
     FEQ     = 0b010,
     FLT     = 0b001,
-    FLE     = 0b000
+    FLE     = 0b000,
+    
+    // 浮点符号注入指令
+    FSGNJ   = 0b000,    // 符号注入
+    FSGNJN  = 0b001,    // 符号注入取反  
+    FSGNJX  = 0b010,    // 符号注入异或
+    
+    // 浮点最小值/最大值指令
+    FMIN    = 0b000,    // 最小值
+    FMAX    = 0b001,    // 最大值
+    
+    // 浮点移动和分类指令
+    FMV_CLASS = 0b000,  // FMV.X.W, FMV.X.D (rs2=00000)
+    FCLASS    = 0b001   // FCLASS.S, FCLASS.D (rs2=00000)
 };
 
 enum class Funct7 : uint8_t {
@@ -136,21 +162,37 @@ enum class Funct7 : uint8_t {
     SUB_SRA = 0b0100000,    // SUB, SRA
     M_EXT   = 0b0000001,    // M扩展指令
     
-    // 浮点运算指令
+    // RV64F 单精度浮点指令
     FADD_S  = 0b0000000,    // 浮点加法
     FSUB_S  = 0b0000100,    // 浮点减法
     FMUL_S  = 0b0001000,    // 浮点乘法
     FDIV_S  = 0b0001100,    // 浮点除法
     FSQRT_S = 0b0101100,    // 浮点开方
-    FMIN_S  = 0b0010100,    // 浮点最小值
-    FMAX_S  = 0b0010101,    // 浮点最大值
-    FEQ_S   = 0b1010000,    // 浮点相等比较
-    FLT_S   = 0b1010001,    // 浮点小于比较
-    FLE_S   = 0b1010010,    // 浮点小于等于比较
-    FCVT_W_S = 0b1100000,   // 浮点转整数
-    FCVT_WU_S = 0b1100001,  // 浮点转无符号整数
-    FCVT_S_W = 0b1101000,   // 整数转浮点
-    FCVT_S_WU = 0b1101001   // 无符号整数转浮点
+    FSGNJ_S = 0b0010000,    // 浮点符号注入
+    FMIN_FMAX_S = 0b0010100, // 浮点最小值/最大值 (funct3区分)
+    FCVT_INT_S = 0b1100000, // 浮点转整数 (rs2字段区分W/WU/L/LU)
+    FMV_X_W = 0b1110000,    // 浮点寄存器移动到整数寄存器 (funct3=000)
+    FCLASS_S = 0b1110000,   // 浮点分类 (funct3=001)
+    FCMP_S = 0b1010000,     // 浮点比较 (funct3区分：FEQ=010, FLT=001, FLE=000)
+    FCVT_S_INT = 0b1101000, // 整数转浮点 (rs2字段区分W/WU/L/LU)
+    FMV_W_X = 0b1111000,    // 整数寄存器移动到浮点寄存器
+    
+    // RV64D 双精度浮点指令
+    FADD_D  = 0b0000001,    // 双精度浮点加法
+    FSUB_D  = 0b0000101,    // 双精度浮点减法
+    FMUL_D  = 0b0001001,    // 双精度浮点乘法
+    FDIV_D  = 0b0001101,    // 双精度浮点除法
+    FSQRT_D = 0b0101101,    // 双精度浮点开方
+    FSGNJ_D = 0b0010001,    // 双精度浮点符号注入
+    FMIN_FMAX_D = 0b0010101, // 双精度浮点最小值/最大值 (funct3区分)
+    FCVT_INT_D = 0b1100001, // 双精度转整数 (rs2字段区分W/WU/L/LU)
+    FMV_X_D = 0b1110001,    // 双精度寄存器移动到整数寄存器 (funct3=000)
+    FCLASS_D = 0b1110001,   // 双精度浮点分类 (funct3=001)
+    FCMP_D = 0b1010001,     // 双精度浮点比较 (funct3区分：FEQ=010, FLT=001, FLE=000)
+    FCVT_D_INT = 0b1101001, // 整数转双精度 (rs2字段区分W/WU/L/LU)
+    FMV_D_X = 0b1111001,    // 整数寄存器移动到双精度寄存器
+    FCVT_S_D = 0b0100000,   // 双精度转单精度 (rs2=00001)
+    FCVT_D_S = 0b0100001    // 单精度转双精度 (rs2=00000)
 };
 
 // 扩展支持标志
@@ -171,6 +213,20 @@ namespace SystemInst {
     constexpr uint32_t SRET   = 0x102;  // 监管模式返回 (可选)
     constexpr uint32_t URET   = 0x002;  // 用户模式返回 (可选)
     constexpr uint32_t WFI    = 0x105;  // 等待中断 (可选)
+}
+
+// CSR地址常量
+namespace CSRAddr {
+    // 浮点CSR寄存器
+    constexpr uint16_t FFLAGS = 0x001;  // 浮点异常标志
+    constexpr uint16_t FRM    = 0x002;  // 浮点舍入模式
+    constexpr uint16_t FCSR   = 0x003;  // 浮点控制和状态寄存器
+    
+    // 机器模式CSR（简化支持）
+    constexpr uint16_t MSTATUS = 0x300; // 机器状态寄存器
+    constexpr uint16_t MISA    = 0x301; // 机器ISA寄存器
+    constexpr uint16_t MIE     = 0x304; // 机器中断使能
+    constexpr uint16_t MTVEC   = 0x305; // 机器陷阱向量
 }
 
 // 浮点舍入模式

@@ -187,14 +187,64 @@ float OutOfOrderCPU::getFPRegisterFloat(RegNum reg) const {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }
-    return *reinterpret_cast<const float*>(&cpu_state_.arch_fp_registers[reg]);
+    // 取低32位重新解释为IEEE 754单精度浮点数
+    uint32_t bits = static_cast<uint32_t>(cpu_state_.arch_fp_registers[reg] & 0xFFFFFFFF);
+    return *reinterpret_cast<const float*>(&bits);
 }
 
 void OutOfOrderCPU::setFPRegisterFloat(RegNum reg, float value) {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }
-    cpu_state_.arch_fp_registers[reg] = *reinterpret_cast<const uint32_t*>(&value);
+    // 重新解释IEEE 754单精度浮点数为32位整数，并存储在低32位
+    uint32_t bits = *reinterpret_cast<const uint32_t*>(&value);
+    cpu_state_.arch_fp_registers[reg] = (cpu_state_.arch_fp_registers[reg] & 0xFFFFFFFF00000000ULL) | bits;
+}
+
+double OutOfOrderCPU::getFPRegisterDouble(RegNum reg) const {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    // 重新解释64位整数为IEEE 754双精度浮点数
+    return *reinterpret_cast<const double*>(&cpu_state_.arch_fp_registers[reg]);
+}
+
+void OutOfOrderCPU::setFPRegisterDouble(RegNum reg, double value) {
+    if (reg >= NUM_FP_REGISTERS) {
+        throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
+    }
+    // 重新解释IEEE 754双精度浮点数为64位整数
+    cpu_state_.arch_fp_registers[reg] = *reinterpret_cast<const uint64_t*>(&value);
+}
+
+uint64_t OutOfOrderCPU::getCSR(uint16_t csr_addr) const {
+    // 简化CSR实现：返回固定的合理默认值（与顺序CPU保持一致）
+    switch (csr_addr) {
+        case CSRAddr::FFLAGS:
+            return 0x0;  // 无浮点异常标志
+        case CSRAddr::FRM:
+            return 0x0;  // 默认舍入模式 (RNE)
+        case CSRAddr::FCSR:
+            return 0x0;  // FCSR = FRM[7:5] | FFLAGS[4:0]
+        case CSRAddr::MSTATUS:
+            return 0x1800;  // FS字段设置为初始状态
+        case CSRAddr::MISA:
+            // RV64IMAFDC (基本指令集 + M + A + F + D + C扩展)
+            return 0x8000000000141101UL;
+        case CSRAddr::MIE:
+            return 0x0;  // 禁用所有中断
+        case CSRAddr::MTVEC:
+            return 0x0;  // 陷阱向量基地址为0
+        default:
+            // 对于未知CSR，返回0（标准做法）
+            return 0x0;
+    }
+}
+
+void OutOfOrderCPU::setCSR(uint16_t csr_addr, uint64_t value) {
+    // 简化CSR实现：忽略写入操作
+    (void)csr_addr;  // 避免未使用参数警告
+    (void)value;
 }
 
 void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint64_t pc) {

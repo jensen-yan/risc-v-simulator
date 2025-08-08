@@ -61,9 +61,9 @@ struct CPUState {
     static constexpr size_t NUM_FP_REGISTERS = 32;
     
     std::array<uint64_t, NUM_REGISTERS> arch_registers;     // 架构寄存器
-    std::array<uint32_t, NUM_FP_REGISTERS> arch_fp_registers; // 架构浮点寄存器
+    std::array<uint64_t, NUM_FP_REGISTERS> arch_fp_registers; // 架构浮点寄存器
     std::array<uint64_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_registers;    // 物理寄存器
-    std::array<uint32_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_fp_registers; // 物理浮点寄存器
+    std::array<uint64_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_fp_registers; // 物理浮点寄存器
     
     // 流水线缓冲区
     std::queue<FetchedInstruction> fetch_buffer;  // 取指缓冲区

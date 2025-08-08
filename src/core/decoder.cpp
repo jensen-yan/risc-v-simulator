@@ -32,6 +32,10 @@ DecodedInstruction Decoder::decode(Instruction instruction, uint32_t enabled_ext
         case InstructionType::J_TYPE:
             decoded.imm = extractImmediateJ(instruction);
             break;
+        case InstructionType::R4_TYPE:
+            // R4型指令没有立即数
+            decoded.imm = 0;
+            break;
         case InstructionType::SYSTEM_TYPE:
             // 系统指令的立即数解码：类似 I 型指令但需要特殊处理
             decoded.imm = extractImmediateI(instruction);
@@ -146,6 +150,12 @@ InstructionType Decoder::determineType(Opcode opcode) {
             return InstructionType::J_TYPE;
         case Opcode::SYSTEM:
             return InstructionType::SYSTEM_TYPE;
+        // R4型融合乘加指令
+        case Opcode::FMADD:
+        case Opcode::FMSUB:
+        case Opcode::FNMSUB:
+        case Opcode::FNMADD:
+            return InstructionType::R4_TYPE;
         default:
             return InstructionType::UNKNOWN;
     }
@@ -159,10 +169,50 @@ void Decoder::validateInstruction(const DecodedInstruction& decoded, uint32_t en
         }
     }
     
-    // 检查F扩展指令
-    if (decoded.opcode == Opcode::OP_FP) {
+    // 检查F扩展指令（单精度浮点）
+    if (decoded.opcode == Opcode::OP_FP || 
+        decoded.opcode == Opcode::FMADD || decoded.opcode == Opcode::FMSUB ||
+        decoded.opcode == Opcode::FNMSUB || decoded.opcode == Opcode::FNMADD) {
         if (!isExtensionEnabled(enabled_extensions, Extension::F)) {
             throw IllegalInstructionException("F扩展指令未启用");
+        }
+    }
+    
+    // 检查D扩展指令（双精度浮点，依赖F扩展）
+    if (decoded.opcode == Opcode::OP_FP && 
+        (decoded.funct7 == Funct7::FADD_D || decoded.funct7 == Funct7::FSUB_D || 
+         decoded.funct7 == Funct7::FMUL_D || decoded.funct7 == Funct7::FDIV_D ||
+         decoded.funct7 == Funct7::FSQRT_D || decoded.funct7 == Funct7::FSGNJ_D ||
+         decoded.funct7 == Funct7::FMIN_FMAX_D || decoded.funct7 == Funct7::FCVT_INT_D ||
+         decoded.funct7 == Funct7::FMV_X_D || decoded.funct7 == Funct7::FCLASS_D ||
+         decoded.funct7 == Funct7::FCMP_D || decoded.funct7 == Funct7::FCVT_D_INT ||
+         decoded.funct7 == Funct7::FMV_D_X || decoded.funct7 == Funct7::FCVT_S_D ||
+         decoded.funct7 == Funct7::FCVT_D_S)) {
+        if (!isExtensionEnabled(enabled_extensions, Extension::D)) {
+            throw IllegalInstructionException("D扩展指令未启用");
+        }
+        if (!isExtensionEnabled(enabled_extensions, Extension::F)) {
+            throw IllegalInstructionException("D扩展依赖F扩展，但F扩展未启用");
+        }
+    }
+    
+    // 检查浮点加载/存储指令
+    if (decoded.opcode == Opcode::LOAD && 
+        (decoded.funct3 == Funct3::FLW || decoded.funct3 == Funct3::FLD)) {
+        if (decoded.funct3 == Funct3::FLW && !isExtensionEnabled(enabled_extensions, Extension::F)) {
+            throw IllegalInstructionException("FLW指令需要F扩展");
+        }
+        if (decoded.funct3 == Funct3::FLD && !isExtensionEnabled(enabled_extensions, Extension::D)) {
+            throw IllegalInstructionException("FLD指令需要D扩展");
+        }
+    }
+    if (decoded.opcode == Opcode::STORE && 
+        (decoded.funct3 == Funct3::FSW || decoded.funct3 == Funct3::FSD)) {
+        if (decoded.funct3 == Funct3::FSW && !isExtensionEnabled(enabled_extensions, Extension::F)) {
+            throw IllegalInstructionException("FSW指令需要F扩展");
+        }
+        if (decoded.funct3 == Funct3::FSD && !isExtensionEnabled(enabled_extensions, Extension::D)) {
+            throw IllegalInstructionException("FSD指令需要D扩展");
         }
     }
     

@@ -30,6 +30,12 @@ public:
     virtual void setFPRegister(RegNum reg, uint64_t value) = 0;
     virtual float getFPRegisterFloat(RegNum reg) const = 0;
     virtual void setFPRegisterFloat(RegNum reg, float value) = 0;
+    virtual double getFPRegisterDouble(RegNum reg) const = 0;
+    virtual void setFPRegisterDouble(RegNum reg, double value) = 0;
+    
+    // CSR寄存器访问（简化实现）
+    virtual uint64_t getCSR(uint16_t csr_addr) const = 0;
+    virtual void setCSR(uint16_t csr_addr, uint64_t value) = 0;
     
     // 程序计数器
     virtual uint64_t getPC() const = 0;

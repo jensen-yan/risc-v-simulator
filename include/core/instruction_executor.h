@@ -39,6 +39,13 @@ public:
     // F扩展指令（单精度浮点）
     static uint32_t executeFPExtension(const DecodedInstruction& inst, float rs1_val, float rs2_val);
     
+    // D扩展指令（双精度浮点）
+    static uint64_t executeFPExtensionDouble(const DecodedInstruction& inst, double rs1_val, double rs2_val);
+    
+    // 融合乘加指令（R4型指令）
+    static uint32_t executeFusedMultiplyAddSingle(const DecodedInstruction& inst, float rs1_val, float rs2_val, float rs3_val);
+    static uint64_t executeFusedMultiplyAddDouble(const DecodedInstruction& inst, double rs1_val, double rs2_val, double rs3_val);
+    
     // RV64I 32位算术运算
     static uint64_t executeImmediateOperation32(const DecodedInstruction& inst, uint64_t rs1_val);
     static uint64_t executeRegisterOperation32(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val);
@@ -67,6 +74,8 @@ private:
     // 浮点辅助方法
     static float uint32ToFloat(uint32_t value);
     static uint32_t floatToUint32(float value);
+    static double uint64ToDouble(uint64_t value);
+    static uint64_t doubleToUint64(double value);
     
     // 内存访问辅助
     static uint64_t loadSignExtended(std::shared_ptr<Memory> memory, uint64_t addr, int bytes);

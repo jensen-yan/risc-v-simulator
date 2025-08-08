@@ -296,26 +296,150 @@ uint32_t InstructionExecutor::executeFPExtension(const DecodedInstruction& inst,
             }
             return floatToUint32(rs1_val / rs2_val);
             
-        case Funct7::FEQ_S:
-            return (rs1_val == rs2_val) ? 1 : 0;
+        case Funct7::FCMP_S:
+            // 根据funct3来区分比较类型
+            switch (inst.funct3) {
+                case Funct3::FEQ:
+                    return (rs1_val == rs2_val) ? 1 : 0;
+                case Funct3::FLT:
+                    return (rs1_val < rs2_val) ? 1 : 0;
+                case Funct3::FLE:
+                    return (rs1_val <= rs2_val) ? 1 : 0;
+                default:
+                    throw IllegalInstructionException("未知的浮点比较指令");
+            }
             
-        case Funct7::FLT_S:
-            return (rs1_val < rs2_val) ? 1 : 0;
+        case Funct7::FCVT_INT_S:
+            // 根据rs2字段来区分转换类型
+            switch (inst.rs2) {
+                case 0:  // FCVT.W.S
+                    return static_cast<uint32_t>(static_cast<int32_t>(rs1_val));
+                case 1:  // FCVT.WU.S
+                    return static_cast<uint32_t>(rs1_val);
+                case 2:  // FCVT.L.S
+                    return static_cast<uint64_t>(static_cast<int64_t>(rs1_val));
+                case 3:  // FCVT.LU.S
+                    return static_cast<uint64_t>(rs1_val);
+                default:
+                    throw IllegalInstructionException("未知的浮点转整数指令");
+            }
             
-        case Funct7::FLE_S:
-            return (rs1_val <= rs2_val) ? 1 : 0;
+        case Funct7::FCVT_S_INT:
+            // 根据rs2字段来区分转换类型
+            switch (inst.rs2) {
+                case 0:  // FCVT.S.W
+                    return floatToUint32(static_cast<float>(static_cast<int32_t>(rs1_val)));
+                case 1:  // FCVT.S.WU
+                    return floatToUint32(static_cast<float>(rs1_val));
+                case 2:  // FCVT.S.L
+                    return floatToUint32(static_cast<float>(static_cast<int64_t>(rs1_val)));
+                case 3:  // FCVT.S.LU
+                    return floatToUint32(static_cast<float>(rs1_val));
+                default:
+                    throw IllegalInstructionException("未知的整数转浮点指令");
+            }
             
-        case Funct7::FCVT_W_S:
-            return static_cast<uint32_t>(static_cast<int32_t>(rs1_val));
+        case Funct7::FSQRT_S:
+            return floatToUint32(std::sqrt(rs1_val));
             
-        case Funct7::FCVT_WU_S:
-            return static_cast<uint32_t>(rs1_val);
+        case Funct7::FMIN_FMAX_S:
+            // 根据funct3来区分
+            switch (inst.funct3) {
+                case Funct3::FMIN:
+                    return floatToUint32(std::fmin(rs1_val, rs2_val));
+                case Funct3::FMAX:
+                    return floatToUint32(std::fmax(rs1_val, rs2_val));
+                default:
+                    throw IllegalInstructionException("未知的FMIN/FMAX指令");
+            }
             
-        case Funct7::FCVT_S_W:
-            return floatToUint32(static_cast<float>(static_cast<int32_t>(rs1_val)));
+        case Funct7::FSGNJ_S:
+            // 符号注入指令
+            switch (inst.funct3) {
+                case Funct3::FSGNJ: {
+                    // 复制rs2的符号到rs1
+                    uint32_t rs1_bits = floatToUint32(rs1_val);
+                    uint32_t rs2_bits = floatToUint32(rs2_val);
+                    uint32_t result = (rs1_bits & 0x7FFFFFFF) | (rs2_bits & 0x80000000);
+                    return result;
+                }
+                case Funct3::FSGNJN: {
+                    // 复制rs2的符号取反到rs1
+                    uint32_t rs1_bits = floatToUint32(rs1_val);
+                    uint32_t rs2_bits = floatToUint32(rs2_val);
+                    uint32_t result = (rs1_bits & 0x7FFFFFFF) | ((~rs2_bits) & 0x80000000);
+                    return result;
+                }
+                case Funct3::FSGNJX: {
+                    // rs1和rs2的符号异或
+                    uint32_t rs1_bits = floatToUint32(rs1_val);
+                    uint32_t rs2_bits = floatToUint32(rs2_val);
+                    uint32_t result = rs1_bits ^ (rs2_bits & 0x80000000);
+                    return result;
+                }
+                default:
+                    throw IllegalInstructionException("未知的FSGNJ指令");
+            }
             
-        case Funct7::FCVT_S_WU:
-            return floatToUint32(static_cast<float>(rs1_val));
+        case Funct7::FMV_X_W:  // 这个值与FCLASS_S相同，通过funct3区分
+            // 根据funct3来区分FMV.X.W和FCLASS.S
+            switch (inst.funct3) {
+                case Funct3::FMV_CLASS:
+                    // FMV.X.W: 将浮点寄存器的位模式移动到整数寄存器
+                    return floatToUint32(rs1_val);
+                case Funct3::FCLASS: {
+                    // FCLASS.S: 分类浮点数
+                    uint32_t bits = floatToUint32(rs1_val);
+                    uint32_t result = 0;
+                    
+                    if (std::isnan(rs1_val)) {
+                        if ((bits & 0x00400000) == 0) {
+                            result = 1 << 8;  // 安静NaN
+                        } else {
+                            result = 1 << 9;  // 信号NaN
+                        }
+                    } else if (std::isinf(rs1_val)) {
+                        if (rs1_val < 0) {
+                            result = 1 << 0;  // 负无穷大
+                        } else {
+                            result = 1 << 7;  // 正无穷大
+                        }
+                    } else if (rs1_val == 0.0f) {
+                        if (std::signbit(rs1_val)) {
+                            result = 1 << 3;  // 负零
+                        } else {
+                            result = 1 << 4;  // 正零
+                        }
+                    } else if (std::isnormal(rs1_val)) {
+                        if (rs1_val < 0) {
+                            result = 1 << 1;  // 负正常数
+                        } else {
+                            result = 1 << 6;  // 正正常数
+                        }
+                    } else {
+                        // 次正常数
+                        if (rs1_val < 0) {
+                            result = 1 << 2;  // 负次正常数
+                        } else {
+                            result = 1 << 5;  // 正次正常数
+                        }
+                    }
+                    return result;
+                }
+                default:
+                    throw IllegalInstructionException("未知的FMV.X.W/FCLASS.S指令");
+            }
+            
+        case Funct7::FMV_W_X:
+            // 根据funct3来区分
+            switch (inst.funct3) {
+                case Funct3::FMV_CLASS:
+                    // FMV.W.X: 将整数寄存器的低32位位模式移动到浮点寄存器
+                    // rs1_val实际上是从整数寄存器来的uint64_t值，需要取低32位
+                    return static_cast<uint32_t>(reinterpret_cast<const uint64_t&>(rs1_val) & 0xFFFFFFFF);
+                default:
+                    throw IllegalInstructionException("未知的FMV.W.X指令");
+            }
             
         default:
             throw IllegalInstructionException("未知的F扩展指令功能码");
@@ -484,6 +608,238 @@ uint32_t InstructionExecutor::floatToUint32(float value) {
     union { uint32_t i; float f; } converter;
     converter.f = value;
     return converter.i;
+}
+
+double InstructionExecutor::uint64ToDouble(uint64_t value) {
+    union { uint64_t i; double d; } converter;
+    converter.i = value;
+    return converter.d;
+}
+
+uint64_t InstructionExecutor::doubleToUint64(double value) {
+    union { uint64_t i; double d; } converter;
+    converter.d = value;
+    return converter.i;
+}
+
+uint64_t InstructionExecutor::executeFPExtensionDouble(const DecodedInstruction& inst, double rs1_val, double rs2_val) {
+    switch (inst.funct7) {
+        case Funct7::FADD_D:
+            return doubleToUint64(rs1_val + rs2_val);
+            
+        case Funct7::FSUB_D:
+            return doubleToUint64(rs1_val - rs2_val);
+            
+        case Funct7::FMUL_D:
+            return doubleToUint64(rs1_val * rs2_val);
+            
+        case Funct7::FDIV_D:
+            if (rs2_val == 0.0) {
+                return doubleToUint64(rs1_val > 0 ? INFINITY : -INFINITY);
+            }
+            return doubleToUint64(rs1_val / rs2_val);
+            
+        case Funct7::FCMP_D:
+            // 根据funct3来区分比较类型
+            switch (inst.funct3) {
+                case Funct3::FEQ:
+                    return (rs1_val == rs2_val) ? 1 : 0;
+                case Funct3::FLT:
+                    return (rs1_val < rs2_val) ? 1 : 0;
+                case Funct3::FLE:
+                    return (rs1_val <= rs2_val) ? 1 : 0;
+                default:
+                    throw IllegalInstructionException("未知的双精度浮点比较指令");
+            }
+            
+        case Funct7::FCVT_INT_D:
+            // 根据rs2字段来区分转换类型
+            switch (inst.rs2) {
+                case 0:  // FCVT.W.D
+                    return static_cast<uint64_t>(static_cast<int32_t>(rs1_val));
+                case 1:  // FCVT.WU.D
+                    return static_cast<uint64_t>(static_cast<uint32_t>(rs1_val));
+                case 2:  // FCVT.L.D
+                    return static_cast<uint64_t>(static_cast<int64_t>(rs1_val));
+                case 3:  // FCVT.LU.D
+                    return static_cast<uint64_t>(rs1_val);
+                default:
+                    throw IllegalInstructionException("未知的双精度转整数指令");
+            }
+            
+        case Funct7::FCVT_D_INT:
+            // 根据rs2字段来区分转换类型
+            switch (inst.rs2) {
+                case 0:  // FCVT.D.W
+                    return doubleToUint64(static_cast<double>(static_cast<int32_t>(rs1_val)));
+                case 1:  // FCVT.D.WU
+                    return doubleToUint64(static_cast<double>(static_cast<uint32_t>(rs1_val)));
+                case 2:  // FCVT.D.L
+                    return doubleToUint64(static_cast<double>(static_cast<int64_t>(rs1_val)));
+                case 3:  // FCVT.D.LU
+                    return doubleToUint64(static_cast<double>(rs1_val));
+                default:
+                    throw IllegalInstructionException("未知的整数转双精度指令");
+            }
+            
+        case Funct7::FSQRT_D:
+            return doubleToUint64(std::sqrt(rs1_val));
+            
+        case Funct7::FMIN_FMAX_D:
+            // 根据funct3来区分
+            switch (inst.funct3) {
+                case Funct3::FMIN:
+                    return doubleToUint64(std::fmin(rs1_val, rs2_val));
+                case Funct3::FMAX:
+                    return doubleToUint64(std::fmax(rs1_val, rs2_val));
+                default:
+                    throw IllegalInstructionException("未知的双精度FMIN/FMAX指令");
+            }
+            
+        case Funct7::FSGNJ_D:
+            // 符号注入指令
+            switch (inst.funct3) {
+                case Funct3::FSGNJ: {
+                    // 复制rs2的符号到rs1
+                    uint64_t rs1_bits = doubleToUint64(rs1_val);
+                    uint64_t rs2_bits = doubleToUint64(rs2_val);
+                    uint64_t result = (rs1_bits & 0x7FFFFFFFFFFFFFFF) | (rs2_bits & 0x8000000000000000);
+                    return result;
+                }
+                case Funct3::FSGNJN: {
+                    // 复制rs2的符号取反到rs1
+                    uint64_t rs1_bits = doubleToUint64(rs1_val);
+                    uint64_t rs2_bits = doubleToUint64(rs2_val);
+                    uint64_t result = (rs1_bits & 0x7FFFFFFFFFFFFFFF) | ((~rs2_bits) & 0x8000000000000000);
+                    return result;
+                }
+                case Funct3::FSGNJX: {
+                    // rs1和rs2的符号异或
+                    uint64_t rs1_bits = doubleToUint64(rs1_val);
+                    uint64_t rs2_bits = doubleToUint64(rs2_val);
+                    uint64_t result = rs1_bits ^ (rs2_bits & 0x8000000000000000);
+                    return result;
+                }
+                default:
+                    throw IllegalInstructionException("未知的双精度FSGNJ指令");
+            }
+            
+        case Funct7::FMV_X_D:  // 这个值与FCLASS_D相同，通过funct3区分
+            // 根据funct3来区分FMV.X.D和FCLASS.D
+            switch (inst.funct3) {
+                case Funct3::FMV_CLASS:
+                    // FMV.X.D: 将双精度浮点寄存器的位模式移动到整数寄存器
+                    return doubleToUint64(rs1_val);
+                case Funct3::FCLASS: {
+                    // FCLASS.D: 分类双精度浮点数
+                    uint64_t bits = doubleToUint64(rs1_val);
+                    uint64_t result = 0;
+                    
+                    if (std::isnan(rs1_val)) {
+                        if ((bits & 0x0008000000000000) == 0) {
+                            result = 1 << 8;  // 安静NaN
+                        } else {
+                            result = 1 << 9;  // 信号NaN
+                        }
+                    } else if (std::isinf(rs1_val)) {
+                        if (rs1_val < 0) {
+                            result = 1 << 0;  // 负无穷大
+                        } else {
+                            result = 1 << 7;  // 正无穷大
+                        }
+                    } else if (rs1_val == 0.0) {
+                        if (std::signbit(rs1_val)) {
+                            result = 1 << 3;  // 负零
+                        } else {
+                            result = 1 << 4;  // 正零
+                        }
+                    } else if (std::isnormal(rs1_val)) {
+                        if (rs1_val < 0) {
+                            result = 1 << 1;  // 负正常数
+                        } else {
+                            result = 1 << 6;  // 正正常数
+                        }
+                    } else {
+                        // 次正常数
+                        if (rs1_val < 0) {
+                            result = 1 << 2;  // 负次正常数
+                        } else {
+                            result = 1 << 5;  // 正次正常数
+                        }
+                    }
+                    return result;
+                }
+                default:
+                    throw IllegalInstructionException("未知的FMV.X.D/FCLASS.D指令");
+            }
+            
+        case Funct7::FMV_D_X:
+            // 根据funct3来区分
+            switch (inst.funct3) {
+                case Funct3::FMV_CLASS:
+                    // FMV.D.X: 将整数寄存器的位模式移动到双精度浮点寄存器
+                    return static_cast<uint64_t>(reinterpret_cast<const uint64_t&>(rs1_val));
+                default:
+                    throw IllegalInstructionException("未知的FMV.D.X指令");
+            }
+            
+        case Funct7::FCVT_S_D:
+            // FCVT.S.D: 双精度转单精度
+            return static_cast<uint64_t>(floatToUint32(static_cast<float>(rs1_val)));
+            
+        case Funct7::FCVT_D_S:
+            // FCVT.D.S: 单精度转双精度
+            return doubleToUint64(static_cast<double>(uint32ToFloat(static_cast<uint32_t>(rs1_val))));
+            
+        default:
+            throw IllegalInstructionException("未知的D扩展指令功能码");
+    }
+}
+
+uint32_t InstructionExecutor::executeFusedMultiplyAddSingle(const DecodedInstruction& inst, float rs1_val, float rs2_val, float rs3_val) {
+    switch (inst.opcode) {
+        case Opcode::FMADD:
+            // FMADD.S: rs1 * rs2 + rs3
+            return floatToUint32(std::fma(rs1_val, rs2_val, rs3_val));
+            
+        case Opcode::FMSUB:
+            // FMSUB.S: rs1 * rs2 - rs3
+            return floatToUint32(std::fma(rs1_val, rs2_val, -rs3_val));
+            
+        case Opcode::FNMSUB:
+            // FNMSUB.S: -(rs1 * rs2) + rs3 = rs3 - rs1 * rs2
+            return floatToUint32(std::fma(-rs1_val, rs2_val, rs3_val));
+            
+        case Opcode::FNMADD:
+            // FNMADD.S: -(rs1 * rs2 + rs3)
+            return floatToUint32(-std::fma(rs1_val, rs2_val, rs3_val));
+            
+        default:
+            throw IllegalInstructionException("未知的融合乘加指令");
+    }
+}
+
+uint64_t InstructionExecutor::executeFusedMultiplyAddDouble(const DecodedInstruction& inst, double rs1_val, double rs2_val, double rs3_val) {
+    switch (inst.opcode) {
+        case Opcode::FMADD:
+            // FMADD.D: rs1 * rs2 + rs3
+            return doubleToUint64(std::fma(rs1_val, rs2_val, rs3_val));
+            
+        case Opcode::FMSUB:
+            // FMSUB.D: rs1 * rs2 - rs3
+            return doubleToUint64(std::fma(rs1_val, rs2_val, -rs3_val));
+            
+        case Opcode::FNMSUB:
+            // FNMSUB.D: -(rs1 * rs2) + rs3 = rs3 - rs1 * rs2
+            return doubleToUint64(std::fma(-rs1_val, rs2_val, rs3_val));
+            
+        case Opcode::FNMADD:
+            // FNMADD.D: -(rs1 * rs2 + rs3)
+            return doubleToUint64(-std::fma(rs1_val, rs2_val, rs3_val));
+            
+        default:
+            throw IllegalInstructionException("未知的双精度融合乘加指令");
+    }
 }
 
 uint64_t InstructionExecutor::loadSignExtended(std::shared_ptr<Memory> memory, uint64_t addr, int bytes) {

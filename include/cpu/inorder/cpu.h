@@ -41,6 +41,12 @@ public:
     void setFPRegister(RegNum reg, uint64_t value) override;
     float getFPRegisterFloat(RegNum reg) const override;
     void setFPRegisterFloat(RegNum reg, float value) override;
+    double getFPRegisterDouble(RegNum reg) const override;
+    void setFPRegisterDouble(RegNum reg, double value) override;
+    
+    // CSR寄存器访问（简化实现）
+    uint64_t getCSR(uint16_t csr_addr) const override;
+    void setCSR(uint16_t csr_addr, uint64_t value) override;
     
     // 程序计数器
     uint64_t getPC() const override { return pc_; }
@@ -65,7 +71,7 @@ private:
     
     // CPU 状态
     std::array<uint64_t, NUM_REGISTERS> registers_;
-    std::array<uint32_t, NUM_FP_REGISTERS> fp_registers_;
+    std::array<uint64_t, NUM_FP_REGISTERS> fp_registers_;
     uint64_t pc_;                   // 程序计数器
     bool halted_;                   // 停机标志
     uint64_t instruction_count_;    // 指令计数器

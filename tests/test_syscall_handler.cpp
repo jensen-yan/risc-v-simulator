@@ -54,11 +54,30 @@ public:
     }
 
     float getFPRegisterFloat(RegNum reg) const override {
-        uint32_t bits = static_cast<uint32_t>(fp_registers_[reg]);
-        return *reinterpret_cast<float*>(&bits);
+        uint32_t bits = static_cast<uint32_t>(fp_registers_[reg] & 0xFFFFFFFF);
+        return *reinterpret_cast<const float*>(&bits);
     }
     void setFPRegisterFloat(RegNum reg, float value) override {
-        fp_registers_[reg] = *reinterpret_cast<uint32_t*>(&value);
+        uint32_t bits = *reinterpret_cast<const uint32_t*>(&value);
+        fp_registers_[reg] = (fp_registers_[reg] & 0xFFFFFFFF00000000ULL) | bits;
+    }
+
+    double getFPRegisterDouble(RegNum reg) const override {
+        return *reinterpret_cast<const double*>(&fp_registers_[reg]);
+    }
+    void setFPRegisterDouble(RegNum reg, double value) override {
+        fp_registers_[reg] = *reinterpret_cast<const uint64_t*>(&value);
+    }
+
+    uint64_t getCSR(uint16_t csr_addr) const override {
+        // 测试用简化CSR实现
+        (void)csr_addr;
+        return 0x0;
+    }
+    void setCSR(uint16_t csr_addr, uint64_t value) override {
+        // 测试用简化CSR实现
+        (void)csr_addr;
+        (void)value;
     }
 
     // PC访问

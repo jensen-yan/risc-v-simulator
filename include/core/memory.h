@@ -50,10 +50,25 @@ public:
     // 调试功能
     void dump(Address startAddr, size_t length) const;
     
+    // tohost/fromhost 机制支持
+    bool shouldExit() const { return should_exit_; }
+    int getExitCode() const { return exit_code_; }
+    void resetExitStatus() { should_exit_ = false; exit_code_ = 0; }
+    
 private:
     std::vector<uint8_t> memory_;
     
+    // tohost/fromhost 特殊地址
+    static constexpr Address TOHOST_ADDR = 0x80001000;
+    static constexpr Address FROMHOST_ADDR = 0x80001040;
+    
+    // 程序退出状态
+    bool should_exit_ = false;
+    int exit_code_ = 0;
+    
     void checkAddress(Address addr, size_t accessSize) const;
+    void handleTohost(uint64_t value);
+    void processSyscall(Address magic_mem_addr);
 };
 
 } // namespace riscv

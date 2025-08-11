@@ -76,6 +76,12 @@ uint64_t Memory::read64(Address addr) const {
 }
 
 void Memory::write64(Address addr, uint64_t value) {
+    // 检查是否为 tohost 地址
+    if (addr == TOHOST_ADDR) {
+        handleTohost(value);
+        return;
+    }
+    
     checkAddress(addr, 8);
     
     // 小端序存储
@@ -169,6 +175,67 @@ void Memory::checkAddress(Address addr, size_t accessSize) const {
                              std::to_string(addr) + 
                              ", 访问大小=" + std::to_string(accessSize) +
                              ", 内存大小=" + std::to_string(memory_.size()));
+    }
+}
+
+void Memory::handleTohost(uint64_t value) {
+    if (value == 0) {
+        // 忽略零值写入
+        return;
+    }
+    
+    if (value & 1) {
+        // 最低位为1表示程序退出
+        exit_code_ = static_cast<int>(value >> 1);
+        should_exit_ = true;
+        std::cout << "[tohost] 程序请求退出，退出码: " << exit_code_ << std::endl;
+    } else {
+        // 最低位为0表示系统调用
+        std::cout << "[tohost] 处理系统调用请求，magic_mem地址: 0x" 
+                  << std::hex << value << std::dec << std::endl;
+        processSyscall(value);
+    }
+}
+
+void Memory::processSyscall(Address magic_mem_addr) {
+    try {
+        // 读取系统调用参数
+        uint64_t syscall_num = read64(magic_mem_addr);
+        uint64_t arg0 = read64(magic_mem_addr + 8);
+        uint64_t arg1 = read64(magic_mem_addr + 16);
+        uint64_t arg2 = read64(magic_mem_addr + 24);
+        
+        std::cout << "[tohost] 系统调用: " << syscall_num 
+                  << ", args: " << arg0 << ", " << arg1 << ", " << arg2 << std::endl;
+        
+        // 处理常见的系统调用
+        if (syscall_num == 64) { // SYS_write
+            // arg0 = fd, arg1 = buffer地址, arg2 = 长度
+            if (arg0 == 1 || arg0 == 2) { // stdout 或 stderr
+                std::vector<char> buffer(arg2);
+                for (size_t i = 0; i < arg2; i++) {
+                    buffer[i] = static_cast<char>(readByte(arg1 + i));
+                }
+                // 输出到控制台
+                std::cout.write(buffer.data(), arg2);
+                std::cout.flush();
+                
+                // 返回成功
+                write64(magic_mem_addr, arg2); // 返回写入的字节数
+            }
+        } else {
+            std::cout << "[tohost] 不支持的系统调用: " << syscall_num << std::endl;
+            // 返回错误
+            write64(magic_mem_addr, static_cast<uint64_t>(-1));
+        }
+        
+        // 写入 fromhost 表示处理完成，解除程序等待
+        write64(FROMHOST_ADDR, 1);
+        
+    } catch (const MemoryException& e) {
+        std::cerr << "[tohost] 系统调用处理错误: " << e.what() << std::endl;
+        // 写入 fromhost 表示处理完成（即使出错）
+        write64(FROMHOST_ADDR, 1);
     }
 }
 

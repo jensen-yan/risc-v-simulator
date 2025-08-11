@@ -83,8 +83,20 @@ void OutOfOrderCPU::step() {
 }
 
 void OutOfOrderCPU::run() {
-    while (!cpu_state_.halted) {
+    while (!cpu_state_.halted && !memory_->shouldExit()) {
         step();
+        
+        // 检查执行周期数，避免无限循环
+        if (cpu_state_.cycle_count > 10000) {
+            std::cout << "警告: 执行周期数超过10000，自动停止\n";
+            cpu_state_.halted = true;
+            break;
+        }
+    }
+    
+    // 如果是通过tohost退出的，显示退出信息
+    if (memory_->shouldExit()) {
+        std::cout << "[tohost] 程序通过tohost机制退出，退出码: " << memory_->getExitCode() << std::endl;
     }
 }
 

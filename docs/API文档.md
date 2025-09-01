@@ -29,7 +29,7 @@
 ```cpp
 Simulator(size_t memorySize = Memory::DEFAULT_SIZE)
 ```
-- **参数**: `memorySize` - 内存大小（字节），默认4KB
+- **参数**: `memorySize` - 内存大小（字节），默认 1MB
 - **功能**: 初始化模拟器，创建CPU和内存组件
 
 ### 程序加载接口
@@ -160,7 +160,7 @@ void printStatistics() const
 ## 2. CPU 类
 
 ### 描述
-RISC-V处理器核心实现，支持RV32I基础指令集和M、F、C扩展。
+RISC-V 处理器核心实现，支持 RV64I 基础指令集（兼容 RV32I 子集）以及 M、C 常用子集。
 
 ### 构造函数
 ```cpp
@@ -688,7 +688,7 @@ enum class InstructionType {
 ```cpp
 constexpr size_t NUM_REGISTERS = 32;      // 通用寄存器数量
 constexpr size_t NUM_FP_REGISTERS = 32;   // 浮点寄存器数量
-constexpr size_t DEFAULT_SIZE = 4 * 1024; // 默认内存大小（4KB）
+constexpr size_t DEFAULT_SIZE = 1 * 1024 * 1024; // 默认内存大小（1MB）
 ```
 
 ---
@@ -720,7 +720,7 @@ class MemoryException : public SimulatorException
 
 int main() {
     try {
-        // 创建4KB内存的模拟器
+        // 创建 1MB 内存的模拟器
         riscv::Simulator simulator(4096);
         
         // 加载程序

@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <cstring>
+#include <limits>
 
 namespace riscv {
 
@@ -131,6 +132,44 @@ Address ElfLoader::getEntryPoint(const std::vector<uint8_t>& data) {
         return read32(data, 24);
     }
     return read64(data, 24);
+}
+
+size_t ElfLoader::getRequiredMemorySize(const std::string& filename,
+                                        size_t minSize,
+                                        size_t stackReserve) {
+    try {
+        auto data = loadFile(filename);
+        if (!validateElfHeader(data)) {
+            return minSize;
+        }
+
+        ElfHeader header = parseElfHeader(data);
+        uint64_t maxEnd = 0;
+
+        for (int i = 0; i < header.e_phnum; i++) {
+            size_t phOffset = header.e_phoff + i * header.e_phentsize;
+            ProgramHeader ph = parseProgramHeader(data, phOffset);
+            if (ph.p_type != PT_LOAD) {
+                continue;
+            }
+            uint64_t end = ph.p_vaddr + ph.p_memsz;
+            if (end > maxEnd) {
+                maxEnd = end;
+            }
+        }
+
+        uint64_t reserve = stackReserve;
+        uint64_t total = maxEnd + reserve;
+        uint64_t maxSize = static_cast<uint64_t>(std::numeric_limits<size_t>::max());
+        if (total < maxEnd || total > maxSize) {
+            return minSize;
+        }
+
+        size_t recommended = static_cast<size_t>(total);
+        return recommended > minSize ? recommended : minSize;
+    } catch (const std::exception&) {
+        return minSize;
+    }
 }
 
 std::vector<uint8_t> ElfLoader::loadFile(const std::string& filename) {

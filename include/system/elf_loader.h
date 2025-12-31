@@ -54,6 +54,17 @@ public:
      */
     static Address getEntryPoint(const std::vector<uint8_t>& data);
 
+    /**
+     * 根据ELF可加载段计算所需内存大小
+     * @param filename ELF文件路径
+     * @param minSize 最小内存大小（不足时会提升到该值）
+     * @param stackReserve 额外预留空间（用于栈等）
+     * @return 建议的内存大小
+     */
+    static size_t getRequiredMemorySize(const std::string& filename,
+                                        size_t minSize,
+                                        size_t stackReserve = 0x10000);
+
 private:
     // 统一的ELF文件头结构（字段使用64位表示）
     struct ElfHeader {

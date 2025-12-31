@@ -1,4 +1,5 @@
 #include "system/simulator.h"
+#include "system/elf_loader.h"
 #include "common/debug_types.h"
 #include <iostream>
 #include <string>
@@ -63,6 +64,7 @@ int main(int argc, char* argv[]) {
     bool debugMode = false;
     bool forceElf = false;
     size_t memorySize = Memory::DEFAULT_SIZE;
+    bool memorySizeSpecified = false;
     CpuType cpuType = CpuType::OUT_OF_ORDER;  // 默认使用乱序执行CPU
     
     // 增强调试参数
@@ -92,6 +94,7 @@ int main(int argc, char* argv[]) {
             cpuType = CpuType::IN_ORDER;
         } else if (arg == "-m" && i + 1 < argc) {
             memorySize = std::stoul(argv[++i]);
+            memorySizeSpecified = true;
         } else if (arg.find("--debug-flags=") == 0) {
             debugCategories = arg.substr(14);  // 去掉 "--debug-flags=" 前缀
             debugMode = true;  // 自动启用调试模式
@@ -128,6 +131,14 @@ int main(int argc, char* argv[]) {
     }
     
     try {
+        // 未显式指定 -m 时，若加载 ELF 则根据段地址自动决定内存大小
+        if (!memorySizeSpecified && !filename.empty()) {
+            const bool willLoadElf = forceElf || filename.find(".elf") != std::string::npos;
+            if (willLoadElf) {
+                memorySize = ElfLoader::getRequiredMemorySize(filename, memorySize);
+            }
+        }
+
         // 创建模拟器
         Simulator simulator(memorySize, cpuType);
         

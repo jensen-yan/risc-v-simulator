@@ -42,7 +42,9 @@ void WritebackStage::execute(CPUState& state) {
                                          instruction->is_jump(), instruction->get_jump_target());
         } else {
             dprintf(WRITEBACK, "CDB条目过期，跳过更新: ROB[%d] 当前指令=%p, CDB指令=%p",
-                   rob_entry, rob_instruction.get(), instruction.get());
+                   rob_entry,
+                   static_cast<const void*>(rob_instruction.get()),
+                   static_cast<const void*>(instruction.get()));
         }
         
         dprintf(WRITEBACK, "ROB[%d] status updated to COMPLETED", rob_entry);

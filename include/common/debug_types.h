@@ -10,9 +10,11 @@
 #include <iostream>
 #include <fstream>
 #include <fmt/format.h>
+#include <fmt/printf.h>
 #include <cinttypes>
 #include <optional>
 #include <utility>
+#include <cctype>
 
 namespace riscv {
 
@@ -211,7 +213,7 @@ public:
     void setCategories(const std::vector<std::string>& categories) {
         enabled_categories_.clear();
         for (const auto& category : categories) {
-            enabled_categories_.insert(category);
+            enabled_categories_.insert(toUpper(category));
         }
     }
 
@@ -229,14 +231,14 @@ public:
             category.erase(0, category.find_first_not_of(" \t"));
             category.erase(category.find_last_not_of(" \t") + 1);
             if (!category.empty()) {
-                enabled_categories_.insert(category);
+                enabled_categories_.insert(toUpper(category));
             }
             current = current.substr(pos + 1);
         }
         current.erase(0, current.find_first_not_of(" \t"));
         current.erase(current.find_last_not_of(" \t") + 1);
         if (!current.empty()) {
-            enabled_categories_.insert(current);
+            enabled_categories_.insert(toUpper(current));
         }
     }
 
@@ -364,6 +366,15 @@ private:
     DebugManager(const DebugManager&) = delete;
     DebugManager& operator=(const DebugManager&) = delete;
 
+    static std::string toUpper(const std::string& input) {
+        std::string result;
+        result.reserve(input.size());
+        for (unsigned char ch : input) {
+            result.push_back(static_cast<char>(std::toupper(ch)));
+        }
+        return result;
+    }
+
     bool shouldOutput(const std::string& stage,
                       const std::optional<uint64_t>& cycle,
                       LogLevel level) const {
@@ -412,9 +423,8 @@ private:
 } // namespace riscv
 
 #define LOG_WITH_LEVEL(level, stage, ...) do { \
-    char buffer[1024]; \
-    std::snprintf(buffer, sizeof(buffer), __VA_ARGS__); \
-    ::riscv::DebugManager::getInstance().log(#stage, level, std::string(buffer)); \
+    const auto message = fmt::sprintf(__VA_ARGS__); \
+    ::riscv::DebugManager::getInstance().log(#stage, level, message); \
 } while (0)
 
 #define LOG_DEBUG(stage, ...) LOG_WITH_LEVEL(::riscv::LogLevel::Debug, stage, __VA_ARGS__)

@@ -71,6 +71,7 @@ int main(int argc, char* argv[]) {
     bool debugSimple = false;
     bool debugVerbose = false;
     bool debugWithPC = false;
+    bool debugNoConsole = false;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -114,10 +115,12 @@ int main(int argc, char* argv[]) {
             DebugManager::getInstance().setOutputToFile(true);
             debugMode = true; // 自动启用调试模式
             DebugManager::getInstance().setOutputToConsole(false); // 禁用控制台输出
+            debugNoConsole = true;
             std::cout << "调试日志将输出到文件: " << logFile << "\n";
         } else if (arg == "--debug-no-console") {
             DebugManager::getInstance().setOutputToConsole(false);
             debugMode = true; // 自动启用调试模式
+            debugNoConsole = true;
         } else if (filename.empty()) {
             filename = arg;
         }
@@ -130,13 +133,9 @@ int main(int argc, char* argv[]) {
         // 配置调试系统
         if (debugMode) {
             auto& debugManager = DebugManager::getInstance();
-            
-            // 设置调试输出回调
-            // 使用lambda表达式， 捕获debugManager的引用， 并使用DebugFormatter::format格式化输出
-            // 语法： [捕获列表] (参数列表) -> 返回类型 { 函数体 }
-            debugManager.setCallback([&debugManager](const DebugInfo& info) {
-                std::cout << DebugFormatter::format(info, debugManager.getOutputMode()) << std::endl;
-            });
+
+            // 根据参数启用/禁用控制台输出
+            debugManager.setOutputToConsole(!debugNoConsole);
             
             // 配置输出格式
             if (debugWithPC) {
@@ -178,6 +177,9 @@ int main(int argc, char* argv[]) {
             
             // 显示调试配置信息
             std::cout << "\n" << debugManager.getConfigInfo() << "\n";
+        } else {
+            DebugManager::getInstance().setOutputToConsole(false);
+            DebugManager::getInstance().setOutputToFile(false);
         }
         
         // 显示CPU类型

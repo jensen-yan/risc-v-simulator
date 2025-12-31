@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Configure
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Unit Tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: ISA Tests (rv32)
+        run: python3 run_tests.py -p "rv32*-p-*"
+
+      - name: ISA Tests (rv64ui)
+        run: python3 run_tests.py -p "rv64ui-p-*"

@@ -1,5 +1,7 @@
 # RISC-V CPU 模拟器
 
+[![CI](https://github.com/jensen-yan/risc-v-simulator/actions/workflows/ci.yml/badge.svg)](https://github.com/jensen-yan/risc-v-simulator/actions/workflows/ci.yml)
+
 一个模块化的 RISC-V CPU 模拟器，已从 RV32I 推进到 RV64I 基础指令集，并具备乱序（OOO）与顺序两种执行模式。
 
 ## 功能特性

@@ -77,8 +77,7 @@ public:
     uint32_t getEnabledExtensions() const override { return cpu_state_.enabled_extensions; }
     
     // 性能统计
-    void getPerformanceStats(uint64_t& instructions, uint64_t& cycles, 
-                            uint64_t& branch_mispredicts, uint64_t& stalls) const;
+    StatsList getStats() const override;
     
     // 调试功能
     void dumpRegisters() const override;

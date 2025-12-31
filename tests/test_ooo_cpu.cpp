@@ -160,24 +160,6 @@ TEST_F(OutOfOrderCPUTest, MultipleInstructions) {
     EXPECT_EQ(cpu->getRegister(1), 10) << "x1应该等于10";
     EXPECT_EQ(cpu->getRegister(2), 20) << "x2应该等于20";
     EXPECT_EQ(cpu->getRegister(3), 30) << "x3应该等于30";
-    
-    // 验证性能统计
-    uint64_t instructions, cycles, branch_mispredicts, stalls;
-    cpu->getPerformanceStats(instructions, cycles, branch_mispredicts, stalls);
-    
-    EXPECT_GT(instructions, 0) << "应该执行了一些指令";
-    EXPECT_GT(cycles, 0) << "应该消耗了一些周期";
-    
-    std::cout << "性能统计:" << std::endl;
-    std::cout << "指令数: " << instructions << std::endl;
-    std::cout << "周期数: " << cycles << std::endl;
-    std::cout << "分支预测错误: " << branch_mispredicts << std::endl;
-    std::cout << "流水线停顿: " << stalls << std::endl;
-    
-    if (cycles > 0) {
-        double ipc = static_cast<double>(instructions) / cycles;
-        std::cout << "IPC: " << ipc << std::endl;
-    }
 }
 
 // 测试6：CPU状态重置

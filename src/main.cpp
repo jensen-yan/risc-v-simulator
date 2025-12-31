@@ -2,6 +2,7 @@
 #include "system/elf_loader.h"
 #include "common/debug_types.h"
 #include <iostream>
+#include <iomanip>
 #include <string>
 
 using namespace riscv;
@@ -271,10 +272,29 @@ int main(int argc, char* argv[]) {
         // 如果使用乱序执行CPU，显示额外的性能统计
         if (cpuType == CpuType::OUT_OF_ORDER) {
             std::cout << "\n=== 乱序执行性能统计 ===\n";
-            // 通过适配器获取OutOfOrderCPU的特有功能
-            // 这里需要dynamic_cast来安全地转换
-            // 暂时简化处理
-            std::cout << "注意: 乱序执行CPU的详细性能统计需要访问特定接口\n";
+            auto stats = simulator.getCpu()->getStats();
+            if (!stats.empty()) {
+                uint64_t instructions = 0;
+                uint64_t cycles = 0;
+                for (const auto& entry : stats) {
+                    std::cout << entry.name << ": " << entry.value;
+                    if (!entry.description.empty()) {
+                        std::cout << " (" << entry.description << ")";
+                    }
+                    std::cout << "\n";
+                    if (entry.name == "instructions") {
+                        instructions = entry.value;
+                    } else if (entry.name == "cycles") {
+                        cycles = entry.value;
+                    }
+                }
+                if (cycles > 0) {
+                    double ipc = static_cast<double>(instructions) / cycles;
+                    std::cout << "IPC: " << std::fixed << std::setprecision(2) << ipc << "\n";
+                }
+            } else {
+                std::cout << "警告: 无法获取乱序CPU统计信息\n";
+            }
         }
         
     } catch (const std::exception& e) {

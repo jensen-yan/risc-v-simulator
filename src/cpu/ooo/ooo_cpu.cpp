@@ -248,12 +248,13 @@ int32_t OutOfOrderCPU::signExtend(uint32_t value, int bits) const {
     return InstructionExecutor::signExtend(value, bits);
 }
 
-void OutOfOrderCPU::getPerformanceStats(uint64_t& instructions, uint64_t& cycles, 
-                                       uint64_t& branch_mispredicts, uint64_t& stalls) const {
-    instructions = cpu_state_.instruction_count;
-    cycles = cpu_state_.cycle_count;
-    branch_mispredicts = cpu_state_.branch_mispredicts;
-    stalls = cpu_state_.pipeline_stalls;
+ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
+    return {
+        {"instructions", cpu_state_.instruction_count, "指令数"},
+        {"cycles", cpu_state_.cycle_count, "周期数"},
+        {"branch_mispredicts", cpu_state_.branch_mispredicts, "分支预测错误次数"},
+        {"pipeline_stalls", cpu_state_.pipeline_stalls, "流水线停顿次数"},
+    };
 }
 
 void OutOfOrderCPU::dumpRegisters() const {

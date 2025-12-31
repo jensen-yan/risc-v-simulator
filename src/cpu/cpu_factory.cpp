@@ -41,6 +41,8 @@ public:
     
     void dumpRegisters() const override { cpu_->dumpRegisters(); }
     void dumpState() const override { cpu_->dumpState(); }
+
+    StatsList getStats() const override { return {}; }
 };
 
 /**
@@ -84,6 +86,8 @@ public:
     void setDiffTest(class DiffTest* difftest) override { cpu_->setDiffTest(difftest); }
     void performDiffTestWithCommittedPC(uint64_t committed_pc) override { cpu_->performDiffTestWithCommittedPC(committed_pc); }
     bool isDiffTestEnabled() const override { return cpu_->isDiffTestEnabled(); }
+
+    StatsList getStats() const override { return cpu_->getStats(); }
     
     // 乱序执行CPU特有的功能
     OutOfOrderCPU* getOooCpu() { return cpu_.get(); }

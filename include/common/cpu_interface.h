@@ -2,6 +2,7 @@
 
 #include "common/types.h"
 #include <memory>
+#include <vector>
 
 namespace riscv {
 
@@ -14,6 +15,13 @@ class Memory;
  */
 class ICpuInterface {
 public:
+    struct StatEntry {
+        std::string name;
+        uint64_t value;
+        std::string description;
+    };
+
+    using StatsList = std::vector<StatEntry>;
     virtual ~ICpuInterface() = default;
     
     // 执行控制
@@ -52,6 +60,9 @@ public:
     virtual void setDiffTest(class DiffTest* difftest) {} // 设置DiffTest引用
     virtual void performDiffTestWithCommittedPC(uint64_t committed_pc) {}
     virtual bool isDiffTestEnabled() const { return false; }
+
+    // 性能统计（默认返回空）
+    virtual StatsList getStats() const { return {}; }
 };
 
 /**

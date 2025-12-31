@@ -24,13 +24,16 @@ jobs:
       - name: Install Test Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtest-dev
+          sudo apt-get install -y libgtest-dev gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
           sudo cmake -S /usr/src/googletest -B /tmp/gtest
           sudo cmake --build /tmp/gtest
           sudo install -m 644 /tmp/gtest/lib/libgtest*.a /usr/lib
 
       - name: Init Submodules
         run: git submodule update --init --recursive
+
+      - name: Build riscv-tests
+        run: make -C riscv-tests
 
       - name: Configure
         run: cmake -S . -B build

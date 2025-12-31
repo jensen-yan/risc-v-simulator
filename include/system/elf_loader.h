@@ -11,7 +11,7 @@ class Memory;
 
 /**
  * ELF文件解析器和加载器
- * 支持64位RISC-V ELF文件
+ * 支持32位/64位RISC-V ELF文件
  */
 class ElfLoader {
 public:
@@ -43,7 +43,7 @@ public:
     /**
      * 验证ELF文件头
      * @param data 文件数据
-     * @return 是否为有效的64位RISC-V ELF文件
+     * @return 是否为有效的RISC-V ELF文件
      */
     static bool validateElfHeader(const std::vector<uint8_t>& data);
 
@@ -55,7 +55,7 @@ public:
     static Address getEntryPoint(const std::vector<uint8_t>& data);
 
 private:
-    // 64位ELF文件头结构
+    // 统一的ELF文件头结构（字段使用64位表示）
     struct ElfHeader {
         uint8_t e_ident[16];    // ELF标识
         uint16_t e_type;        // 文件类型
@@ -73,7 +73,7 @@ private:
         uint16_t e_shstrndx;    // 节头字符串表索引
     };
 
-    // 64位程序头结构
+    // 统一的程序头结构（字段使用64位表示）
     struct ProgramHeader {
         uint32_t p_type;        // 段类型
         uint32_t p_flags;       // 段标志
@@ -87,6 +87,7 @@ private:
 
     // ELF常量
     static constexpr uint32_t ELF_MAGIC = 0x464C457F;  // 0x7F + "ELF"
+    static constexpr uint8_t ELFCLASS32 = 1;           // 32位
     static constexpr uint8_t ELFCLASS64 = 2;           // 64位
     static constexpr uint8_t ELFDATA2LSB = 1;          // 小端
     static constexpr uint16_t EM_RISCV = 243;          // RISC-V架构

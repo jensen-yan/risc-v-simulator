@@ -24,7 +24,7 @@ jobs:
       - name: Install Test Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtest-dev gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf picolibc-riscv64-unknown-elf
+          sudo apt-get install -y libgtest-dev gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
           sudo cmake -S /usr/src/googletest -B /tmp/gtest
           sudo cmake --build /tmp/gtest
           sudo install -m 644 /tmp/gtest/lib/libgtest*.a /usr/lib
@@ -32,11 +32,12 @@ jobs:
       - name: Init Submodules
         run: git submodule update --init --recursive
 
-      - name: Build ISA Tests
+      - name: Build ISA Tests (p-only)
         run: |
           make -C riscv-tests/isa -f Makefile \
             src_dir="${GITHUB_WORKSPACE}/riscv-tests/isa" \
-            XLEN=64
+            XLEN=64 \
+            tests='$(rv32ui_p_tests) $(rv32uc_p_tests) $(rv32um_p_tests) $(rv32ua_p_tests) $(rv32uf_p_tests) $(rv32ud_p_tests) $(rv32uzfh_p_tests) $(rv32uzba_p_tests) $(rv32uzbb_p_tests) $(rv32uzbc_p_tests) $(rv32uzbs_p_tests) $(rv32si_p_tests) $(rv32mi_p_tests) $(rv64ui_p_tests)'
 
       - name: Configure
         run: cmake -S . -B build

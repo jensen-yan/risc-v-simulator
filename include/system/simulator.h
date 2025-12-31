@@ -60,6 +60,7 @@ private:
     std::shared_ptr<Memory> memory_;
     std::unique_ptr<ICpuInterface> cpu_;
     CpuType cpuType_;
+    uint64_t cycle_count_ = 0;
     
     // 参考CPU内存和CPU（仅乱序CPU模式下使用）
     std::shared_ptr<Memory> reference_memory_;
@@ -70,6 +71,9 @@ private:
     
     // 辅助方法
     std::vector<uint8_t> loadBinaryFile(const std::string& filename);
+
+    static constexpr uint64_t kMaxInOrderInstructions = 100000;
+    static constexpr uint64_t kMaxOutOfOrderCycles = 10000;
 };
 
 } // namespace riscv

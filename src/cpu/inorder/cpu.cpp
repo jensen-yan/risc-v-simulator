@@ -96,17 +96,6 @@ void CPU::step() {
 void CPU::run() {
     while (!halted_ && !memory_->shouldExit()) {
         step();
-        
-        // 防止无限循环
-        if (instruction_count_ > 100000) {
-            std::cout << "警告: 执行指令数超过100000，自动停止\n";
-            halted_ = true;
-        }
-    }
-    
-    // 如果是通过tohost退出的，显示退出信息
-    if (memory_->shouldExit()) {
-        std::cout << "[tohost] 程序通过tohost机制退出，退出码: " << memory_->getExitCode() << std::endl;
     }
 }
 

@@ -49,6 +49,7 @@ public:
     // 状态查询
     bool isHalted() const override { return halted_; }
     uint64_t getInstructionCount() const override { return instruction_count_; }
+    void requestHalt() override { halted_ = true; }
     
     // 扩展支持
     void setEnabledExtensions(uint32_t extensions) override { enabled_extensions_ = extensions; }

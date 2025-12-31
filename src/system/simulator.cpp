@@ -1,5 +1,6 @@
 #include "system/simulator.h"
 #include "system/difftest.h"
+#include "common/debug_types.h"
 #include "cpu/ooo/ooo_cpu.h"
 #include <iostream>
 #include <fstream>
@@ -10,7 +11,8 @@ namespace riscv {
 Simulator::Simulator(size_t memorySize, CpuType cpuType) 
     : memory_(std::make_shared<Memory>(memorySize)),
       cpu_(CpuFactory::createCpu(cpuType, memory_)),
-      cpuType_(cpuType) {
+      cpuType_(cpuType),
+      cycle_count_(0) {
     
     // 如果是乱序CPU，创建独立的参考内存和参考CPU用于DiffTest
     if (cpuType == CpuType::OUT_OF_ORDER) {
@@ -19,6 +21,8 @@ Simulator::Simulator(size_t memorySize, CpuType cpuType)
         
         // DiffTest将在loadElfProgram中创建，因为需要两个CPU都加载相同的程序
     }
+
+    DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
 }
 
 Simulator::~Simulator() = default;
@@ -32,6 +36,8 @@ bool Simulator::loadProgram(const std::string& filename) {
         
         memory_->loadProgram(program);
         cpu_->reset();
+        cycle_count_ = 0;
+        DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
         return true;
     } catch (const std::exception& e) {
         std::cerr << "加载程序失败: " << e.what() << "\n";
@@ -44,6 +50,8 @@ bool Simulator::loadProgramFromBytes(const std::vector<uint8_t>& program, Addres
         memory_->loadProgram(program, startAddr);
         cpu_->reset();
         cpu_->setPC(startAddr);
+        cycle_count_ = 0;
+        DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
         return true;
     } catch (const std::exception& e) {
         std::cerr << "加载程序失败: " << e.what() << "\n";
@@ -63,6 +71,7 @@ bool Simulator::loadRiscvProgram(const std::string& filename, Address loadAddr) 
         
         // 重置CPU状态
         cpu_->reset();
+        cycle_count_ = 0;
         
         // 设置程序计数器
         cpu_->setPC(loadAddr);
@@ -75,7 +84,8 @@ bool Simulator::loadRiscvProgram(const std::string& filename, Address loadAddr) 
         // x1 = ra (返回地址寄存器)，暂时设为0，程序结束时会用到
         // x8 = s0/fp (帧指针)，初始化为栈指针值
         cpu_->setRegister(8, memory_->getSize() - 4); // s0/fp
-        
+
+        DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
         return true;
     } catch (const std::exception& e) {
         std::cerr << "加载RISC-V程序失败: " << e.what() << "\n";
@@ -84,16 +94,54 @@ bool Simulator::loadRiscvProgram(const std::string& filename, Address loadAddr) 
 }
 
 void Simulator::step() {
+    auto& debugManager = DebugManager::getInstance();
+    debugManager.setGlobalContext(cycle_count_, cpu_->getPC());
+
+    if (cpu_->isHalted()) {
+        return;
+    }
+
     cpu_->step();
+
+    ++cycle_count_;
+    debugManager.setGlobalContext(cycle_count_, cpu_->getPC());
 }
 
 void Simulator::run() {
-    cpu_->run();
+    auto& debugManager = DebugManager::getInstance();
+    while (!cpu_->isHalted() && !memory_->shouldExit()) {
+        step();
+
+        if (cpuType_ == CpuType::IN_ORDER &&
+            cpu_->getInstructionCount() > kMaxInOrderInstructions) {
+            LOG_WARN(SYSTEM, "执行指令数超过限制(%llu)，自动停止",
+                     static_cast<unsigned long long>(kMaxInOrderInstructions));
+            cpu_->requestHalt();
+            break;
+        }
+
+        if (cpuType_ == CpuType::OUT_OF_ORDER &&
+            cycle_count_ > kMaxOutOfOrderCycles) {
+            LOG_WARN(SYSTEM, "执行周期数超过限制(%llu)，自动停止",
+                     static_cast<unsigned long long>(kMaxOutOfOrderCycles));
+            cpu_->requestHalt();
+            break;
+        }
+    }
+
+    if (memory_->shouldExit()) {
+        LOG_INFO(SYSTEM, "[tohost] 程序通过tohost机制退出，退出码: %d",
+                 static_cast<int>(memory_->getExitCode()));
+    }
+
+    debugManager.setGlobalContext(cycle_count_, cpu_->getPC());
 }
 
 void Simulator::reset() {
     cpu_->reset();
     memory_->clear();
+    cycle_count_ = 0;
+    DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
 }
 
 bool Simulator::isHalted() const {
@@ -121,6 +169,7 @@ void Simulator::printStatistics() const {
     std::cout << "总执行指令数: " << getInstructionCount() << "\n";
     std::cout << "最终PC: 0x" << std::hex << cpu_->getPC() << std::dec << "\n";
     std::cout << "程序状态: " << (isHalted() ? "已停机" : "运行中") << "\n";
+    std::cout << "总周期数: " << cycle_count_ << "\n";
 }
 
 std::vector<uint8_t> Simulator::loadBinaryFile(const std::string& filename) {
@@ -165,6 +214,7 @@ bool Simulator::loadElfProgram(const std::string& filename) {
 
         // 重置主CPU状态
         cpu_->reset();
+        cycle_count_ = 0;
         
         // 设置主CPU的程序计数器为ELF入口点
         cpu_->setPC(elfInfo.entryPoint);
@@ -197,10 +247,11 @@ bool Simulator::loadElfProgram(const std::string& filename) {
             // 将DiffTest设置到乱序CPU中
             cpu_->setDiffTest(difftest_.get());
             
-            std::cout << "DiffTest已初始化" << std::endl;
+	        std::cout << "DiffTest已初始化" << std::endl;
         }
         
         std::cout << "ELF程序加载成功，入口点: 0x" << std::hex << elfInfo.entryPoint << std::dec << std::endl;
+        DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
         return true;
     } catch (const std::exception& e) {
         std::cerr << "加载ELF程序失败: " << e.what() << std::endl;

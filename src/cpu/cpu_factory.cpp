@@ -34,6 +34,7 @@ public:
     
     bool isHalted() const override { return cpu_->isHalted(); }
     uint64_t getInstructionCount() const override { return cpu_->getInstructionCount(); }
+    void requestHalt() override { cpu_->requestHalt(); }
     
     void setEnabledExtensions(uint32_t extensions) override { cpu_->setEnabledExtensions(extensions); }
     uint32_t getEnabledExtensions() const override { return cpu_->getEnabledExtensions(); }
@@ -71,6 +72,7 @@ public:
     
     bool isHalted() const override { return cpu_->isHalted(); }
     uint64_t getInstructionCount() const override { return cpu_->getInstructionCount(); }
+    void requestHalt() override { cpu_->requestHalt(); }
     
     void setEnabledExtensions(uint32_t extensions) override { cpu_->setEnabledExtensions(extensions); }
     uint32_t getEnabledExtensions() const override { return cpu_->getEnabledExtensions(); }

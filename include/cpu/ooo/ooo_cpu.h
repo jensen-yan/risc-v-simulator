@@ -70,6 +70,7 @@ public:
     bool isHalted() const override { return cpu_state_.halted; }
     uint64_t getInstructionCount() const override { return cpu_state_.instruction_count; }
     uint64_t getCycleCount() const { return cpu_state_.cycle_count; }
+    void requestHalt() override { cpu_state_.halted = true; }
     
     // 扩展支持
     void setEnabledExtensions(uint32_t extensions) override { cpu_state_.enabled_extensions = extensions; }
@@ -107,9 +108,6 @@ private:
     
     // DiffTest组件（由Simulator管理，这里只保存引用）
     class DiffTest* difftest_;
-    
-    // 调试辅助方法
-    void print_stage_activity(const std::string& stage, const std::string& activity);
     
     // 异常处理
     void handle_exception(const std::string& exception_msg, uint64_t pc);

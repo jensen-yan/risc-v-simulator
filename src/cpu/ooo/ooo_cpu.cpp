@@ -55,9 +55,6 @@ void OutOfOrderCPU::step() {
     }
     
     try {
-        // 更新全局调试上下文
-        DebugContext::getInstance().setCycle(cpu_state_.cycle_count);
-        
         // 流水线阶段执行（反向顺序以维护依赖关系）
         commit_stage_->execute(cpu_state_);    // 提交阶段
         writeback_stage_->execute(cpu_state_); // 写回阶段
@@ -68,13 +65,6 @@ void OutOfOrderCPU::step() {
         
         // 增加周期计数
         cpu_state_.cycle_count++;
-        
-        // 简单的停机条件检查
-        if (cpu_state_.cycle_count > 10000) {
-            std::cout << "警告: 执行周期数超过10000，自动停止" << std::endl;
-            cpu_state_.halted = true;
-        }
-        
     } catch (const MemoryException& e) {
         handle_exception(e.what(), cpu_state_.pc);
     } catch (const SimulatorException& e) {
@@ -85,18 +75,6 @@ void OutOfOrderCPU::step() {
 void OutOfOrderCPU::run() {
     while (!cpu_state_.halted && !memory_->shouldExit()) {
         step();
-        
-        // 检查执行周期数，避免无限循环
-        if (cpu_state_.cycle_count > 10000) {
-            std::cout << "警告: 执行周期数超过10000，自动停止\n";
-            cpu_state_.halted = true;
-            break;
-        }
-    }
-    
-    // 如果是通过tohost退出的，显示退出信息
-    if (memory_->shouldExit()) {
-        std::cout << "[tohost] 程序通过tohost机制退出，退出码: " << memory_->getExitCode() << std::endl;
     }
 }
 

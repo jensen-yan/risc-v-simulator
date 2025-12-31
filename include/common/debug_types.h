@@ -11,62 +11,59 @@
 #include <fstream>
 #include <fmt/format.h>
 #include <cinttypes>
+#include <optional>
+#include <utility>
 
 namespace riscv {
 
-/**
- * 全局调试上下文管理器
- * 用于存储当前的周期数等上下文信息
- */
-class DebugContext {
-public:
-    static DebugContext& getInstance() {
-        static DebugContext instance;
-        return instance;
-    }
-    
-    // 设置当前周期数（由 ooo_cpu 调用）
-    void setCycle(uint64_t cycle) {
-        current_cycle_ = cycle;
-    }
-    
-    // 获取当前周期数
-    uint64_t getCurrentCycle() const {
-        return current_cycle_;
-    }
-    
-private:
-    uint64_t current_cycle_ = 0;
-    
-    DebugContext() = default;
-    ~DebugContext() = default;
-    DebugContext(const DebugContext&) = delete;
-    DebugContext& operator=(const DebugContext&) = delete;
+enum class LogLevel {
+    Debug = 0,
+    Info,
+    Warn,
+    Error
 };
+
+inline const char* levelToString(LogLevel level) {
+    switch (level) {
+        case LogLevel::Debug:
+            return "DEBUG";
+        case LogLevel::Info:
+            return "INFO";
+        case LogLevel::Warn:
+            return "WARN";
+        case LogLevel::Error:
+            return "ERROR";
+    }
+    return "UNKNOWN";
+}
 
 /**
  * 调试信息结构体
  * 包含完整的调试信息，支持多种输出格式
  */
 struct DebugInfo {
-    std::string stage;        // 阶段名称 (FETCH, DECODE, ISSUE, EXECUTE, WRITEBACK, COMMIT, ROB, RS, RENAME)
-    std::string message;      // 调试消息
-    uint64_t cycle = 0;       // 当前周期
-    uint64_t pc = 0;          // 程序计数器（可选）
-    
-    // 简单构造函数
+    std::string stage;
+    std::string message;
+    std::optional<uint64_t> cycle;
+    std::optional<uint64_t> pc;
+    LogLevel level = LogLevel::Debug;
+
     DebugInfo() = default;
-    
-    DebugInfo(const std::string& stage, const std::string& message)
-        : stage(stage), message(message) {}
-    
-    DebugInfo(const std::string& stage, const std::string& message, 
-              uint64_t cycle, uint64_t pc = 0)
-        : stage(stage), message(message), cycle(cycle), pc(pc) {}
+
+    DebugInfo(std::string stageValue,
+              std::string messageValue,
+              LogLevel levelValue = LogLevel::Debug,
+              std::optional<uint64_t> cycleValue = std::nullopt,
+              std::optional<uint64_t> pcValue = std::nullopt)
+        : stage(std::move(stageValue)),
+          message(std::move(messageValue)),
+          cycle(cycleValue),
+          pc(pcValue),
+          level(levelValue) {}
 };
 
 /**
- * 调试回调函数类型， 定义函数别名，返回void，参数为DebugInfo
+ * 调试回调函数类型
  */
 using DebugCallback = std::function<void(const DebugInfo&)>;
 
@@ -77,33 +74,43 @@ using DebugCallback = std::function<void(const DebugInfo&)>;
 class DebugFormatter {
 public:
     enum class Mode {
-        SIMPLE,     // 简洁模式: [STAGE] message
-        VERBOSE,    // 详细模式: [STAGE] Cycle X: message
-        WITH_PC     // 带PC模式: [STAGE] Cycle X (PC=0xYYYY): message
+        SIMPLE,     // 简洁模式: [LEVEL][STAGE] message
+        VERBOSE,    // 详细模式: [LEVEL][STAGE] [cycle=] message
+        WITH_PC     // 带PC模式: [LEVEL][STAGE] [cycle=] [pc=] message
     };
-    
+
     // 根据模式格式化输出
     static std::string format(const DebugInfo& info, Mode mode = Mode::VERBOSE) {
+        const std::string prefix = fmt::format("[{}][{}]", levelToString(info.level), info.stage);
+
         switch (mode) {
             case Mode::SIMPLE:
-                return "[" + info.stage + "] " + info.message;
+                return fmt::format("{} {}", prefix, info.message);
             case Mode::VERBOSE:
-                return "[" + info.stage + "] Cycle " + std::to_string(info.cycle) + ": " + info.message;
-            case Mode::WITH_PC:
-                if (info.pc != 0) {
-                    return "[" + info.stage + "] Cycle " + std::to_string(info.cycle) + 
-                           " (PC=0x" + std::to_string(info.pc) + "): " + info.message;
+                if (info.cycle) {
+                    return fmt::format("{} [cycle={}]: {}", prefix, *info.cycle, info.message);
                 }
-                return format(info, Mode::VERBOSE);
+                return fmt::format("{} {}", prefix, info.message);
+            case Mode::WITH_PC:
+                if (info.cycle && info.pc) {
+                    return fmt::format("{} [cycle={}][pc=0x{:016x}] {}", prefix, *info.cycle, *info.pc, info.message);
+                }
+                if (info.cycle) {
+                    return fmt::format("{} [cycle={}]: {}", prefix, *info.cycle, info.message);
+                }
+                if (info.pc) {
+                    return fmt::format("{} [pc=0x{:016x}] {}", prefix, *info.pc, info.message);
+                }
+                return fmt::format("{} {}", prefix, info.message);
         }
-        return "";
+        return fmt::format("{} {}", prefix, info.message);
     }
-    
+
     // 兼容性函数
     static std::string formatSimple(const DebugInfo& info) {
         return format(info, Mode::SIMPLE);
     }
-    
+
     static std::string formatWithPC(const DebugInfo& info) {
         return format(info, Mode::WITH_PC);
     }
@@ -117,7 +124,7 @@ class LogPresets {
 public:
     // 预设配置映射
     static const std::unordered_map<std::string, std::vector<std::string>> presets;
-    
+
     // 获取预设的调试分类
     static std::vector<std::string> getCategories(const std::string& preset) {
         auto it = presets.find(preset);
@@ -126,7 +133,7 @@ public:
         }
         return {};
     }
-    
+
     // 获取所有可用的预设名称
     static std::vector<std::string> getAvailablePresets() {
         std::vector<std::string> result;
@@ -139,7 +146,7 @@ public:
 
 /**
  * 增强的调试管理器
- * 提供类似GEM5的dprintf功能，支持分类控制和周期范围
+ * 提供类似GEM5的日志功能，支持分类、等级控制和周期范围
  */
 class DebugManager {
 public:
@@ -147,54 +154,59 @@ public:
         static DebugManager instance;
         return instance;
     }
-    
+
     // 设置调试输出回调
     void setCallback(DebugCallback callback) {
-        debug_callback_ = callback;
+        debug_callback_ = std::move(callback);
     }
-    
+
     // 文件输出功能
     void setLogFile(const std::string& filename) {
         if (log_file_.is_open()) {
             log_file_.close();
         }
-        // 强制使用文本模式，设置UTF-8编码
         log_file_.open(filename, std::ios::out | std::ios::trunc);
-        if (log_file_.is_open()) {
-            // 确保使用UTF-8编码
-            log_file_.imbue(std::locale(""));
-        } else {
+        if (!log_file_.is_open()) {
             std::cerr << "Warning: Cannot open log file: " << filename << std::endl;
         }
     }
-    
+
     void setOutputToFile(bool enable) {
         output_to_file_ = enable;
     }
-    
+
     void setOutputToConsole(bool enable) {
         output_to_console_ = enable;
     }
-    
+
     void closeLogFile() {
         if (log_file_.is_open()) {
             log_file_.close();
         }
     }
-    
+
+    // 日志等级控制
+    void setLogLevel(LogLevel level) {
+        min_level_ = level;
+    }
+
+    LogLevel getLogLevel() const {
+        return min_level_;
+    }
+
     // 启用/禁用调试分类
     void enableCategory(const std::string& category) {
         enabled_categories_.insert(category);
     }
-    
+
     void disableCategory(const std::string& category) {
         enabled_categories_.erase(category);
     }
-    
+
     void clearCategories() {
         enabled_categories_.clear();
     }
-    
+
     // 批量设置调试分类
     void setCategories(const std::vector<std::string>& categories) {
         enabled_categories_.clear();
@@ -202,19 +214,18 @@ public:
             enabled_categories_.insert(category);
         }
     }
-    
+
     // 设置调试分类（字符串格式，用逗号分隔）
     void setCategories(const std::string& categories) {
         enabled_categories_.clear();
         if (categories.empty()) {
             return;
         }
-        
+
         std::string current = categories;
         size_t pos = 0;
         while ((pos = current.find(',')) != std::string::npos) {
             std::string category = current.substr(0, pos);
-            // 去除空格
             category.erase(0, category.find_first_not_of(" \t"));
             category.erase(category.find_last_not_of(" \t") + 1);
             if (!category.empty()) {
@@ -222,72 +233,94 @@ public:
             }
             current = current.substr(pos + 1);
         }
-        // 处理最后一个分类
         current.erase(0, current.find_first_not_of(" \t"));
         current.erase(current.find_last_not_of(" \t") + 1);
         if (!current.empty()) {
             enabled_categories_.insert(current);
         }
     }
-    
+
     // 使用预设配置
     void setPreset(const std::string& preset) {
         auto categories = LogPresets::getCategories(preset);
         setCategories(categories);
     }
-    
+
     // 设置周期范围
     void setCycleRange(uint64_t start, uint64_t end = UINT64_MAX) {
         debug_start_cycle_ = start;
         debug_end_cycle_ = end;
     }
-    
+
     // 设置输出格式
     void setOutputMode(DebugFormatter::Mode mode) {
         output_mode_ = mode;
     }
-    
+
     // 获取当前输出格式
     DebugFormatter::Mode getOutputMode() const {
         return output_mode_;
     }
-    
-    // 检查是否应该输出调试信息
-    bool shouldOutput(const std::string& stage, uint64_t cycle) const {
-        // 检查分类过滤
-        if (!enabled_categories_.empty() && 
-            enabled_categories_.find(stage) == enabled_categories_.end()) {
-            return false;
-        }
-        
-        // 检查周期范围
-        if (cycle < debug_start_cycle_ || cycle > debug_end_cycle_) {
-            return false;
-        }
-        
-        return debug_callback_ != nullptr;
+
+    // 设置全局上下文
+    void setGlobalContext(uint64_t cycle, uint64_t pc) {
+        global_cycle_ = cycle;
+        global_pc_ = pc;
+        has_global_cycle_ = true;
+        has_global_pc_ = true;
     }
-    
+
+    void clearGlobalContext() {
+        has_global_cycle_ = false;
+        has_global_pc_ = false;
+    }
+
+    uint64_t getCurrentCycle() const {
+        return has_global_cycle_ ? global_cycle_ : 0;
+    }
+
+    uint64_t getCurrentPC() const {
+        return has_global_pc_ ? global_pc_ : 0;
+    }
+
     // 输出调试信息
-    void printf(const std::string& stage, const std::string& message, 
-                uint64_t cycle = 0, uint64_t pc = 0) {
-        if (shouldOutput(stage, cycle)) {
-            DebugInfo info(stage, message, cycle, pc);
-            std::string formatted = DebugFormatter::format(info, output_mode_);
-            
-            // 输出到控制台
-            if (output_to_console_ && debug_callback_) {
+    void log(const std::string& stage,
+             LogLevel level,
+             const std::string& message,
+             std::optional<uint64_t> cycle = std::nullopt,
+             std::optional<uint64_t> pc = std::nullopt) {
+        std::optional<uint64_t> resolved_cycle = cycle;
+        if (!resolved_cycle && has_global_cycle_) {
+            resolved_cycle = global_cycle_;
+        }
+
+        std::optional<uint64_t> resolved_pc = pc;
+        if (!resolved_pc && has_global_pc_) {
+            resolved_pc = global_pc_;
+        }
+
+        if (!shouldOutput(stage, resolved_cycle, level)) {
+            return;
+        }
+
+        DebugInfo info(stage, message, level, resolved_cycle, resolved_pc);
+
+        if (output_to_console_) {
+            if (debug_callback_) {
                 debug_callback_(info);
+            } else {
+                std::cout << DebugFormatter::format(info, output_mode_) << std::endl;
             }
-            
-            // 输出到文件
-            if (output_to_file_ && log_file_.is_open()) {
-                log_file_ << formatted << std::endl;
-                log_file_.flush();
-            }
+        } else if (debug_callback_) {
+            debug_callback_(info);
+        }
+
+        if (output_to_file_ && log_file_.is_open()) {
+            log_file_ << DebugFormatter::format(info, output_mode_) << std::endl;
+            log_file_.flush();
         }
     }
-    
+
     // 获取当前配置信息
     std::string getConfigInfo() const {
         std::string info = "Debug Configuration:\n";
@@ -320,10 +353,47 @@ public:
                 info += "WITH_PC";
                 break;
         }
+        info += "\n  Min Level: ";
+        info += levelToString(min_level_);
         return info;
     }
-    
+
 private:
+    DebugManager() = default;
+    ~DebugManager() = default;
+    DebugManager(const DebugManager&) = delete;
+    DebugManager& operator=(const DebugManager&) = delete;
+
+    bool shouldOutput(const std::string& stage,
+                      const std::optional<uint64_t>& cycle,
+                      LogLevel level) const {
+        if (static_cast<int>(level) < static_cast<int>(min_level_)) {
+            return false;
+        }
+
+        if (stage != "SYSTEM" &&
+            !enabled_categories_.empty() &&
+            enabled_categories_.find(stage) == enabled_categories_.end()) {
+            return false;
+        }
+
+        if (cycle) {
+            if (*cycle < debug_start_cycle_ || *cycle > debug_end_cycle_) {
+                return false;
+            }
+        } else {
+            if (debug_start_cycle_ != 0 || debug_end_cycle_ != UINT64_MAX) {
+                return false;
+            }
+        }
+
+        if (!output_to_console_ && !output_to_file_ && !debug_callback_) {
+            return false;
+        }
+
+        return true;
+    }
+
     DebugCallback debug_callback_;
     std::unordered_set<std::string> enabled_categories_;
     uint64_t debug_start_cycle_ = 0;
@@ -332,14 +402,25 @@ private:
     std::ofstream log_file_;
     bool output_to_file_ = false;
     bool output_to_console_ = true;
+    LogLevel min_level_ = LogLevel::Debug;
+    uint64_t global_cycle_ = 0;
+    bool has_global_cycle_ = false;
+    uint64_t global_pc_ = 0;
+    bool has_global_pc_ = false;
 };
 
 } // namespace riscv
 
-// 类似GEM5的dprintf宏，自动使用全局上下文的cycle
-#define dprintf(stage, ...) do { \
+#define LOG_WITH_LEVEL(level, stage, ...) do { \
     char buffer[1024]; \
-    snprintf(buffer, sizeof(buffer), __VA_ARGS__); \
-    uint64_t current_cycle = riscv::DebugContext::getInstance().getCurrentCycle(); \
-    riscv::DebugManager::getInstance().printf(#stage, std::string(buffer), current_cycle); \
-} while(0)
+    std::snprintf(buffer, sizeof(buffer), __VA_ARGS__); \
+    ::riscv::DebugManager::getInstance().log(#stage, level, std::string(buffer)); \
+} while (0)
+
+#define LOG_DEBUG(stage, ...) LOG_WITH_LEVEL(::riscv::LogLevel::Debug, stage, __VA_ARGS__)
+#define LOG_INFO(stage, ...)  LOG_WITH_LEVEL(::riscv::LogLevel::Info, stage, __VA_ARGS__)
+#define LOG_WARN(stage, ...)  LOG_WITH_LEVEL(::riscv::LogLevel::Warn, stage, __VA_ARGS__)
+#define LOG_ERROR(stage, ...) LOG_WITH_LEVEL(::riscv::LogLevel::Error, stage, __VA_ARGS__)
+
+// 兼容旧接口
+#define dprintf(stage, ...) LOG_DEBUG(stage, __VA_ARGS__)

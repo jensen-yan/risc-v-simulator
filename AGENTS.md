@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+注意默认都使用中文回复我！
+
 ## Project Structure & Modules
 - `src/`: Core simulator sources (CPU, memory, decoder, system, stages).
 - `include/`: Public headers mirroring `src/` layout.

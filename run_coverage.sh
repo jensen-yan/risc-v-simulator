@@ -8,70 +8,96 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}开始代码覆盖率测试...${NC}"
+log_message() {
+    local level="$1"; shift
+    local message="$*"
+    local prefix="[$level][COVERAGE]"
+    local color="$NC"
 
-# 检查是否安装了必要工具
-command -v gcov >/dev/null 2>&1 || { echo -e "${RED}错误: gcov 未安装${NC}" >&2; exit 1; }
-command -v lcov >/dev/null 2>&1 || { echo -e "${YELLOW}警告: lcov 未安装，将使用基础gcov输出${NC}"; }
+    case "$level" in
+        INFO) color="$GREEN" ;;
+        WARN) color="$YELLOW" ;;
+        ERROR) color="$RED" ;;
+        DEBUG) color="$NC" ;;
+        *) color="$NC" ;;
+    esac
 
-# 清理之前的构建
-echo -e "${YELLOW}清理之前的构建...${NC}"
+    if [[ -n "$NO_COLOR" ]]; then
+        printf '%s %s\n' "$prefix" "$message"
+    else
+        printf '%b%s%b %s\n' "${color}" "$prefix" "${NC}" "$message"
+    fi
+}
+
+detect_cores() {
+    if command -v nproc >/dev/null 2>&1; then
+        nproc
+    elif [[ "$OSTYPE" == darwin* ]]; then
+        sysctl -n hw.ncpu 2>/dev/null || echo 1
+    else
+        getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1
+    fi
+}
+
+log_message INFO "开始代码覆盖率测试..."
+
+# 检查工具依赖
+if ! command -v gcov >/dev/null 2>&1; then
+    log_message ERROR "gcov 未安装"
+    exit 1
+fi
+
+if ! command -v lcov >/dev/null 2>&1; then
+    log_message WARN "lcov 未安装，将使用基础 gcov 输出"
+fi
+
+# 清理旧构建
+log_message INFO "清理之前的构建..."
 rm -rf build_coverage
 mkdir build_coverage
-cd build_coverage
+cd build_coverage || exit 1
 
-# 使用Coverage标志构建
-echo -e "${YELLOW}配置项目(启用覆盖率)...${NC}"
+# 配置并编译
+log_message INFO "配置项目(启用覆盖率)..."
 cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON ..
 
-echo -e "${YELLOW}编译项目...${NC}"
-make -j$(nproc)
+log_message INFO "编译项目..."
+make -j"$(detect_cores)"
 
 # 运行测试
-echo -e "${YELLOW}运行测试...${NC}"
-if [ -f "./risc-v-tests" ]; then
+log_message INFO "运行测试..."
+if [[ -f "./risc-v-tests" ]]; then
     ./risc-v-tests
 else
-    echo -e "${RED}错误: 找不到测试可执行文件${NC}"
+    log_message ERROR "找不到测试可执行文件"
     exit 1
 fi
 
 # 生成覆盖率报告
-echo -e "${YELLOW}生成覆盖率报告...${NC}"
+log_message INFO "生成覆盖率报告..."
 
 if command -v lcov >/dev/null 2>&1; then
-    # 使用lcov生成详细报告
-    echo -e "${GREEN}使用lcov生成HTML报告...${NC}"
-    
-    # 创建覆盖率数据
+    log_message INFO "使用 lcov 生成 HTML 报告..."
+
     lcov --capture --directory . --output-file coverage.info --ignore-errors gcov,mismatch
-    
-    # 过滤掉系统文件和测试文件
     lcov --remove coverage.info '/usr/*' '*/tests/*' '*/build*/*' --output-file coverage_filtered.info --ignore-errors empty
-    
-    # 生成HTML报告
+
     mkdir -p coverage_html
     genhtml coverage_filtered.info --output-directory coverage_html
-    
-    echo -e "${GREEN}HTML覆盖率报告已生成在: $(pwd)/coverage_html/index.html${NC}"
-    echo -e "${GREEN}可以用浏览器打开查看详细报告${NC}"
-    
-    # 显示覆盖率汇总
-    echo -e "${YELLOW}覆盖率汇总:${NC}"
+
+    log_message INFO "HTML 覆盖率报告已生成在: $(pwd)/coverage_html/index.html"
+    log_message INFO "可以用浏览器打开查看详细报告"
+
+    log_message INFO "覆盖率汇总:"
     lcov --summary coverage_filtered.info
-    
 else
-    # 使用基础gcov
-    echo -e "${GREEN}使用gcov生成基础报告...${NC}"
-    
-    # 为每个源文件生成gcov报告
+    log_message INFO "使用 gcov 生成基础报告..."
+
     find . -name "*.gcno" -exec gcov {} \;
-    
-    echo -e "${GREEN}gcov文件已生成，查看.gcov文件了解覆盖率详情${NC}"
-    
-    # 显示一些基本统计
-    echo -e "${YELLOW}覆盖率统计:${NC}"
-    echo "总.gcov文件数: $(find . -name "*.gcov" | wc -l)"
+
+    log_message INFO "gcov 文件已生成，查看 .gcov 文件了解覆盖率详情"
+    log_message INFO "覆盖率统计:"
+    log_message INFO "总 .gcov 文件数: $(find . -name \"*.gcov\" | wc -l)"
 fi
 
-echo -e "${GREEN}覆盖率测试完成！${NC}"
+log_message INFO "覆盖率测试完成！"

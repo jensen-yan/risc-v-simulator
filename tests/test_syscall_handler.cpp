@@ -28,7 +28,7 @@ public:
         halted_ = false;
     }
     bool isHalted() const override { return halted_; }
-    void halt() { halted_ = true; }
+    void requestHalt() override { halted_ = true; }
     
     // 扩展支持
     void setEnabledExtensions(uint32_t extensions) override { 

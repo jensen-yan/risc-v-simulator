@@ -38,6 +38,7 @@ public:
     // 状态查询
     virtual bool isHalted() const = 0;
     virtual uint64_t getInstructionCount() const = 0;
+    virtual void requestHalt() = 0;
     
     // 扩展支持
     virtual void setEnabledExtensions(uint32_t extensions) = 0;

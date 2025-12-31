@@ -14,6 +14,11 @@ const std::unordered_map<std::string, std::vector<std::string>> LogPresets::pres
         "FETCH", "DECODE", "ISSUE", "EXECUTE", "WRITEBACK", "COMMIT", 
         "ROB", "RENAME", "RS"
     }},
+
+    // 顺序执行预设：按拍输出顺序CPU执行信息
+    {"inorder", {
+        "INORDER"
+    }},
     
     // 流水线预设：完整的流水线阶段
     {"pipeline", {

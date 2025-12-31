@@ -29,6 +29,7 @@ void printUsage(const char* programName) {
     std::cout << "可用的调试预设:\n";
     std::cout << "  basic      基础流水线 (fetch, decode, commit)\n";
     std::cout << "  ooo        乱序执行 (fetch, decode, issue, execute, writeback, commit, rob, rename, rs)\n";
+    std::cout << "  inorder    顺序执行 (inorder)\n";
     std::cout << "  pipeline   完整流水线 (fetch, decode, issue, execute, writeback, commit)\n";
     std::cout << "  performance 性能分析 (execute, commit, rob, rs, branch, stall)\n";
     std::cout << "  detailed   所有调试信息\n";

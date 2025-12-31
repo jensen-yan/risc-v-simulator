@@ -1,8 +1,10 @@
 #include "cpu/inorder/cpu.h"
+#include "common/debug_types.h"
 #include "system/syscall_handler.h"
 #include "core/instruction_executor.h"
 #include <iostream>
 #include <iomanip>
+#include <cinttypes>
 
 namespace riscv {
 
@@ -28,6 +30,7 @@ void CPU::step() {
     
     try {
         // 1. 取指令
+        const uint64_t pc_before = pc_;
         Instruction inst = memory_->fetchInstruction(pc_);
         
         // 如果指令为0，可能表明程序结束或到达无效内存区域
@@ -51,6 +54,20 @@ void CPU::step() {
             last_instruction_compressed_ = false;
         }
         
+        LOG_DEBUG(INORDER,
+                  "pc=0x%" PRIx64 " inst=0x%" PRIx32 " rd=%u rs1=%u rs2=%u imm=%d c=%s",
+                  pc_before,
+                  static_cast<uint32_t>(inst),
+                  static_cast<unsigned>(decoded.rd),
+                  static_cast<unsigned>(decoded.rs1),
+                  static_cast<unsigned>(decoded.rs2),
+                  static_cast<int>(decoded.imm),
+                  decoded.is_compressed ? "y" : "n");
+
+        const uint64_t rs1_val = getRegister(decoded.rs1);
+        const uint64_t rs2_val = getRegister(decoded.rs2);
+        const uint64_t rd_before = getRegister(decoded.rd);
+
         // 3. 执行指令
         switch (decoded.type) {
             case InstructionType::R_TYPE:
@@ -80,6 +97,22 @@ void CPU::step() {
         }
         
         instruction_count_++;
+
+        const uint64_t rd_after = getRegister(decoded.rd);
+        if (decoded.rd != 0 && rd_after != rd_before) {
+            LOG_DEBUG(INORDER,
+                      "pc=0x%" PRIx64 " x%u:0x%" PRIx64 "->0x%" PRIx64
+                      " rs1=x%u:0x%" PRIx64 " rs2=x%u:0x%" PRIx64 " imm=%d",
+                      pc_before,
+                      static_cast<unsigned>(decoded.rd),
+                      rd_before,
+                      rd_after,
+                      static_cast<unsigned>(decoded.rs1),
+                      rs1_val,
+                      static_cast<unsigned>(decoded.rs2),
+                      rs2_val,
+                      static_cast<int>(decoded.imm));
+        }
         
         // 简单的停机条件：PC超出内存范围
         if (pc_ >= memory_->getSize()) {

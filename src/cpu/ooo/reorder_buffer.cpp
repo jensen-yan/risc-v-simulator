@@ -66,7 +66,8 @@ DynamicInstPtr ReorderBuffer::allocate_entry(
     allocated_count++;
     
     // 使用新的dprintf宏 - 类似GEM5风格
-    dprintf(ROB, "分配ROB表项 %d, PC=0x%" PRIx64 ", InstID=%" PRId64, rob_entry, pc, instruction_id);
+    dprintf(ROB, "分配ROB表项 %d, Inst#%" PRId64 ", PC=0x%" PRIx64,
+        rob_entry, instruction_id, pc);
     
     return dynamic_inst;
 }
@@ -164,8 +165,8 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
         head_ptr = next_index(head_ptr);
         entry_count--;
         
-        dprintf(ROB, "提交异常指令 %" PRId64 ", PC=0x%" PRIx64, 
-               head_inst->get_instruction_id(), head_inst->get_pc());
+        dprintf(ROB, "提交异常指令 %" PRId64 ", PC=0x%" PRIx64,
+            head_inst->get_instruction_id(), head_inst->get_pc());
         
         return result;
     }
@@ -184,8 +185,8 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
     head_ptr = next_index(head_ptr);
     entry_count--;
     
-    dprintf(ROB, "提交指令 %" PRId64 ", PC=0x%" PRIx64 ", 结果=0x%" PRIx64, 
-           head_inst->get_instruction_id(), head_inst->get_pc(), head_inst->get_result());
+    dprintf(ROB, "提交指令 %" PRId64 ", PC=0x%" PRIx64 ", 结果=0x%" PRIx64,
+        head_inst->get_instruction_id(), head_inst->get_pc(), head_inst->get_result());
     
     return result;
 }

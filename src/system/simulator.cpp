@@ -114,24 +114,24 @@ void Simulator::run() {
 
         if (cpuType_ == CpuType::IN_ORDER &&
             cpu_->getInstructionCount() > kMaxInOrderInstructions) {
-            LOG_WARN(SYSTEM, "执行指令数超过限制(%llu)，自动停止",
-                     static_cast<unsigned long long>(kMaxInOrderInstructions));
+            dprintf(SYSTEM, "执行指令数超过限制(%llu)，自动停止",
+                    static_cast<unsigned long long>(kMaxInOrderInstructions));
             cpu_->requestHalt();
             break;
         }
 
         if (cpuType_ == CpuType::OUT_OF_ORDER &&
             cycle_count_ > kMaxOutOfOrderCycles) {
-            LOG_WARN(SYSTEM, "执行周期数超过限制(%llu)，自动停止",
-                     static_cast<unsigned long long>(kMaxOutOfOrderCycles));
+            dprintf(SYSTEM, "执行周期数超过限制(%llu)，自动停止",
+                    static_cast<unsigned long long>(kMaxOutOfOrderCycles));
             cpu_->requestHalt();
             break;
         }
     }
 
     if (memory_->shouldExit()) {
-        LOG_INFO(SYSTEM, "[tohost] 程序通过tohost机制退出，退出码: %d",
-                 static_cast<int>(memory_->getExitCode()));
+        dprintf(SYSTEM, "[tohost] 程序通过tohost机制退出，退出码: %d",
+                static_cast<int>(memory_->getExitCode()));
     }
 
     debugManager.setGlobalContext(cycle_count_, cpu_->getPC());

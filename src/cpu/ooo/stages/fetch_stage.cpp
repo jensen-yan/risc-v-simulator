@@ -43,12 +43,12 @@ void FetchStage::execute(CPUState& state) {
             if ((raw_inst & 0x03) != 0x03) {
                 fetched.is_compressed = true;
                 state.pc += 2;
-                dprintf(FETCH, "取指令: pc = 0x%" PRIx64 " data = 0x%" PRIx32 " (压缩指令，PC+2)", 
+                dprintf(FETCH, "取指令: pc = 0x%" PRIx64 " data = 0x%" PRIx32 " (压缩指令，PC+2)",
                     fetched.pc, raw_inst);
             } else {
                 fetched.is_compressed = false;
                 state.pc += 4;
-                dprintf(FETCH, "取指令: pc = 0x%" PRIx64 " data = 0x%" PRIx32 " (正常指令，PC+4)", 
+                dprintf(FETCH, "取指令: pc = 0x%" PRIx64 " data = 0x%" PRIx32 " (正常指令，PC+4)",
                     fetched.pc, raw_inst);
             }
             

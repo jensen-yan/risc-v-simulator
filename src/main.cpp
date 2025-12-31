@@ -22,9 +22,6 @@ void printUsage(const char* programName) {
     std::cout << "  --debug-flags=<flags>        指定调试分类（用逗号分隔）\n";
     std::cout << "  --debug-cycles=<start>-<end> 指定调试周期范围\n";
     std::cout << "  --debug-preset=<preset>      使用预设调试配置\n";
-    std::cout << "  --debug-simple               简洁输出模式\n";
-    std::cout << "  --debug-verbose              详细输出模式（默认）\n";
-    std::cout << "  --debug-with-pc              带PC信息的输出模式\n";
     std::cout << "  --debug-file=<file>      调试日志输出到文件\n";
     std::cout << "  --debug-no-console           禁用控制台输出（仅文件输出）\n";
     std::cout << "\n";
@@ -45,7 +42,7 @@ void printUsage(const char* programName) {
     std::cout << "  " << programName << " -s -d program.elf                        # 单步调试\n";
     std::cout << "  " << programName << " --ooo program.elf                        # 乱序执行CPU\n";
     std::cout << "  " << programName << " --debug-preset=basic program.elf         # 基础调试\n";
-    std::cout << "  " << programName << " --debug-preset=ooo --debug-simple program.elf  # 乱序调试简洁模式\n";
+    std::cout << "  " << programName << " --debug-preset=ooo program.elf               # 乱序调试\n";
     std::cout << "  " << programName << " --debug-flags=fetch,decode,commit program.elf  # 自定义分类\n";
     std::cout << "  " << programName << " --debug-cycles=100-200 program.elf       # 指定周期范围\n";
 }
@@ -72,9 +69,6 @@ int main(int argc, char* argv[]) {
     std::string debugCategories;
     std::string debugCycles;
     std::string debugPreset;
-    bool debugSimple = false;
-    bool debugVerbose = false;
-    bool debugWithPC = false;
     bool debugNoConsole = false;
     
     for (int i = 1; i < argc; ++i) {
@@ -104,15 +98,6 @@ int main(int argc, char* argv[]) {
             debugMode = true;  // 自动启用调试模式
         } else if (arg.find("--debug-preset=") == 0) {
             debugPreset = arg.substr(15);  // 去掉 "--debug-preset=" 前缀
-            debugMode = true;  // 自动启用调试模式
-        } else if (arg == "--debug-simple") {
-            debugSimple = true;
-            debugMode = true;  // 自动启用调试模式
-        } else if (arg == "--debug-verbose") {
-            debugVerbose = true;
-            debugMode = true;  // 自动启用调试模式
-        } else if (arg == "--debug-with-pc") {
-            debugWithPC = true;
             debugMode = true;  // 自动启用调试模式
         } else if (arg.find("--debug-file=") == 0) {
             std::string logFile = arg.substr(13); // 去掉 "--debug-file=" 前缀
@@ -149,15 +134,6 @@ int main(int argc, char* argv[]) {
 
             // 根据参数启用/禁用控制台输出
             debugManager.setOutputToConsole(!debugNoConsole);
-            
-            // 配置输出格式
-            if (debugWithPC) {
-                debugManager.setOutputMode(DebugFormatter::Mode::WITH_PC);
-            } else if (debugSimple) {
-                debugManager.setOutputMode(DebugFormatter::Mode::SIMPLE);
-            } else if (debugVerbose) {
-                debugManager.setOutputMode(DebugFormatter::Mode::VERBOSE);
-            }
             
             // 配置调试分类
             if (!debugPreset.empty()) {

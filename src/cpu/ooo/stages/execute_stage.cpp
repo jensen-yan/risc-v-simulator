@@ -17,8 +17,8 @@ void ExecuteStage::execute(CPUState& state) {
     // 尝试从保留站调度指令到执行单元
     auto dispatch_result = state.reservation_station->dispatch_instruction();
     if (dispatch_result.success) {
-        dprintf(EXECUTE, "从保留站调度指令 RS[%d] Inst#%" PRId64 " 到执行单元", 
-                            dispatch_result.rs_entry, dispatch_result.instruction->get_instruction_id());
+        dprintf(EXECUTE, "Inst#%" PRId64 " 从保留站调度指令 RS[%d] 到执行单元",
+            dispatch_result.instruction->get_instruction_id(), dispatch_result.rs_entry);
         
         ExecutionUnit* unit = get_available_unit(dispatch_result.unit_type, state);
         if (unit) {
@@ -48,8 +48,8 @@ void ExecuteStage::execute(CPUState& state) {
                     break;
             }
             
-            dprintf(EXECUTE, "指令开始在 %s 单元执行，需要 %d 个周期", 
-                                unit_type_str, unit->remaining_cycles);
+            dprintf(EXECUTE, "Inst#%" PRId64 " 指令开始在 %s 单元执行，需要 %d 个周期",
+                dispatch_result.instruction->get_instruction_id(), unit_type_str, unit->remaining_cycles);
             
             // 开始执行指令
             execute_instruction(*unit, dispatch_result.instruction, state);
@@ -119,8 +119,8 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
 
             case InstructionType::SYSTEM_TYPE:
                 // CSR指令或系统调用 - 暂时作为NOP处理
-                dprintf(EXECUTE, "执行SYSTEM_TYPE指令(NOP): Inst#%" PRId64 " PC=0x%" PRIx64, 
-                       instruction->get_instruction_id(), instruction->get_pc());
+                dprintf(EXECUTE, "Inst#%" PRId64 " 执行SYSTEM_TYPE指令(NOP)",
+                    instruction->get_instruction_id());
                 unit.result = 0;
                 break;
                 
@@ -228,11 +228,12 @@ void ExecuteStage::update_execution_units(CPUState& state) {
         auto& unit = state.alu_units[i];
         if (unit.busy) {
             unit.remaining_cycles--;
-            dprintf(EXECUTE, "ALU%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
+            dprintf(EXECUTE, "Inst#%" PRId64 " ALU%zu 执行中，剩余周期: %d",
+                unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                dprintf(EXECUTE, "ALU%zu 执行完成，Inst#%" PRId64 " 结果 0x%" PRIx64 " 发送到CDB", 
-                                    i, unit.instruction->get_instruction_id(), unit.result);
+                dprintf(EXECUTE, "Inst#%" PRId64 " ALU%zu 执行完成，结果 0x%" PRIx64 " 发送到CDB",
+                    unit.instruction->get_instruction_id(), i, unit.result);
                 
                 complete_execution_unit(unit, ExecutionUnitType::ALU, i, state);
             }
@@ -244,11 +245,12 @@ void ExecuteStage::update_execution_units(CPUState& state) {
         auto& unit = state.branch_units[i];
         if (unit.busy) {
             unit.remaining_cycles--;
-            dprintf(EXECUTE, "BRANCH%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
+            dprintf(EXECUTE, "Inst#%" PRId64 " BRANCH%zu 执行中，剩余周期: %d",
+                unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                dprintf(EXECUTE, "BRANCH%zu 跳转指令执行完成，Inst#%" PRId64 " 结果发送到CDB", 
-                                        i, unit.instruction->get_instruction_id());
+                dprintf(EXECUTE, "Inst#%" PRId64 " BRANCH%zu 跳转指令执行完成，结果发送到CDB",
+                    unit.instruction->get_instruction_id(), i);
                 complete_execution_unit(unit, ExecutionUnitType::BRANCH, i, state);
             }
         }
@@ -259,7 +261,8 @@ void ExecuteStage::update_execution_units(CPUState& state) {
         auto& unit = state.load_units[i];
         if (unit.busy) {
             unit.remaining_cycles--;
-            dprintf(EXECUTE, "LOAD%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
+            dprintf(EXECUTE, "Inst#%" PRId64 " LOAD%zu 执行中，剩余周期: %d",
+                unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
                 // 在Load指令完成前，再次检查Store依赖
@@ -268,7 +271,8 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 if (should_wait) {
                     // 仍然有未完成的Store依赖，延迟完成
                     unit.remaining_cycles = 1; // 延迟一个周期
-                    dprintf(EXECUTE, "LOAD%zu 检测到Store依赖，延迟完成", i);
+                    dprintf(EXECUTE, "Inst#%" PRId64 " LOAD%zu 检测到Store依赖，延迟完成",
+                        unit.instruction->get_instruction_id(), i);
                     continue; // 跳过完成处理
                 }
                 
@@ -276,10 +280,9 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 // 尝试Store-to-Load Forwarding
                 bool used_forwarding = perform_load_execution(unit, state);
                 
-                dprintf(EXECUTE, "LOAD%zu 执行完成，Inst#%" PRId64 " %s 结果=0x%" PRIx64 " 发送到CDB",
-                                           i, unit.instruction->get_instruction_id(),
-                                           (used_forwarding ? "(使用Store转发)" : "(从内存读取)"),
-                                           unit.result);
+                dprintf(EXECUTE, "Inst#%" PRId64 " LOAD%zu 执行完成，%s 结果=0x%" PRIx64 " 发送到CDB",
+                    unit.instruction->get_instruction_id(),
+                    i, (used_forwarding ? "(使用Store转发)" : "(从内存读取)"), unit.result);
                 
                 complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
             }
@@ -291,14 +294,15 @@ void ExecuteStage::update_execution_units(CPUState& state) {
         auto& unit = state.store_units[i];
         if (unit.busy) {
             unit.remaining_cycles--;
-            dprintf(EXECUTE, "STORE%zu 执行中，剩余周期: %d", i, unit.remaining_cycles);
+            dprintf(EXECUTE, "Inst#%" PRId64 " STORE%zu 执行中，剩余周期: %d",
+                unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
                 // 存储指令结果为0
                 unit.result = 0;
                 
-                dprintf(EXECUTE, "STORE%zu 执行完成，Inst#%" PRId64 " 通知ROB完成", 
-                                    i, unit.instruction->get_instruction_id());
+                dprintf(EXECUTE, "Inst#%" PRId64 " STORE%zu 执行完成，通知ROB完成",
+                    unit.instruction->get_instruction_id(), i);
                 
                 complete_execution_unit(unit, ExecutionUnitType::STORE, i, state);
             }

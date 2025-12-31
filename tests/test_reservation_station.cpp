@@ -21,7 +21,7 @@ protected:
 
         // 设置回调函数
         debugManager.setCallback([](const DebugInfo& info) {
-            std::cout << DebugFormatter::format(info, DebugFormatter::Mode::VERBOSE) << std::endl;
+            std::cout << DebugFormatter::format(info) << std::endl;
         });
         
         // 启用相关分类

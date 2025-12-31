@@ -18,27 +18,6 @@
 
 namespace riscv {
 
-enum class LogLevel {
-    Debug = 0,
-    Info,
-    Warn,
-    Error
-};
-
-inline const char* levelToString(LogLevel level) {
-    switch (level) {
-        case LogLevel::Debug:
-            return "DEBUG";
-        case LogLevel::Info:
-            return "INFO";
-        case LogLevel::Warn:
-            return "WARN";
-        case LogLevel::Error:
-            return "ERROR";
-    }
-    return "UNKNOWN";
-}
-
 /**
  * 调试信息结构体
  * 包含完整的调试信息，支持多种输出格式
@@ -48,20 +27,17 @@ struct DebugInfo {
     std::string message;
     std::optional<uint64_t> cycle;
     std::optional<uint64_t> pc;
-    LogLevel level = LogLevel::Debug;
 
     DebugInfo() = default;
 
     DebugInfo(std::string stageValue,
               std::string messageValue,
-              LogLevel levelValue = LogLevel::Debug,
               std::optional<uint64_t> cycleValue = std::nullopt,
               std::optional<uint64_t> pcValue = std::nullopt)
         : stage(std::move(stageValue)),
           message(std::move(messageValue)),
           cycle(cycleValue),
-          pc(pcValue),
-          level(levelValue) {}
+          pc(pcValue) {}
 };
 
 /**
@@ -75,46 +51,12 @@ using DebugCallback = std::function<void(const DebugInfo&)>;
  */
 class DebugFormatter {
 public:
-    enum class Mode {
-        SIMPLE,     // 简洁模式: [LEVEL][STAGE] message
-        VERBOSE,    // 详细模式: [LEVEL][STAGE] [cycle=] message
-        WITH_PC     // 带PC模式: [LEVEL][STAGE] [cycle=] [pc=] message
-    };
+    // 输出固定verbose格式: [STAGE] [c=] message
+    static std::string format(const DebugInfo& info) {
+        const std::string prefix = fmt::format("[{}]", info.stage);
+        const std::string cycle_part = info.cycle ? fmt::format(" [c={}]", *info.cycle) : "";
 
-    // 根据模式格式化输出
-    static std::string format(const DebugInfo& info, Mode mode = Mode::VERBOSE) {
-        const std::string prefix = fmt::format("[{}][{}]", levelToString(info.level), info.stage);
-
-        switch (mode) {
-            case Mode::SIMPLE:
-                return fmt::format("{} {}", prefix, info.message);
-            case Mode::VERBOSE:
-                if (info.cycle) {
-                    return fmt::format("{} [cycle={}]: {}", prefix, *info.cycle, info.message);
-                }
-                return fmt::format("{} {}", prefix, info.message);
-            case Mode::WITH_PC:
-                if (info.cycle && info.pc) {
-                    return fmt::format("{} [cycle={}][pc=0x{:016x}] {}", prefix, *info.cycle, *info.pc, info.message);
-                }
-                if (info.cycle) {
-                    return fmt::format("{} [cycle={}]: {}", prefix, *info.cycle, info.message);
-                }
-                if (info.pc) {
-                    return fmt::format("{} [pc=0x{:016x}] {}", prefix, *info.pc, info.message);
-                }
-                return fmt::format("{} {}", prefix, info.message);
-        }
-        return fmt::format("{} {}", prefix, info.message);
-    }
-
-    // 兼容性函数
-    static std::string formatSimple(const DebugInfo& info) {
-        return format(info, Mode::SIMPLE);
-    }
-
-    static std::string formatWithPC(const DebugInfo& info) {
-        return format(info, Mode::WITH_PC);
+        return fmt::format("{}{} {}", prefix, cycle_part, info.message);
     }
 };
 
@@ -187,15 +129,6 @@ public:
         }
     }
 
-    // 日志等级控制
-    void setLogLevel(LogLevel level) {
-        min_level_ = level;
-    }
-
-    LogLevel getLogLevel() const {
-        return min_level_;
-    }
-
     // 启用/禁用调试分类
     void enableCategory(const std::string& category) {
         enabled_categories_.insert(category);
@@ -254,16 +187,6 @@ public:
         debug_end_cycle_ = end;
     }
 
-    // 设置输出格式
-    void setOutputMode(DebugFormatter::Mode mode) {
-        output_mode_ = mode;
-    }
-
-    // 获取当前输出格式
-    DebugFormatter::Mode getOutputMode() const {
-        return output_mode_;
-    }
-
     // 设置全局上下文
     void setGlobalContext(uint64_t cycle, uint64_t pc) {
         global_cycle_ = cycle;
@@ -287,7 +210,6 @@ public:
 
     // 输出调试信息
     void log(const std::string& stage,
-             LogLevel level,
              const std::string& message,
              std::optional<uint64_t> cycle = std::nullopt,
              std::optional<uint64_t> pc = std::nullopt) {
@@ -301,24 +223,24 @@ public:
             resolved_pc = global_pc_;
         }
 
-        if (!shouldOutput(stage, resolved_cycle, level)) {
+        if (!shouldOutput(stage, resolved_cycle)) {
             return;
         }
 
-        DebugInfo info(stage, message, level, resolved_cycle, resolved_pc);
+        DebugInfo info(stage, message, resolved_cycle, resolved_pc);
 
         if (output_to_console_) {
             if (debug_callback_) {
                 debug_callback_(info);
             } else {
-                std::cout << DebugFormatter::format(info, output_mode_) << std::endl;
+                std::cout << DebugFormatter::format(info) << std::endl;
             }
         } else if (debug_callback_) {
             debug_callback_(info);
         }
 
         if (output_to_file_ && log_file_.is_open()) {
-            log_file_ << DebugFormatter::format(info, output_mode_) << std::endl;
+            log_file_ << DebugFormatter::format(info) << std::endl;
             log_file_.flush();
         }
     }
@@ -343,20 +265,6 @@ public:
         } else {
             info += std::to_string(debug_end_cycle_);
         }
-        info += "\n  Output Mode: ";
-        switch (output_mode_) {
-            case DebugFormatter::Mode::SIMPLE:
-                info += "SIMPLE";
-                break;
-            case DebugFormatter::Mode::VERBOSE:
-                info += "VERBOSE";
-                break;
-            case DebugFormatter::Mode::WITH_PC:
-                info += "WITH_PC";
-                break;
-        }
-        info += "\n  Min Level: ";
-        info += levelToString(min_level_);
         return info;
     }
 
@@ -376,11 +284,7 @@ private:
     }
 
     bool shouldOutput(const std::string& stage,
-                      const std::optional<uint64_t>& cycle,
-                      LogLevel level) const {
-        if (static_cast<int>(level) < static_cast<int>(min_level_)) {
-            return false;
-        }
+                      const std::optional<uint64_t>& cycle) const {
 
         if (stage != "SYSTEM" &&
             !enabled_categories_.empty() &&
@@ -409,11 +313,9 @@ private:
     std::unordered_set<std::string> enabled_categories_;
     uint64_t debug_start_cycle_ = 0;
     uint64_t debug_end_cycle_ = UINT64_MAX;
-    DebugFormatter::Mode output_mode_ = DebugFormatter::Mode::VERBOSE;
     std::ofstream log_file_;
     bool output_to_file_ = false;
     bool output_to_console_ = true;
-    LogLevel min_level_ = LogLevel::Debug;
     uint64_t global_cycle_ = 0;
     bool has_global_cycle_ = false;
     uint64_t global_pc_ = 0;
@@ -422,15 +324,10 @@ private:
 
 } // namespace riscv
 
-#define LOG_WITH_LEVEL(level, stage, ...) do { \
+#define LOG_DEBUG(stage, ...) do { \
     const auto message = fmt::sprintf(__VA_ARGS__); \
-    ::riscv::DebugManager::getInstance().log(#stage, level, message); \
+    ::riscv::DebugManager::getInstance().log(#stage, message); \
 } while (0)
-
-#define LOG_DEBUG(stage, ...) LOG_WITH_LEVEL(::riscv::LogLevel::Debug, stage, __VA_ARGS__)
-#define LOG_INFO(stage, ...)  LOG_WITH_LEVEL(::riscv::LogLevel::Info, stage, __VA_ARGS__)
-#define LOG_WARN(stage, ...)  LOG_WITH_LEVEL(::riscv::LogLevel::Warn, stage, __VA_ARGS__)
-#define LOG_ERROR(stage, ...) LOG_WITH_LEVEL(::riscv::LogLevel::Error, stage, __VA_ARGS__)
 
 // 兼容旧接口
 #define dprintf(stage, ...) LOG_DEBUG(stage, __VA_ARGS__)

@@ -21,6 +21,17 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install Test Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtest-dev
+          sudo cmake -S /usr/src/googletest -B /tmp/gtest
+          sudo cmake --build /tmp/gtest
+          sudo install -m 644 /tmp/gtest/lib/libgtest*.a /usr/lib
+
+      - name: Init Submodules
+        run: git submodule update --init --recursive
+
       - name: Configure
         run: cmake -S . -B build
 
@@ -31,7 +42,11 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: ISA Tests (rv32)
-        run: python3 run_tests.py -p "rv32*-p-*"
+        run: |
+          chmod +x riscv-tests/isa/rv32*-p-* || true
+          python3 run_tests.py -p "rv32*-p-*"
 
       - name: ISA Tests (rv64ui)
-        run: python3 run_tests.py -p "rv64ui-p-*"
+        run: |
+          chmod +x riscv-tests/isa/rv64ui-p-* || true
+          python3 run_tests.py -p "rv64ui-p-*"

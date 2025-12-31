@@ -7,6 +7,8 @@
 namespace riscv {
 
 SyscallHandler::SyscallHandler(std::shared_ptr<Memory> memory) : memory_(memory) {
+    uint64_t mem_size = memory_ ? static_cast<uint64_t>(memory_->getSize()) : 0;
+    current_brk_ = mem_size > 4 ? mem_size / 4 : 1;
 }
 
 bool SyscallHandler::handleSyscall(ICpuInterface* cpu) {
@@ -72,6 +74,14 @@ void SyscallHandler::handleWrite(ICpuInterface* cpu) {
     
     try {
         if (fd == STDOUT || fd == STDERR) {
+            if (count == 0) {
+                cpu->setRegister(10, 0);
+                return;
+            }
+            if (bufAddr == 0) {
+                cpu->setRegister(10, static_cast<uint64_t>(-1));
+                return;
+            }
             // 输出到控制台
             std::string output;
             for (size_t i = 0; i < count; i++) {
@@ -106,6 +116,14 @@ void SyscallHandler::handleRead(ICpuInterface* cpu) {
     uint64_t count = cpu->getRegister(12);   // a2: 读取字节数
     
     if (fd == STDIN) {
+        if (count == 0) {
+            cpu->setRegister(10, 0);
+            return;
+        }
+        if (bufAddr == 0) {
+            cpu->setRegister(10, static_cast<uint64_t>(-1));
+            return;
+        }
         // 从标准输入读取（简化实现）
         std::string input;
         std::getline(std::cin, input);
@@ -130,9 +148,13 @@ void SyscallHandler::handleRead(ICpuInterface* cpu) {
 void SyscallHandler::handleBrk(ICpuInterface* cpu) {
     uint64_t addr = cpu->getRegister(10);  // a0: 新的程序断点
     
-    // 简化实现：总是返回请求的地址
-    // 实际实现应该管理堆内存
-    cpu->setRegister(10, addr);
+    if (addr == 0) {
+        cpu->setRegister(10, current_brk_);
+        return;
+    }
+
+    current_brk_ = addr;
+    cpu->setRegister(10, current_brk_);
 }
 
 std::string SyscallHandler::readStringFromMemory(Address addr, size_t maxLen) {

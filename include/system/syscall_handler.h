@@ -43,6 +43,7 @@ public:
 
 private:
     std::shared_ptr<Memory> memory_;
+    uint64_t current_brk_ = 0;
     
     // 系统调用实现
     void handleExit(ICpuInterface* cpu);

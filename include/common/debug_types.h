@@ -54,9 +54,9 @@ public:
     // 输出固定verbose格式: [STAGE] [c=] message
     static std::string format(const DebugInfo& info) {
         const std::string prefix = fmt::format("[{}]", info.stage);
-        const std::string cycle_part = info.cycle ? fmt::format(" [c={}]", *info.cycle) : "";
+        const std::string cycle_part = info.cycle ? fmt::format("[c={}] ", *info.cycle) : "";
 
-        return fmt::format("{}{} {}", prefix, cycle_part, info.message);
+        return fmt::format("{}{} {}", cycle_part, prefix, info.message);
     }
 };
 

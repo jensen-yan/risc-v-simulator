@@ -311,7 +311,9 @@ TEST_F(InstructionExecutorTest, Immediate32BitOperations) {
     // SLLIW (32位立即数左移)
     auto slliw_inst = createDecodedInst(Opcode::OP_IMM_32, Funct3::SLL, Funct7::NORMAL, 1, 0, 0, 4);
     uint64_t slliw_result = InstructionExecutor::executeImmediateOperation32(slliw_inst, 0xFFFFFFFF80000001);
-    EXPECT_EQ(slliw_result, static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(0x80000001) << 4))) << "SLLIW应该进行32位左移并符号扩展";
+    const auto slliw_expected =
+        static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(0x80000001u) << 4)));
+    EXPECT_EQ(slliw_result, slliw_expected) << "SLLIW应该进行32位左移并符号扩展";
     
     // SRLIW (32位立即数逻辑右移)
     auto srliw_inst = createDecodedInst(Opcode::OP_IMM_32, Funct3::SRL_SRA, Funct7::NORMAL, 1, 0, 0, 2);
@@ -339,7 +341,9 @@ TEST_F(InstructionExecutorTest, Register32BitOperations) {
     // SLLW (32位寄存器左移)
     auto sllw_inst = createDecodedInst(Opcode::OP_32, Funct3::SLL, Funct7::NORMAL, 1, 2, 3);
     uint64_t sllw_result = InstructionExecutor::executeRegisterOperation32(sllw_inst, 0xFFFFFFFF80000001, 4);
-    EXPECT_EQ(sllw_result, static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(0x80000001) << 4))) << "SLLW应该进行32位左移并符号扩展";
+    const auto sllw_expected =
+        static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(0x80000001u) << 4)));
+    EXPECT_EQ(sllw_result, sllw_expected) << "SLLW应该进行32位左移并符号扩展";
 }
 
 // ========== M扩展指令测试 ==========

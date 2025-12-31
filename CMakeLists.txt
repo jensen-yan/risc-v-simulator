@@ -14,6 +14,9 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# 启用 CTest（让子目录测试能被 ctest 发现）
+enable_testing()
+
 # 调试/发布编译参数
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g")

@@ -33,7 +33,6 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 
 常用示例：
 
-```bash
 # 运行 ELF，使用默认 OOO CPU 与 2GB 内存（适配 riscv-tests）
 ./risc-v-sim -e -m 2164260864 ./riscv-tests/isa/rv32ui-p-add
 
@@ -43,7 +42,6 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 # 调试预设/分类与周期过滤
 ./risc-v-sim --debug --debug-preset=ooo -e program.elf
 ./risc-v-sim --debug-categories=fetch,decode,commit --debug-cycles=100-200 -e program.elf
-```
 ```
 
 ## 项目结构

@@ -32,8 +32,11 @@ jobs:
       - name: Init Submodules
         run: git submodule update --init --recursive
 
-      - name: Build riscv-tests
-        run: make -C riscv-tests
+      - name: Build ISA Tests
+        run: |
+          make -C riscv-tests/isa -f Makefile \
+            src_dir="${GITHUB_WORKSPACE}/riscv-tests/isa" \
+            XLEN=64
 
       - name: Configure
         run: cmake -S . -B build

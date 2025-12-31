@@ -56,24 +56,15 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 └── docs/           # 文档
 ```
 
+## 文档
+
+- 架构设计（精简）：`docs/代码架构文档.md`
+- 需求与范围（精简）：`docs/requirements.md`
+- 项目计划（精简）：`docs/plans.md`
+
 ## 支持的指令
 
-主要支持 RV64I（含 RV32I 子集）与扩展 M、C 的常用子集：
-
-### 算术运算
-- ADD, SUB, AND, OR, XOR, SLL, SRL, SRA
-- ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI
-
-### 内存操作
-- RV32: LW, LH, LB, LBU, LHU; SW, SH, SB
-- RV64: LD, LWU; SD
-
-### 控制流
-- BEQ, BNE, BLT, BGE, BLTU, BGEU
-- JAL, JALR
-
-### 系统/其他
-- ECALL, EBREAK；FENCE（部分）；WFI/MRET（按需）
+支持 RV64I（含 RV32I 子集）与 M/C 扩展的常用子集；具体覆盖以测试集与源码实现为准。
 
 ## 构建 riscv-tests
 

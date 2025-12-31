@@ -1,6 +1,8 @@
 # Repository Guidelines
 
 注意默认都使用中文回复我！
+画图尽量用mermaid 画图
+commit message 尽量详细点，用中文
 
 ## Project Structure & Modules
 - `src/`: Core simulator sources (CPU, memory, decoder, system, stages).

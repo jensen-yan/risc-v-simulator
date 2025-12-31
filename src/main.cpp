@@ -17,7 +17,7 @@ void printUsage(const char* programName) {
     std::cout << "  --in-order                   使用顺序执行CPU\n";
     std::cout << "\n";
     std::cout << "增强调试选项:\n";
-    std::cout << "  --debug-categories=<cats>    指定调试分类（用逗号分隔）\n";
+    std::cout << "  --debug-flags=<flags>        指定调试分类（用逗号分隔）\n";
     std::cout << "  --debug-cycles=<start>-<end> 指定调试周期范围\n";
     std::cout << "  --debug-preset=<preset>      使用预设调试配置\n";
     std::cout << "  --debug-simple               简洁输出模式\n";
@@ -44,7 +44,7 @@ void printUsage(const char* programName) {
     std::cout << "  " << programName << " --ooo program.elf                        # 乱序执行CPU\n";
     std::cout << "  " << programName << " --debug-preset=basic program.elf         # 基础调试\n";
     std::cout << "  " << programName << " --debug-preset=ooo --debug-simple program.elf  # 乱序调试简洁模式\n";
-    std::cout << "  " << programName << " --debug-categories=fetch,decode,commit program.elf  # 自定义分类\n";
+    std::cout << "  " << programName << " --debug-flags=fetch,decode,commit program.elf  # 自定义分类\n";
     std::cout << "  " << programName << " --debug-cycles=100-200 program.elf       # 指定周期范围\n";
 }
 
@@ -92,8 +92,8 @@ int main(int argc, char* argv[]) {
             cpuType = CpuType::IN_ORDER;
         } else if (arg == "-m" && i + 1 < argc) {
             memorySize = std::stoul(argv[++i]);
-        } else if (arg.find("--debug-categories=") == 0) {
-            debugCategories = arg.substr(19);  // 去掉 "--debug-categories=" 前缀
+        } else if (arg.find("--debug-flags=") == 0) {
+            debugCategories = arg.substr(14);  // 去掉 "--debug-flags=" 前缀
             debugMode = true;  // 自动启用调试模式
         } else if (arg.find("--debug-cycles=") == 0) {
             debugCycles = arg.substr(15);  // 去掉 "--debug-cycles=" 前缀

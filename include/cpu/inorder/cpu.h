@@ -19,6 +19,7 @@ class CPU : public ICpuInterface {
 public:
     static constexpr size_t NUM_REGISTERS = 32;
     static constexpr size_t NUM_FP_REGISTERS = 32;
+    static constexpr size_t NUM_CSR_REGISTERS = 4096;
     
     explicit CPU(std::shared_ptr<Memory> memory);
     ~CPU() override;
@@ -67,6 +68,7 @@ private:
     // CPU 状态
     std::array<uint64_t, NUM_REGISTERS> registers_;
     std::array<uint32_t, NUM_FP_REGISTERS> fp_registers_;
+    std::array<uint64_t, NUM_CSR_REGISTERS> csr_registers_;
     uint64_t pc_;                   // 程序计数器
     bool halted_;                   // 停机标志
     uint64_t instruction_count_;    // 指令计数器

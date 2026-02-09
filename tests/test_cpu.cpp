@@ -447,3 +447,43 @@ TEST_F(CPUTest, BLTU_Instruction) {
     // 不应该跳转（作为无符号数，-10 > 5）
     EXPECT_EQ(cpu->getPC(), 4);
 }
+
+TEST_F(CPUTest, SystemCSR_CSRRWAndCSRRS) {
+    // csrrw x2, mstatus(0x300), x1 : x2 <- old(mstatus), mstatus <- x1
+    cpu->setRegister(1, 0x55);
+    uint32_t csrrw_inst = createIType(Opcode::SYSTEM, 2, 1, 0x300, static_cast<Funct3>(0b001));
+    memory->writeWord(0, csrrw_inst);
+
+    // csrrs x4, mstatus(0x300), x3 : x4 <- old(mstatus), mstatus <- old | x3
+    cpu->setRegister(3, 0x02);
+    uint32_t csrrs_set_inst = createIType(Opcode::SYSTEM, 4, 3, 0x300, static_cast<Funct3>(0b010));
+    memory->writeWord(4, csrrs_set_inst);
+
+    // csrr x5, mstatus(0x300) = csrrs x5, mstatus, x0
+    uint32_t csrr_inst = createIType(Opcode::SYSTEM, 5, 0, 0x300, static_cast<Funct3>(0b010));
+    memory->writeWord(8, csrr_inst);
+
+    cpu->step();
+    EXPECT_EQ(cpu->getRegister(2), 0x0);
+    EXPECT_EQ(cpu->getPC(), 4);
+
+    cpu->step();
+    EXPECT_EQ(cpu->getRegister(4), 0x55);
+    EXPECT_EQ(cpu->getPC(), 8);
+
+    cpu->step();
+    EXPECT_EQ(cpu->getRegister(5), 0x57);
+    EXPECT_EQ(cpu->getPC(), 12);
+}
+
+TEST_F(CPUTest, SystemCSR_CSRRShouldOverwriteRdValue) {
+    // 复现 rv64ui-p-add 的关键点：csrr a0, mhartid 必须覆盖 a0 旧值
+    cpu->setRegister(10, 0x80000000ULL);
+    uint32_t csrr_mhartid = createIType(Opcode::SYSTEM, 10, 0, 0xF14, static_cast<Funct3>(0b010));
+    memory->writeWord(0, csrr_mhartid);
+
+    cpu->step();
+
+    EXPECT_EQ(cpu->getRegister(10), 0x0);
+    EXPECT_EQ(cpu->getPC(), 4);
+}

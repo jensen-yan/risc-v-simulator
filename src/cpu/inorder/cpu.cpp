@@ -16,6 +16,7 @@ CPU::CPU(std::shared_ptr<Memory> memory)
     // 初始化寄存器，x0寄存器始终为0
     registers_.fill(0);
     fp_registers_.fill(0);
+    csr_registers_.fill(0);
     
     // 初始化系统调用处理器
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
@@ -135,6 +136,7 @@ void CPU::run() {
 void CPU::reset() {
     registers_.fill(0);
     fp_registers_.fill(0);
+    csr_registers_.fill(0);
     pc_ = 0;
     halted_ = false;
     instruction_count_ = 0;
@@ -358,8 +360,12 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
         } else if (InstructionExecutor::isUserReturn(inst)) {
             // URET - 用户模式返回（可选实现）
             incrementPC();
-        } else if (inst.funct3 != Funct3::ECALL_EBREAK) {
-            // CSR指令 - 暂时不实现，直接跳过
+        } else if (InstructionExecutor::isCsrInstruction(inst)) {
+            const uint32_t csr_addr = static_cast<uint32_t>(inst.imm) & 0xFFFU;
+            const auto csr_result = InstructionExecutor::executeCsrInstruction(
+                inst, getRegister(inst.rs1), csr_registers_[csr_addr]);
+            csr_registers_[csr_addr] = csr_result.write_value;
+            setRegister(inst.rd, csr_result.read_value);
             incrementPC();
         } else {
             throw IllegalInstructionException("不支持的系统指令: imm=" + std::to_string(inst.imm));

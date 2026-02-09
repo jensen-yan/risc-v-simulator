@@ -28,6 +28,10 @@ def log_message(level: str, category: str, message: str) -> None:
     print(f"[{level.upper()}][{category}] {message}")
 
 
+PASS_MARKER = "=== TEST RESULT: PASS ==="
+FAIL_MARKER = "=== TEST RESULT: FAIL ==="
+
+
 class TestRunner:
     def __init__(self, simulator_path: str, riscv_tests_path: str, verbose: bool = False):
         self.simulator_path = simulator_path
@@ -89,10 +93,10 @@ class TestRunner:
             stdout = result.stdout
             stderr = result.stderr
             
-            # 检查是否通过
-            if "=== 测试结果: PASS ===" in stdout:
+            # 检查是否通过（仅英文输出）
+            if PASS_MARKER in stdout:
                 return "passed", "", result.returncode, elapsed, test_name
-            elif "=== 测试结果: FAIL ===" in stdout:
+            elif FAIL_MARKER in stdout:
                 return "failed", stderr, result.returncode, elapsed, test_name
             else:
                 return "error", f"未知结果:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}", result.returncode, elapsed, test_name

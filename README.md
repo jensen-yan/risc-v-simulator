@@ -53,7 +53,8 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 ├── riscv-tests/    # 上游 riscv-tests（子模块）
 ├── runtime/        # 运行时库（含 minilibc）
 ├── programs/       # 示例/测试程序
-└── docs/           # 文档
+├── docs/           # 架构/需求等稳定文档
+└── tasks/          # 任务说明、重构计划与执行记录（新增任务文档统一放此目录）
 ```
 
 ## 文档
@@ -61,6 +62,7 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 - 架构设计（精简）：`docs/代码架构文档.md`
 - 需求与范围（精简）：`docs/requirements.md`
 - 项目计划（精简）：`docs/plans.md`
+- 任务与重构记录：`tasks/`
 
 ## 支持的指令
 

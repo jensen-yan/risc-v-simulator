@@ -14,6 +14,7 @@ commit message 尽量详细点，用中文
 - `programs/` + `runtime/`: 示例程序与最小化 libc 运行时。
 - `build/`: CMake 构建输出（不提交）。
 - `docs/`、`utils/`、scripts: 辅助文档与工具。
+- `tasks/`: 任务说明、重构计划与执行记录（以后新增任务文档统一放这里）。
 
 ## 构建、测试与开发命令
 - 配置并构建（Release）:

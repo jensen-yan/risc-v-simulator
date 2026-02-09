@@ -8,47 +8,47 @@
 using namespace riscv;
 
 void printUsage(const char* programName) {
-    std::cout << "用法: " << programName << " [选项] [程序文件]\n";
-    std::cout << "选项:\n";
-    std::cout << "  -h, --help                   显示此帮助信息\n";
-    std::cout << "  -s, --step                   单步执行模式\n";
-    std::cout << "  -d, --debug                  调试模式\n";
-    std::cout << "  -m SIZE                      设置内存大小（字节）\n";
-    std::cout << "  -e, --elf                    加载ELF文件（自动检测）\n";
-    std::cout << "  --ooo                        使用乱序执行CPU（默认）\n";
-    std::cout << "  --in-order                   使用顺序执行CPU\n";
+    std::cout << "Usage: " << programName << " [options] [program]\n";
+    std::cout << "Options:\n";
+    std::cout << "  -h, --help                   Show this help message\n";
+    std::cout << "  -s, --step                   Step-by-step execution mode\n";
+    std::cout << "  -d, --debug                  Debug mode\n";
+    std::cout << "  -m SIZE                      Set memory size in bytes\n";
+    std::cout << "  -e, --elf                    Load ELF file (auto detect)\n";
+    std::cout << "  --ooo                        Use out-of-order CPU (default)\n";
+    std::cout << "  --in-order                   Use in-order CPU\n";
     std::cout << "\n";
-    std::cout << "增强调试选项:\n";
-    std::cout << "  --debug-flags=<flags>        指定调试分类（用逗号分隔）\n";
-    std::cout << "  --debug-cycles=<start>-<end> 指定调试周期范围\n";
-    std::cout << "  --debug-preset=<preset>      使用预设调试配置\n";
-    std::cout << "  --debug-file=<file>      调试日志输出到文件\n";
-    std::cout << "  --debug-no-console           禁用控制台输出（仅文件输出）\n";
+    std::cout << "Extended debug options:\n";
+    std::cout << "  --debug-flags=<flags>        Set debug categories (comma separated)\n";
+    std::cout << "  --debug-cycles=<start>-<end> Set debug cycle range\n";
+    std::cout << "  --debug-preset=<preset>      Use preset debug configuration\n";
+    std::cout << "  --debug-file=<file>          Write debug log to file\n";
+    std::cout << "  --debug-no-console           Disable console debug output\n";
     std::cout << "\n";
-    std::cout << "可用的调试预设:\n";
-    std::cout << "  basic      基础流水线 (fetch, decode, commit)\n";
-    std::cout << "  ooo        乱序执行 (fetch, decode, issue, execute, writeback, commit, rob, rename, rs)\n";
-    std::cout << "  inorder    顺序执行 (inorder)\n";
-    std::cout << "  pipeline   完整流水线 (fetch, decode, issue, execute, writeback, commit)\n";
-    std::cout << "  performance 性能分析 (execute, commit, rob, rs, branch, stall)\n";
-    std::cout << "  detailed   所有调试信息\n";
-    std::cout << "  memory     内存访问 (fetch, memory, execute, commit)\n";
-    std::cout << "  branch     分支预测 (fetch, decode, execute, commit, branch)\n";
-    std::cout << "  minimal    最小调试 (fetch, commit)\n";
+    std::cout << "Available debug presets:\n";
+    std::cout << "  basic      Basic pipeline (fetch, decode, commit)\n";
+    std::cout << "  ooo        Out-of-order (fetch, decode, issue, execute, writeback, commit, rob, rename, rs)\n";
+    std::cout << "  inorder    In-order (inorder)\n";
+    std::cout << "  pipeline   Full pipeline (fetch, decode, issue, execute, writeback, commit)\n";
+    std::cout << "  performance Performance analysis (execute, commit, rob, rs, branch, stall)\n";
+    std::cout << "  detailed   All debug categories\n";
+    std::cout << "  memory     Memory access (fetch, memory, execute, commit)\n";
+    std::cout << "  branch     Branch prediction (fetch, decode, execute, commit, branch)\n";
+    std::cout << "  minimal    Minimal debug (fetch, commit)\n";
     std::cout << "\n";
-    std::cout << "示例:\n";
-    std::cout << "  " << programName << " program.bin                              # 二进制文件\n";
-    std::cout << "  " << programName << " program.elf                              # ELF文件\n";
-    std::cout << "  " << programName << " -s -d program.elf                        # 单步调试\n";
-    std::cout << "  " << programName << " --ooo program.elf                        # 乱序执行CPU\n";
-    std::cout << "  " << programName << " --debug-preset=basic program.elf         # 基础调试\n";
-    std::cout << "  " << programName << " --debug-preset=ooo program.elf               # 乱序调试\n";
-    std::cout << "  " << programName << " --debug-flags=fetch,decode,commit program.elf  # 自定义分类\n";
-    std::cout << "  " << programName << " --debug-cycles=100-200 program.elf       # 指定周期范围\n";
+    std::cout << "Examples:\n";
+    std::cout << "  " << programName << " program.bin                              # Binary file\n";
+    std::cout << "  " << programName << " program.elf                              # ELF file\n";
+    std::cout << "  " << programName << " -s -d program.elf                        # Step debug mode\n";
+    std::cout << "  " << programName << " --ooo program.elf                        # Out-of-order CPU\n";
+    std::cout << "  " << programName << " --debug-preset=basic program.elf         # Basic debug preset\n";
+    std::cout << "  " << programName << " --debug-preset=ooo program.elf           # OOO debug preset\n";
+    std::cout << "  " << programName << " --debug-flags=fetch,decode,commit program.elf  # Custom categories\n";
+    std::cout << "  " << programName << " --debug-cycles=100-200 program.elf       # Cycle range\n";
 }
 
 int main(int argc, char* argv[]) {
-    std::cout << "RISC-V CPU 模拟器 v1.0\n";
+    std::cout << "RISC-V CPU Simulator v1.0\n";
     std::cout << "===========================\n\n";
     
     if (argc < 2) {
@@ -106,7 +106,7 @@ int main(int argc, char* argv[]) {
             debugMode = true; // 自动启用调试模式
             DebugManager::getInstance().setOutputToConsole(false); // 禁用控制台输出
             debugNoConsole = true;
-            std::cout << "调试日志将输出到文件: " << logFile << "\n";
+            std::cout << "Debug log will be written to file: " << logFile << "\n";
         } else if (arg == "--debug-no-console") {
             DebugManager::getInstance().setOutputToConsole(false);
             debugMode = true; // 自动启用调试模式
@@ -138,10 +138,10 @@ int main(int argc, char* argv[]) {
             // 配置调试分类
             if (!debugPreset.empty()) {
                 debugManager.setPreset(debugPreset);
-                std::cout << "使用调试预设: " << debugPreset << "\n";
+                std::cout << "Using debug preset: " << debugPreset << "\n";
             } else if (!debugCategories.empty()) {
                 debugManager.setCategories(debugCategories);
-                std::cout << "使用调试分类: " << debugCategories << "\n";
+                std::cout << "Using debug categories: " << debugCategories << "\n";
             }
             
             // 配置周期范围
@@ -157,10 +157,10 @@ int main(int argc, char* argv[]) {
                     }
                     
                     debugManager.setCycleRange(startCycle, endCycle);
-                    std::cout << "调试周期范围: " << startCycle << "-" << 
-                        (endCycle == UINT64_MAX ? "END" : std::to_string(endCycle)) << "\n";
+                    std::cout << "Debug cycle range: " << startCycle << "-"
+                              << (endCycle == UINT64_MAX ? "END" : std::to_string(endCycle)) << "\n";
                 } else {
-                    std::cerr << "警告: 无效的周期范围格式，应为 start-end\n";
+                    std::cerr << "Warning: invalid cycle range format, expected start-end\n";
                 }
             }
             
@@ -172,41 +172,41 @@ int main(int argc, char* argv[]) {
         }
         
         // 显示CPU类型
-        std::cout << "CPU类型: " << (cpuType == CpuType::OUT_OF_ORDER ? "乱序执行" : "顺序执行") << "\n";
-        std::cout << "内存大小: " << memorySize << " 字节\n\n";
+        std::cout << "CPU type: " << (cpuType == CpuType::OUT_OF_ORDER ? "out-of-order" : "in-order") << "\n";
+        std::cout << "Memory size: " << memorySize << " bytes\n\n";
         
         if (!filename.empty()) {
-            std::cout << "加载程序: " << filename << "\n";
+            std::cout << "Loading program: " << filename << "\n";
             
             // 自动检测文件类型或根据用户指定加载
             bool loadSuccess = false;
             
             if (forceElf || filename.find(".elf") != std::string::npos) {
                 // 尝试加载ELF文件
-                std::cout << "尝试加载ELF文件...\n";
+                std::cout << "Trying ELF loader...\n";
                 loadSuccess = simulator.loadElfProgram(filename);
             } else {
                 // 尝试加载二进制文件
-                std::cout << "尝试加载二进制文件...\n";
+                std::cout << "Trying binary loader...\n";
                 loadSuccess = simulator.loadRiscvProgram(filename, 0x1000);
             }
             
             if (!loadSuccess) {
-                std::cerr << "错误: 无法加载程序文件\n";
+                std::cerr << "Error: failed to load program file\n";
                 return 1;
             }
         } else {
-            std::cout << "未指定程序文件，使用测试模式\n";
+            std::cout << "No program file specified, using test mode\n";
             // TODO: 添加简单的测试程序
         }
         
         if (debugMode) {
-            std::cout << "初始状态:\n";
+            std::cout << "Initial state:\n";
             simulator.dumpState();
         }
         
         if (stepMode) {
-            std::cout << "单步执行模式（按Enter继续，输入q退出）:\n";
+            std::cout << "Step mode (press Enter to continue, input q to quit):\n";
             std::string input;
             
             while (!simulator.isHalted()) {
@@ -223,23 +223,23 @@ int main(int argc, char* argv[]) {
                         simulator.dumpRegisters();
                     }
                 } catch (const SimulatorException& e) {
-                    std::cerr << "执行错误: " << e.what() << "\n";
+                    std::cerr << "Execution error: " << e.what() << "\n";
                     break;
                 }
             }
         } else {
-            std::cout << "运行程序...\n";
+            std::cout << "Running program...\n";
             try {
                 simulator.run();
-                std::cout << "程序执行完成\n";
+                std::cout << "Program finished\n";
             } catch (const SimulatorException& e) {
-                std::cerr << "执行错误: " << e.what() << "\n";
+                std::cerr << "Execution error: " << e.what() << "\n";
             }
         }
         
         // 打印最终状态和统计信息
         if (debugMode) {
-            std::cout << "\n最终状态:\n";
+            std::cout << "\nFinal state:\n";
             simulator.dumpState();
         }
         
@@ -247,7 +247,7 @@ int main(int argc, char* argv[]) {
         
         // 如果使用乱序执行CPU，显示额外的性能统计
         if (cpuType == CpuType::OUT_OF_ORDER) {
-            std::cout << "\n=== 乱序执行性能统计 ===\n";
+            std::cout << "\n=== Out-of-Order Performance Stats ===\n";
             auto stats = simulator.getCpu()->getStats();
             if (!stats.empty()) {
                 uint64_t instructions = 0;
@@ -269,12 +269,12 @@ int main(int argc, char* argv[]) {
                     std::cout << "IPC: " << std::fixed << std::setprecision(2) << ipc << "\n";
                 }
             } else {
-                std::cout << "警告: 无法获取乱序CPU统计信息\n";
+                std::cout << "Warning: failed to get OOO CPU stats\n";
             }
         }
         
     } catch (const std::exception& e) {
-        std::cerr << "错误: " << e.what() << "\n";
+        std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
     

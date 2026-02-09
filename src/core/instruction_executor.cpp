@@ -46,6 +46,14 @@ uint32_t classifyFloat32(uint32_t bits) {
 
     return sign ? (1U << 1) : (1U << 6);  // normal
 }
+
+uint64_t signExtend32To64(uint32_t value) {
+    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(value)));
+}
+
+uint32_t atomicFunct5(const DecodedInstruction& inst) {
+    return (static_cast<uint32_t>(inst.funct7) >> 2U) & 0x1FU;
+}
 }  // namespace
 
 uint64_t InstructionExecutor::executeImmediateOperation(const DecodedInstruction& inst, uint64_t rs1_val) {
@@ -191,6 +199,30 @@ void InstructionExecutor::storeToMemory(std::shared_ptr<Memory> memory, uint64_t
             
         default:
             throw IllegalInstructionException("未知的存储指令功能码");
+    }
+}
+
+uint64_t InstructionExecutor::loadFPFromMemory(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 funct3) {
+    switch (funct3) {
+        case Funct3::LW:  // FLW
+            return memory->readWord(addr);
+        case Funct3::LD:  // FLD
+            return memory->read64(addr);
+        default:
+            throw IllegalInstructionException("未知的浮点加载指令功能码");
+    }
+}
+
+void InstructionExecutor::storeFPToMemory(std::shared_ptr<Memory> memory, uint64_t addr, uint64_t value, Funct3 funct3) {
+    switch (funct3) {
+        case Funct3::SW:  // FSW
+            memory->writeWord(addr, static_cast<uint32_t>(value));
+            break;
+        case Funct3::SD:  // FSD
+            memory->write64(addr, value);
+            break;
+        default:
+            throw IllegalInstructionException("未知的浮点存储指令功能码");
     }
 }
 
@@ -548,6 +580,115 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
     throw IllegalInstructionException("未知的F扩展指令功能码");
 }
 
+InstructionExecutor::FpExecuteResult InstructionExecutor::executeFusedFPOperation(
+    const DecodedInstruction& inst, uint32_t rs1_bits, uint32_t rs2_bits, uint32_t rs3_bits) {
+    FpExecuteResult result{};
+    const float rs1 = bitsToFloat(rs1_bits);
+    const float rs2 = bitsToFloat(rs2_bits);
+    const float rs3 = bitsToFloat(rs3_bits);
+
+    switch (inst.opcode) {
+        case Opcode::FMADD:
+            result.value = floatToBits((rs1 * rs2) + rs3);
+            break;
+        case Opcode::FMSUB:
+            result.value = floatToBits((rs1 * rs2) - rs3);
+            break;
+        case Opcode::FNMSUB:
+            result.value = floatToBits((-(rs1 * rs2)) + rs3);
+            break;
+        case Opcode::FNMADD:
+            result.value = floatToBits((-(rs1 * rs2)) - rs3);
+            break;
+        default:
+            throw IllegalInstructionException("未知的浮点融合乘加指令");
+    }
+
+    result.write_fp_reg = true;
+    return result;
+}
+
+InstructionExecutor::AtomicExecuteResult InstructionExecutor::executeAtomicOperation(
+    const DecodedInstruction& inst, uint64_t memory_value, uint64_t rs2_value, bool reservation_hit) {
+    AtomicExecuteResult result{};
+    if (inst.opcode != Opcode::AMO) {
+        throw IllegalInstructionException("非A扩展指令");
+    }
+
+    const uint32_t funct5 = atomicFunct5(inst);
+    if (inst.funct3 != Funct3::LW && inst.funct3 != Funct3::LD) {
+        throw IllegalInstructionException("A扩展仅支持W/D宽度");
+    }
+
+    const bool is_word = (inst.funct3 == Funct3::LW);
+    const uint64_t old_value = is_word ? signExtend32To64(static_cast<uint32_t>(memory_value)) : memory_value;
+    result.rd_value = old_value;
+
+    const uint64_t rs2_width_value = is_word ? static_cast<uint64_t>(static_cast<uint32_t>(rs2_value)) : rs2_value;
+    const uint64_t old_width_value = is_word ? static_cast<uint64_t>(static_cast<uint32_t>(memory_value)) : memory_value;
+
+    const int64_t old_signed = is_word
+        ? static_cast<int64_t>(static_cast<int32_t>(old_width_value))
+        : static_cast<int64_t>(old_width_value);
+    const int64_t rs2_signed = is_word
+        ? static_cast<int64_t>(static_cast<int32_t>(rs2_width_value))
+        : static_cast<int64_t>(rs2_width_value);
+
+    switch (funct5) {
+        case 0x02:  // LR.W/LR.D
+            result.acquire_reservation = true;
+            return result;
+        case 0x03:  // SC.W/SC.D
+            result.release_reservation = true;
+            if (reservation_hit) {
+                result.rd_value = 0;
+                result.store_value = rs2_width_value;
+                result.do_store = true;
+            } else {
+                result.rd_value = 1;
+                result.do_store = false;
+            }
+            return result;
+        case 0x01:  // AMOSWAP
+            result.store_value = rs2_width_value;
+            break;
+        case 0x00:  // AMOADD
+            result.store_value = old_width_value + rs2_width_value;
+            break;
+        case 0x04:  // AMOXOR
+            result.store_value = old_width_value ^ rs2_width_value;
+            break;
+        case 0x0C:  // AMOAND
+            result.store_value = old_width_value & rs2_width_value;
+            break;
+        case 0x08:  // AMOOR
+            result.store_value = old_width_value | rs2_width_value;
+            break;
+        case 0x10:  // AMOMIN
+            result.store_value = (old_signed < rs2_signed) ? old_width_value : rs2_width_value;
+            break;
+        case 0x14:  // AMOMAX
+            result.store_value = (old_signed > rs2_signed) ? old_width_value : rs2_width_value;
+            break;
+        case 0x18:  // AMOMINU
+            result.store_value = (old_width_value < rs2_width_value) ? old_width_value : rs2_width_value;
+            break;
+        case 0x1C:  // AMOMAXU
+            result.store_value = (old_width_value > rs2_width_value) ? old_width_value : rs2_width_value;
+            break;
+        default:
+            throw IllegalInstructionException("未知的A扩展funct5");
+    }
+
+    if (is_word) {
+        result.store_value = static_cast<uint64_t>(static_cast<uint32_t>(result.store_value));
+    }
+
+    result.do_store = true;
+    result.release_reservation = true;
+    return result;
+}
+
 bool InstructionExecutor::isFPIntegerDestination(const DecodedInstruction& inst) {
     const auto funct7_raw = static_cast<uint8_t>(inst.funct7);
     if (funct7_raw == 0x50 || funct7_raw == 0x51 || funct7_raw == 0x52) {
@@ -561,6 +702,21 @@ bool InstructionExecutor::isFPIntegerDestination(const DecodedInstruction& inst)
         return true;  // FMV.X.W / FCLASS.S
     }
     return false;
+}
+
+bool InstructionExecutor::isFloatingPointInstruction(const DecodedInstruction& inst) {
+    switch (inst.opcode) {
+        case Opcode::OP_FP:
+        case Opcode::LOAD_FP:
+        case Opcode::STORE_FP:
+        case Opcode::FMADD:
+        case Opcode::FMSUB:
+        case Opcode::FNMSUB:
+        case Opcode::FNMADD:
+            return true;
+        default:
+            return false;
+    }
 }
 
 int32_t InstructionExecutor::signExtend(uint32_t value, int bits) {

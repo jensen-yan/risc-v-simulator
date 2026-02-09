@@ -26,6 +26,14 @@ public:
         bool write_fp_reg = false;
     };
 
+    struct AtomicExecuteResult {
+        uint64_t rd_value = 0;
+        uint64_t store_value = 0;
+        bool do_store = false;
+        bool acquire_reservation = false;
+        bool release_reservation = false;
+    };
+
     // 基本算术运算
     static uint64_t executeImmediateOperation(const DecodedInstruction& inst, uint64_t rs1_val);
     static uint64_t executeRegisterOperation(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val);
@@ -52,7 +60,18 @@ public:
     static uint32_t executeFPExtension(const DecodedInstruction& inst, float rs1_val, float rs2_val);
     static FpExecuteResult executeFPOperation(const DecodedInstruction& inst, uint32_t rs1_bits,
                                               uint32_t rs2_bits, uint64_t rs1_int);
+    static FpExecuteResult executeFusedFPOperation(const DecodedInstruction& inst, uint32_t rs1_bits,
+                                                   uint32_t rs2_bits, uint32_t rs3_bits);
     static bool isFPIntegerDestination(const DecodedInstruction& inst);
+    static bool isFloatingPointInstruction(const DecodedInstruction& inst);
+
+    // 浮点访存（按位搬运）
+    static uint64_t loadFPFromMemory(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 funct3);
+    static void storeFPToMemory(std::shared_ptr<Memory> memory, uint64_t addr, uint64_t value, Funct3 funct3);
+
+    // A扩展
+    static AtomicExecuteResult executeAtomicOperation(const DecodedInstruction& inst, uint64_t memory_value,
+                                                      uint64_t rs2_value, bool reservation_hit);
     
     // RV64I 32位算术运算
     static uint64_t executeImmediateOperation32(const DecodedInstruction& inst, uint64_t rs1_val);

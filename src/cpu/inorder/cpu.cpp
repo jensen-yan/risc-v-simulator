@@ -11,8 +11,9 @@ namespace riscv {
 CPU::CPU(std::shared_ptr<Memory> memory) 
     : memory_(memory), pc_(0), halted_(false), instruction_count_(0), 
       enabled_extensions_(static_cast<uint32_t>(Extension::I) | static_cast<uint32_t>(Extension::M) | 
-                         static_cast<uint32_t>(Extension::F) | static_cast<uint32_t>(Extension::C)),
-      last_instruction_compressed_(false) {
+                         static_cast<uint32_t>(Extension::A) | static_cast<uint32_t>(Extension::F) |
+                         static_cast<uint32_t>(Extension::C)),
+      last_instruction_compressed_(false), reservation_valid_(false), reservation_addr_(0) {
     // 初始化寄存器，x0寄存器始终为0
     registers_.fill(0);
     fp_registers_.fill(0);
@@ -140,6 +141,8 @@ void CPU::reset() {
     pc_ = 0;
     halted_ = false;
     instruction_count_ = 0;
+    reservation_valid_ = false;
+    reservation_addr_ = 0;
 }
 
 uint64_t CPU::getRegister(RegNum reg) const {
@@ -279,6 +282,11 @@ void CPU::executeJALR(const DecodedInstruction& inst) {
 }
 
 void CPU::executeRType(const DecodedInstruction& inst) {
+    if (inst.opcode == Opcode::AMO) {
+        executeAtomicExtension(inst);
+        return;
+    }
+
     // 检查是否为M扩展指令
     if ((inst.opcode == Opcode::OP || inst.opcode == Opcode::OP_32) &&
         inst.funct7 == Funct7::M_EXT) {
@@ -287,7 +295,7 @@ void CPU::executeRType(const DecodedInstruction& inst) {
     }
     
     // 检查是否为F扩展指令
-    if (inst.opcode == Opcode::OP_FP) {
+    if (InstructionExecutor::isFloatingPointInstruction(inst)) {
         executeFPExtension(inst);
         return;
     }
@@ -324,6 +332,13 @@ void CPU::executeIType(const DecodedInstruction& inst) {
             executeLoadOperations(inst);
             incrementPC();
             break;
+        case Opcode::LOAD_FP: {
+            uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+            uint64_t value = InstructionExecutor::loadFPFromMemory(memory_, addr, inst.funct3);
+            setFPRegister(inst.rd, value);
+            incrementPC();
+            break;
+        }
         case Opcode::JALR:
             executeJALR(inst);
             break;
@@ -341,6 +356,13 @@ void CPU::executeSType(const DecodedInstruction& inst) {
         uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
         uint64_t value = getRegister(inst.rs2);
         InstructionExecutor::storeToMemory(memory_, addr, value, inst.funct3);
+        reservation_valid_ = false;
+        incrementPC();
+    } else if (inst.opcode == Opcode::STORE_FP) {
+        uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+        uint64_t value = getFPRegister(inst.rs2);
+        InstructionExecutor::storeFPToMemory(memory_, addr, value, inst.funct3);
+        reservation_valid_ = false;
         incrementPC();
     } else {
         throw IllegalInstructionException("不支持的S-type指令");
@@ -456,11 +478,23 @@ void CPU::executeMExtension(const DecodedInstruction& inst) {
 }
 
 void CPU::executeFPExtension(const DecodedInstruction& inst) {
-    const auto fp_result = InstructionExecutor::executeFPOperation(
-        inst,
-        static_cast<uint32_t>(getFPRegister(inst.rs1)),
-        static_cast<uint32_t>(getFPRegister(inst.rs2)),
-        getRegister(inst.rs1));
+    InstructionExecutor::FpExecuteResult fp_result;
+    if (inst.opcode == Opcode::FMADD ||
+        inst.opcode == Opcode::FMSUB ||
+        inst.opcode == Opcode::FNMSUB ||
+        inst.opcode == Opcode::FNMADD) {
+        fp_result = InstructionExecutor::executeFusedFPOperation(
+            inst,
+            static_cast<uint32_t>(getFPRegister(inst.rs1)),
+            static_cast<uint32_t>(getFPRegister(inst.rs2)),
+            static_cast<uint32_t>(getFPRegister(inst.rs3)));
+    } else {
+        fp_result = InstructionExecutor::executeFPOperation(
+            inst,
+            static_cast<uint32_t>(getFPRegister(inst.rs1)),
+            static_cast<uint32_t>(getFPRegister(inst.rs2)),
+            getRegister(inst.rs1));
+    }
 
     if (fp_result.write_int_reg) {
         setRegister(inst.rd, fp_result.value);
@@ -468,6 +502,44 @@ void CPU::executeFPExtension(const DecodedInstruction& inst) {
         setFPRegister(inst.rd, static_cast<uint32_t>(fp_result.value));
     }
 
+    incrementPC();
+}
+
+void CPU::executeAtomicExtension(const DecodedInstruction& inst) {
+    const uint64_t addr = getRegister(inst.rs1);
+    uint64_t memory_value = 0;
+    switch (inst.funct3) {
+        case Funct3::LW:
+            memory_value = memory_->readWord(addr);
+            break;
+        case Funct3::LD:
+            memory_value = memory_->read64(addr);
+            break;
+        default:
+            throw IllegalInstructionException("A扩展仅支持W/D宽度");
+    }
+
+    const bool reservation_hit = reservation_valid_ && (reservation_addr_ == addr);
+    const auto amo_result = InstructionExecutor::executeAtomicOperation(
+        inst, memory_value, getRegister(inst.rs2), reservation_hit);
+
+    if (amo_result.acquire_reservation) {
+        reservation_valid_ = true;
+        reservation_addr_ = addr;
+    }
+    if (amo_result.release_reservation) {
+        reservation_valid_ = false;
+    }
+
+    if (amo_result.do_store) {
+        if (inst.funct3 == Funct3::LW) {
+            memory_->writeWord(addr, static_cast<uint32_t>(amo_result.store_value));
+        } else {
+            memory_->write64(addr, amo_result.store_value);
+        }
+    }
+
+    setRegister(inst.rd, amo_result.rd_value);
     incrementPC();
 }
 

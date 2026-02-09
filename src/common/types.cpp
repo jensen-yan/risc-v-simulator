@@ -9,7 +9,7 @@ void DecodedInstruction::initialize_execution_properties() {
     decode_exception_msg.clear();
     
     // 初始化内存访问属性
-    if (opcode == Opcode::LOAD) {
+    if (opcode == Opcode::LOAD || opcode == Opcode::LOAD_FP) {
         // 根据funct3确定加载指令的访问大小和符号扩展
         switch (funct3) {
             case static_cast<Funct3>(0): // LB
@@ -48,8 +48,22 @@ void DecodedInstruction::initialize_execution_properties() {
                 decode_exception_msg = "非法的Load指令funct3值: " + std::to_string(static_cast<int>(funct3));
                 break;
         }
+
+        if (opcode == Opcode::LOAD_FP) {
+            if (funct3 == static_cast<Funct3>(2)) {       // FLW
+                memory_access_size = 4;
+            } else if (funct3 == static_cast<Funct3>(3)) { // FLD
+                memory_access_size = 8;
+            } else {
+                memory_access_size = 0;
+                has_decode_exception = true;
+                decode_exception_msg = "非法的LOAD_FP funct3: " + std::to_string(static_cast<int>(funct3));
+            }
+            is_signed_load = false; // 浮点加载是按位搬运，不做符号扩展
+        }
+
         execution_cycles = 2; // 加载指令需要2个周期
-    } else if (opcode == Opcode::STORE) {
+    } else if (opcode == Opcode::STORE || opcode == Opcode::STORE_FP) {
         // 根据funct3确定存储指令的访问大小
         switch (funct3) {
             case static_cast<Funct3>(0): // SB
@@ -71,6 +85,19 @@ void DecodedInstruction::initialize_execution_properties() {
                 decode_exception_msg = "非法的Store指令funct3值: " + std::to_string(static_cast<int>(funct3));
                 break;
         }
+
+        if (opcode == Opcode::STORE_FP) {
+            if (funct3 == static_cast<Funct3>(2)) {       // FSW
+                memory_access_size = 4;
+            } else if (funct3 == static_cast<Funct3>(3)) { // FSD
+                memory_access_size = 8;
+            } else {
+                memory_access_size = 0;
+                has_decode_exception = true;
+                decode_exception_msg = "非法的STORE_FP funct3: " + std::to_string(static_cast<int>(funct3));
+            }
+        }
+
         is_signed_load = false; // 存储指令不涉及符号扩展
         execution_cycles = 1;   // 存储指令需要1个周期
     } else {

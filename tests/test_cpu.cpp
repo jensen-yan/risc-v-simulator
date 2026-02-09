@@ -34,6 +34,28 @@ protected:
         inst |= (static_cast<uint32_t>(funct7) & 0x7F) << 25;   // funct7 [31:25]
         return inst;
     }
+
+    uint32_t createR4Type(Opcode opcode, RegNum rd, RegNum rs1, RegNum rs2, RegNum rs3, uint8_t rm) {
+        uint32_t inst = 0;
+        inst |= static_cast<uint32_t>(opcode) & 0x7F;           // opcode [6:0]
+        inst |= (rd & 0x1F) << 7;                               // rd [11:7]
+        inst |= (rm & 0x7) << 12;                               // rm [14:12]
+        inst |= (rs1 & 0x1F) << 15;                             // rs1 [19:15]
+        inst |= (rs2 & 0x1F) << 20;                             // rs2 [24:20]
+        inst |= (rs3 & 0x1F) << 27;                             // rs3 [31:27]
+        return inst;
+    }
+
+    uint32_t createAMOType(Opcode opcode, RegNum rd, RegNum rs1, RegNum rs2, Funct3 funct3, uint8_t funct5) {
+        uint32_t inst = 0;
+        inst |= static_cast<uint32_t>(opcode) & 0x7F;           // opcode [6:0]
+        inst |= (rd & 0x1F) << 7;                               // rd [11:7]
+        inst |= (static_cast<uint32_t>(funct3) & 0x7) << 12;    // funct3 [14:12]
+        inst |= (rs1 & 0x1F) << 15;                             // rs1 [19:15]
+        inst |= (rs2 & 0x1F) << 20;                             // rs2 [24:20]
+        inst |= (funct5 & 0x1F) << 27;                          // funct5 [31:27]
+        return inst;
+    }
     
     // 辅助方法：创建S-Type指令
     uint32_t createSType(Opcode opcode, RegNum rs1, RegNum rs2, int32_t imm, Funct3 funct3) {
@@ -340,6 +362,67 @@ TEST_F(CPUTest, LoadStore_Combined) {
     // 0x9876FEDC 作为有符号数为负数，需要符号扩展到64位
     EXPECT_EQ(cpu->getRegister(3), 0xFFFFFFFF9876FEDCULL);
     EXPECT_EQ(cpu->getRegister(2), 0);  // x2应该保持为0
+}
+
+TEST_F(CPUTest, AtomicAddWordInstruction) {
+    cpu->setRegister(1, 128);   // address
+    cpu->setRegister(2, 5);     // add value
+    memory->writeWord(128, 10); // old memory value
+
+    uint32_t inst = createAMOType(Opcode::AMO, 3, 1, 2, Funct3::LW, 0x00); // AMOADD.W
+    memory->writeWord(0, inst);
+
+    cpu->step();
+
+    EXPECT_EQ(cpu->getRegister(3), 10);
+    EXPECT_EQ(memory->readWord(128), 15u);
+}
+
+TEST_F(CPUTest, LrScWordInstruction) {
+    cpu->setRegister(1, 132);    // address
+    cpu->setRegister(2, 0x22);   // SC store value
+    memory->writeWord(132, 0x11);
+
+    uint32_t lr = createAMOType(Opcode::AMO, 5, 1, 0, Funct3::LW, 0x02); // LR.W
+    uint32_t sc = createAMOType(Opcode::AMO, 6, 1, 2, Funct3::LW, 0x03); // SC.W
+    memory->writeWord(0, lr);
+    memory->writeWord(4, sc);
+
+    cpu->step();
+    cpu->step();
+
+    EXPECT_EQ(cpu->getRegister(5), 0x11);
+    EXPECT_EQ(cpu->getRegister(6), 0);
+    EXPECT_EQ(memory->readWord(132), 0x22u);
+}
+
+TEST_F(CPUTest, FloatingLoadStoreWordInstruction) {
+    cpu->setRegister(1, 256);
+    memory->writeWord(256, 0x3F800000); // 1.0f
+
+    uint32_t flw = createIType(Opcode::LOAD_FP, 2, 1, 0, Funct3::LW);
+    uint32_t fsw = createSType(Opcode::STORE_FP, 1, 2, 4, Funct3::SW);
+    memory->writeWord(0, flw);
+    memory->writeWord(4, fsw);
+
+    cpu->step();
+    cpu->step();
+
+    EXPECT_EQ(cpu->getFPRegister(2), 0x3F800000u);
+    EXPECT_EQ(memory->readWord(260), 0x3F800000u);
+}
+
+TEST_F(CPUTest, FmaddSingleInstruction) {
+    cpu->setFPRegister(1, 0x3FC00000u); // 1.5f
+    cpu->setFPRegister(2, 0x40000000u); // 2.0f
+    cpu->setFPRegister(3, 0x3F000000u); // 0.5f
+
+    uint32_t fmadd = createR4Type(Opcode::FMADD, 4, 1, 2, 3, 0);
+    memory->writeWord(0, fmadd);
+
+    cpu->step();
+
+    EXPECT_EQ(cpu->getFPRegister(4), 0x40600000u); // 3.5f
 }
 
 TEST_F(CPUTest, LUI_Instruction) {

@@ -69,6 +69,15 @@ enum class Opcode : uint8_t {
     
     // 浮点运算指令 (F/D扩展)
     OP_FP       = 0b1010011,    // 浮点运算指令
+    LOAD_FP     = 0b0000111,    // FLW/FLD
+    STORE_FP    = 0b0100111,    // FSW/FSD
+    FMADD       = 0b1000011,    // FMADD.S/FMADD.D
+    FMSUB       = 0b1000111,    // FMSUB.S/FMSUB.D
+    FNMSUB      = 0b1001011,    // FNMSUB.S/FNMSUB.D
+    FNMADD      = 0b1001111,    // FNMADD.S/FNMADD.D
+    
+    // 原子操作
+    AMO         = 0b0101111,    // LR/SC/AMO*
     
     // 同步指令
     MISC_MEM    = 0b0001111,    // FENCE指令

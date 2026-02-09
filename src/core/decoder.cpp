@@ -127,15 +127,22 @@ InstructionType Decoder::determineType(Opcode opcode) {
     switch (opcode) {
         case Opcode::OP:
         case Opcode::OP_FP:
+        case Opcode::AMO:
+        case Opcode::FMADD:
+        case Opcode::FMSUB:
+        case Opcode::FNMSUB:
+        case Opcode::FNMADD:
         case Opcode::OP_32:      // RV64I: 32位算术运算
             return InstructionType::R_TYPE;
         case Opcode::OP_IMM:
         case Opcode::OP_IMM_32:  // RV64I: 32位立即数运算
         case Opcode::LOAD:
+        case Opcode::LOAD_FP:
         case Opcode::JALR:
         case Opcode::MISC_MEM:
             return InstructionType::I_TYPE;
         case Opcode::STORE:
+        case Opcode::STORE_FP:
             return InstructionType::S_TYPE;
         case Opcode::BRANCH:
             return InstructionType::B_TYPE;
@@ -160,9 +167,22 @@ void Decoder::validateInstruction(const DecodedInstruction& decoded, uint32_t en
     }
     
     // 检查F扩展指令
-    if (decoded.opcode == Opcode::OP_FP) {
+    if (decoded.opcode == Opcode::OP_FP ||
+        decoded.opcode == Opcode::LOAD_FP ||
+        decoded.opcode == Opcode::STORE_FP ||
+        decoded.opcode == Opcode::FMADD ||
+        decoded.opcode == Opcode::FMSUB ||
+        decoded.opcode == Opcode::FNMSUB ||
+        decoded.opcode == Opcode::FNMADD) {
         if (!isExtensionEnabled(enabled_extensions, Extension::F)) {
             throw IllegalInstructionException("F扩展指令未启用");
+        }
+    }
+
+    // 检查A扩展指令
+    if (decoded.opcode == Opcode::AMO) {
+        if (!isExtensionEnabled(enabled_extensions, Extension::A)) {
+            throw IllegalInstructionException("A扩展指令未启用");
         }
     }
     
@@ -231,6 +251,19 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                     decoded.imm = static_cast<int32_t>(imm);
                     break;
                 }
+                case 0x03: { // C.LD (RV64C)
+                    decoded.opcode = Opcode::LOAD;
+                    decoded.type = InstructionType::I_TYPE;
+                    decoded.funct3 = Funct3::LD;
+                    decoded.rd = 8 + ((instruction >> 2) & 0x07); // x8-x15
+                    decoded.rs1 = 8 + ((instruction >> 7) & 0x07); // x8-x15
+                    // uimm[5:3|7:6]
+                    uint32_t uimm_5_3 = (instruction >> 10) & 0x7;
+                    uint32_t uimm_7_6 = (instruction >> 5) & 0x3;
+                    uint32_t imm = (uimm_7_6 << 6) | (uimm_5_3 << 3);
+                    decoded.imm = static_cast<int32_t>(imm);
+                    break;
+                }
                 case 0x06: { // C.SW
                     decoded.opcode = Opcode::STORE;
                     decoded.type = InstructionType::S_TYPE;
@@ -242,6 +275,19 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                     uint32_t uimm_6 = (instruction >> 5) & 0x1;     // bit[5] -> uimm[6]
                     uint32_t uimm_2 = (instruction >> 6) & 0x1;     // bit[6] -> uimm[2]
                     uint32_t imm = (uimm_6 << 6) | (uimm_5_3 << 3) | (uimm_2 << 2);
+                    decoded.imm = static_cast<int32_t>(imm);
+                    break;
+                }
+                case 0x07: { // C.SD (RV64C)
+                    decoded.opcode = Opcode::STORE;
+                    decoded.type = InstructionType::S_TYPE;
+                    decoded.funct3 = Funct3::SD;
+                    decoded.rs2 = 8 + ((instruction >> 2) & 0x07); // x8-x15
+                    decoded.rs1 = 8 + ((instruction >> 7) & 0x07); // x8-x15
+                    // uimm[5:3|7:6]
+                    uint32_t uimm_5_3 = (instruction >> 10) & 0x7;
+                    uint32_t uimm_7_6 = (instruction >> 5) & 0x3;
+                    uint32_t imm = (uimm_7_6 << 6) | (uimm_5_3 << 3);
                     decoded.imm = static_cast<int32_t>(imm);
                     break;
                 }
@@ -365,30 +411,39 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                     } else { // funct2 == 0x03: C.SUB, C.XOR, C.OR, C.AND
                         uint8_t rs2 = 8 + ((instruction >> 2) & 0x07); // x8-x15
                         uint8_t funct2_low = (instruction >> 5) & 0x03; // 位[6:5]
+                        uint8_t bit12 = (instruction >> 12) & 0x01;
                         
-                        decoded.opcode = Opcode::OP;
-                        decoded.type = InstructionType::R_TYPE;
                         decoded.rd = rs1_rd;
                         decoded.rs1 = rs1_rd;
                         decoded.rs2 = rs2;
-                        
-                        switch (funct2_low) {
-                            case 0x00: // C.SUB (100011 rd' 00 rs2' 01)
-                                decoded.funct3 = Funct3::ADD_SUB;
-                                decoded.funct7 = Funct7::SUB_SRA;
-                                break;
-                            case 0x01: // C.XOR (100011 rd' 01 rs2' 01)
-                                decoded.funct3 = Funct3::XOR;
-                                decoded.funct7 = Funct7::NORMAL;
-                                break;
-                            case 0x02: // C.OR (100011 rd' 10 rs2' 01)
-                                decoded.funct3 = Funct3::OR;
-                                decoded.funct7 = Funct7::NORMAL;
-                                break;
-                            case 0x03: // C.AND (100011 rd' 11 rs2' 01)
-                                decoded.funct3 = Funct3::AND;
-                                decoded.funct7 = Funct7::NORMAL;
-                                break;
+
+                        if (bit12 == 1 && (funct2_low == 0x00 || funct2_low == 0x01)) {
+                            // RV64C: C.SUBW / C.ADDW
+                            decoded.opcode = Opcode::OP_32;
+                            decoded.type = InstructionType::R_TYPE;
+                            decoded.funct3 = Funct3::ADD_SUB;
+                            decoded.funct7 = (funct2_low == 0x00) ? Funct7::SUB_SRA : Funct7::NORMAL;
+                        } else {
+                            decoded.opcode = Opcode::OP;
+                            decoded.type = InstructionType::R_TYPE;
+                            switch (funct2_low) {
+                                case 0x00: // C.SUB
+                                    decoded.funct3 = Funct3::ADD_SUB;
+                                    decoded.funct7 = Funct7::SUB_SRA;
+                                    break;
+                                case 0x01: // C.XOR
+                                    decoded.funct3 = Funct3::XOR;
+                                    decoded.funct7 = Funct7::NORMAL;
+                                    break;
+                                case 0x02: // C.OR
+                                    decoded.funct3 = Funct3::OR;
+                                    decoded.funct7 = Funct7::NORMAL;
+                                    break;
+                                case 0x03: // C.AND
+                                    decoded.funct3 = Funct3::AND;
+                                    decoded.funct7 = Funct7::NORMAL;
+                                    break;
+                            }
                         }
                     }
                     break;
@@ -480,6 +535,34 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                     uint32_t uimm_7_6 = (instruction >> 7) & 0x3;  // bit[8:7] -> uimm[7:6]
                     uint32_t imm = (uimm_7_6 << 6) | (uimm_5_2 << 2);
                     decoded.imm = imm;
+                    break;
+                }
+                case 0x03: { // C.LDSP (RV64C)
+                    decoded.opcode = Opcode::LOAD;
+                    decoded.type = InstructionType::I_TYPE;
+                    decoded.funct3 = Funct3::LD;
+                    decoded.rd = (instruction >> 7) & 0x1F;
+                    if (decoded.rd == 0) {
+                        throw IllegalInstructionException("C.LDSP with rd=x0 is illegal");
+                    }
+                    decoded.rs1 = 2; // x2 (sp)
+                    // uimm[5|4:3|8:6]
+                    uint32_t imm = ((instruction >> 7) & 0x38) |  // uimm[8:6]
+                                   ((instruction >> 10) & 0x18) | // uimm[4:3]
+                                   ((instruction >> 2) & 0x20);   // uimm[5]
+                    decoded.imm = static_cast<int32_t>(imm);
+                    break;
+                }
+                case 0x07: { // C.SDSP (RV64C)
+                    decoded.opcode = Opcode::STORE;
+                    decoded.type = InstructionType::S_TYPE;
+                    decoded.funct3 = Funct3::SD;
+                    decoded.rs2 = (instruction >> 2) & 0x1F;
+                    decoded.rs1 = 2; // x2 (sp)
+                    // uimm[5:3|8:6]
+                    uint32_t imm = ((instruction >> 10) & 0x38) | // uimm[5:3]
+                                   ((instruction >> 7) & 0x1C0);  // uimm[8:6]
+                    decoded.imm = static_cast<int32_t>(imm);
                     break;
                 }
                 case 0x04: { // C.JR, C.MV, C.JALR, C.ADD, C.EBREAK

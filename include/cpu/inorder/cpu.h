@@ -78,6 +78,8 @@ private:
     uint64_t instruction_count_;    // 指令计数器
     uint32_t enabled_extensions_;   // 启用的扩展
     bool last_instruction_compressed_; // 上一条指令是否为压缩指令
+    bool reservation_valid_;        // LR/SC 预留标志
+    uint64_t reservation_addr_;     // LR 预留地址
     
     // 指令执行方法
     void executeRType(const DecodedInstruction& inst);
@@ -91,6 +93,7 @@ private:
     // 扩展指令执行方法
     void executeMExtension(const DecodedInstruction& inst);
     void executeFPExtension(const DecodedInstruction& inst);
+    void executeAtomicExtension(const DecodedInstruction& inst);
     
     // I-Type指令子方法
     void executeImmediateOperations(const DecodedInstruction& inst);

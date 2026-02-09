@@ -42,7 +42,7 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory), 
     writeback_stage_ = std::make_unique<WritebackStage>();
     commit_stage_ = std::make_unique<CommitStage>();
     
-    std::cout << "乱序执行CPU初始化完成（新流水线设计），DiffTest将由Simulator设置" << std::endl;
+    LOGI(SYSTEM, "ooo cpu initialized (new pipeline), difftest will be configured by simulator");
 }
 
 OutOfOrderCPU::~OutOfOrderCPU() = default;
@@ -124,7 +124,7 @@ void OutOfOrderCPU::reset() {
         difftest_->reset();
     }
     
-    std::cout << "乱序执行CPU重置完成" << std::endl;
+    LOGI(SYSTEM, "ooo cpu reset completed");
 }
 
 uint64_t OutOfOrderCPU::get_physical_register_value(PhysRegNum reg) const {
@@ -188,7 +188,7 @@ void OutOfOrderCPU::setFPRegisterFloat(RegNum reg, float value) {
 }
 
 void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint64_t pc) {
-    std::cerr << "异常: " << exception_msg << ", PC=0x" << std::hex << pc << std::dec << std::endl;
+    LOGE(SYSTEM, "exception: %s, pc=0x%" PRIx64, exception_msg.c_str(), pc);
     flush_pipeline();
     cpu_state_.halted = true;
 }
@@ -232,7 +232,7 @@ void OutOfOrderCPU::handleEcall() {
 }
 
 void OutOfOrderCPU::handleEbreak() {
-    std::cout << "遇到断点指令，停止执行" << std::endl;
+    LOGI(SYSTEM, "ebreak encountered, halt cpu");
     cpu_state_.halted = true;
 }
 
@@ -250,15 +250,15 @@ int32_t OutOfOrderCPU::signExtend(uint32_t value, int bits) const {
 
 ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
     return {
-        {"instructions", cpu_state_.instruction_count, "指令数"},
-        {"cycles", cpu_state_.cycle_count, "周期数"},
-        {"branch_mispredicts", cpu_state_.branch_mispredicts, "分支预测错误次数"},
-        {"pipeline_stalls", cpu_state_.pipeline_stalls, "流水线停顿次数"},
+        {"instructions", cpu_state_.instruction_count, "Retired instruction count"},
+        {"cycles", cpu_state_.cycle_count, "Elapsed cycles"},
+        {"branch_mispredicts", cpu_state_.branch_mispredicts, "Branch mispredict count"},
+        {"pipeline_stalls", cpu_state_.pipeline_stalls, "Pipeline stall count"},
     };
 }
 
 void OutOfOrderCPU::dumpRegisters() const {
-    std::cout << "架构寄存器状态:" << std::endl;
+    std::cout << "Architectural Registers:" << std::endl;
     for (int i = 0; i < NUM_REGISTERS; i += 4) {
         for (int j = 0; j < 4 && i + j < NUM_REGISTERS; ++j) {
             std::cout << "x" << std::setw(2) << (i + j) << ": 0x" 
@@ -271,13 +271,13 @@ void OutOfOrderCPU::dumpRegisters() const {
 }
 
 void OutOfOrderCPU::dumpState() const {
-    std::cout << "乱序执行CPU状态:" << std::endl;
+    std::cout << "Out-of-Order CPU State:" << std::endl;
     std::cout << "PC: 0x" << std::hex << cpu_state_.pc << std::dec << std::endl;
-    std::cout << "指令计数: " << cpu_state_.instruction_count << std::endl;
-    std::cout << "周期计数: " << cpu_state_.cycle_count << std::endl;
-    std::cout << "停机状态: " << (cpu_state_.halted ? "是" : "否") << std::endl;
-    std::cout << "分支预测错误: " << cpu_state_.branch_mispredicts << std::endl;
-    std::cout << "流水线停顿: " << cpu_state_.pipeline_stalls << std::endl;
+    std::cout << "Instructions: " << cpu_state_.instruction_count << std::endl;
+    std::cout << "Cycles: " << cpu_state_.cycle_count << std::endl;
+    std::cout << "Halted: " << (cpu_state_.halted ? "yes" : "no") << std::endl;
+    std::cout << "Branch Mispredicts: " << cpu_state_.branch_mispredicts << std::endl;
+    std::cout << "Pipeline Stalls: " << cpu_state_.pipeline_stalls << std::endl;
     
     if (cpu_state_.cycle_count > 0) {
         double ipc = static_cast<double>(cpu_state_.instruction_count) / cpu_state_.cycle_count;
@@ -288,7 +288,7 @@ void OutOfOrderCPU::dumpState() const {
 }
 
 void OutOfOrderCPU::dumpPipelineState() const {
-    std::cout << "\\n=== 乱序执行流水线状态 ===" << std::endl;
+    std::cout << "\\n=== Out-of-Order Pipeline State ===" << std::endl;
     
     // 显示ROB状态
     cpu_state_.reorder_buffer->dump_reorder_buffer();
@@ -302,21 +302,21 @@ void OutOfOrderCPU::dumpPipelineState() const {
     // 显示执行单元状态
     cpu_state_.reservation_station->dump_execution_units();
     
-    std::cout << "取指缓冲区大小: " << cpu_state_.fetch_buffer.size() << std::endl;
-    std::cout << "CDB队列大小: " << cpu_state_.cdb_queue.size() << std::endl;
+    std::cout << "Fetch Buffer Size: " << cpu_state_.fetch_buffer.size() << std::endl;
+    std::cout << "CDB Queue Size: " << cpu_state_.cdb_queue.size() << std::endl;
 }
 
 
 
 void OutOfOrderCPU::setDiffTest(DiffTest* difftest) {
     difftest_ = difftest;
-    std::cout << "[OutOfOrderCPU] DiffTest已设置" << std::endl;
+    LOGI(DIFFTEST, "difftest attached to ooo cpu");
 }
 
 void OutOfOrderCPU::enableDiffTest(bool enable) {
     if (difftest_) {
         difftest_->setEnabled(enable);
-        std::cout << "[OutOfOrderCPU] DiffTest " << (enable ? "启用" : "禁用") << std::endl;
+        LOGI(DIFFTEST, "difftest %s", enable ? "enabled" : "disabled");
     }
 }
 
@@ -338,7 +338,7 @@ void OutOfOrderCPU::performDiffTestWithCommittedPC(uint64_t committed_pc) {
         // 执行参考CPU一步并比较状态，使用提交指令的PC
         bool match = difftest_->stepAndCompareWithCommittedPC(this, committed_pc);
         if (!match) {
-            dprintf(DIFFTEST, "DiffTest检测到状态不一致！");
+            LOGE(DIFFTEST, "difftest detected mismatch");
             exit(1);
         }
     }

@@ -20,7 +20,7 @@ void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64
     entry.value = value;
     entry.size = size;
     
-    dprintf(EXECUTE, "Store Buffer添加条目[%d]: 地址=0x%" PRIx64 ", 值=0x%" PRIx64 ", 大小=%d, Inst#%" PRId64 ", PC=0x%" PRIx64, 
+    LOGT(EXECUTE, "store buffer add[%d]: addr=0x%" PRIx64 ", value=0x%" PRIx64 ", size=%d, inst=%" PRId64 ", pc=0x%" PRIx64,
             next_allocate_index, address, value, size, instruction->get_instruction_id(), instruction->get_pc());
     
     // 移动到下一个分配位置（循环）
@@ -41,7 +41,7 @@ bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_
             // 如果完全匹配，可以直接转发
             if (entry.address == address && entry.size == size) {
                 result_value = entry.value;
-                dprintf(EXECUTE, "Store-to-Load Forwarding: 完全匹配 地址=0x%" PRIx64 ", 大小=%d, 转发值=0x%" PRIx64 " (来自Inst#%" PRId64 ")", 
+                LOGT(EXECUTE, "store-to-load forwarding full match: addr=0x%" PRIx64 ", size=%d, value=0x%" PRIx64 " (inst=%" PRId64 ")",
                         address, size, result_value, entry.instruction->get_instruction_id());
                 return true;
             }
@@ -49,12 +49,12 @@ bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_
             // 部分重叠的情况 - 需要提取正确的数据
             if (can_extract_load_data(entry, address, size)) {
                 result_value = extract_load_data(entry, address, size);
-                dprintf(EXECUTE, "Store-to-Load Forwarding: 部分匹配 Load地址=0x%" PRIx64 ", Load大小=%d, Store地址=0x%" PRIx64 ", Store大小=%d, 转发值=0x%" PRIx64 " (来自Inst#%" PRId64 ")", 
+                LOGT(EXECUTE, "store-to-load forwarding partial match: load_addr=0x%" PRIx64 ", load_size=%d, store_addr=0x%" PRIx64 ", store_size=%d, value=0x%" PRIx64 " (inst=%" PRId64 ")",
                         address, size, entry.address, entry.size, result_value, entry.instruction->get_instruction_id());
                 return true;
             } else {
                 // 有重叠但无法转发（如部分字节写入）- 这种情况下Load必须等待Store提交到内存
-                dprintf(EXECUTE, "Store-to-Load Forwarding: 地址重叠但无法转发 Load地址=0x%" PRIx64 ", Load大小=%d, Store地址=0x%" PRIx64 ", Store大小=%d (来自Inst#%" PRId64 ")", 
+                LOGT(EXECUTE, "store-to-load overlap but cannot forward: load_addr=0x%" PRIx64 ", load_size=%d, store_addr=0x%" PRIx64 ", store_size=%d (inst=%" PRId64 ")",
                         address, size, entry.address, entry.size, entry.instruction->get_instruction_id());
                 return false; // 无法转发，Load需要等待
             }
@@ -62,7 +62,7 @@ bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_
     }
     
     // 没有找到匹配的Store，Load可以直接从内存读取
-    dprintf(EXECUTE, "Store-to-Load Forwarding: 没有找到匹配的Store，地址=0x%" PRIx64 ", 大小=%d", address, size);
+    LOGT(EXECUTE, "store-to-load no matching store: addr=0x%" PRIx64 ", size=%d", address, size);
     return false; // 表示没有匹配，不是转发失败
 }
 
@@ -71,7 +71,7 @@ void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
     
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         if (entries[i].valid && entries[i].instruction && entries[i].instruction->get_instruction_id() <= instruction_id) {
-            dprintf(EXECUTE, "Store Buffer退休条目[%d]: Inst#%" PRId64 ", 地址=0x%" PRIx64, 
+            LOGT(EXECUTE, "store buffer retire[%d]: inst=%" PRId64 ", addr=0x%" PRIx64,
                     i, entries[i].instruction->get_instruction_id(), entries[i].address);
             entries[i].valid = false;
             entries[i].instruction = nullptr; // 清除指令指针
@@ -80,12 +80,12 @@ void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
     }
     
     if (retired_count > 0) {
-        dprintf(EXECUTE, "Store Buffer退休了%d个条目，指令ID <= %" PRId64, retired_count, instruction_id);
+        LOGT(EXECUTE, "store buffer retired %d entries, instruction_id <= %" PRId64, retired_count, instruction_id);
     }
 }
 
 void StoreBuffer::flush() {
-    dprintf(EXECUTE, "Store Buffer刷新：清空所有条目");
+    LOGT(EXECUTE, "store buffer flush: clear all entries");
     
     for (auto& entry : entries) {
         entry.valid = false;
@@ -95,13 +95,13 @@ void StoreBuffer::flush() {
 }
 
 void StoreBuffer::dump() const {
-    dprintf(EXECUTE, "Store Buffer状态:");
-    dprintf(EXECUTE, "分配索引: %d", next_allocate_index);
+    LOGT(EXECUTE, "store buffer state");
+    LOGT(EXECUTE, "next allocation index: %d", next_allocate_index);
     
     bool has_valid = false;
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         if (entries[i].valid && entries[i].instruction) {
-            dprintf(EXECUTE, "  [%d] 地址=0x%" PRIx64 ", 值=0x%" PRIx64 ", 大小=%d, Inst#%" PRId64 ", PC=0x%" PRIx64, 
+            LOGT(EXECUTE, "  [%d] addr=0x%" PRIx64 ", value=0x%" PRIx64 ", size=%d, inst=%" PRId64 ", pc=0x%" PRIx64,
                     i, entries[i].address, entries[i].value, entries[i].size, 
                     entries[i].instruction->get_instruction_id(), entries[i].instruction->get_pc());
             has_valid = true;
@@ -109,7 +109,7 @@ void StoreBuffer::dump() const {
     }
     
     if (!has_valid) {
-        dprintf(EXECUTE, "  (空)");
+        LOGT(EXECUTE, "  (empty)");
     }
 }
 

@@ -13,13 +13,13 @@ DecodeStage::DecodeStage() {
 void DecodeStage::execute(CPUState& state) {
     // 如果取指缓冲区为空，无法译码
     if (state.fetch_buffer.empty()) {
-        dprintf(DECODE, "取指缓冲区为空，跳过译码");
+        LOGT(DECODE, "fetch buffer empty, skip decode");
         return;
     }
     
     // 如果ROB已满，无法译码
     if (!state.reorder_buffer->has_free_entry()) {
-        dprintf(DECODE, "ROB已满，译码停顿");
+        LOGT(DECODE, "rob full, decode stalled");
         state.pipeline_stalls++;
         return;
     }
@@ -35,10 +35,10 @@ void DecodeStage::execute(CPUState& state) {
     DecodedInstruction decoded;
     if (fetched.is_compressed) {
         decoded = state.decoder.decodeCompressed(static_cast<uint16_t>(fetched.instruction), state.enabled_extensions);
-        dprintf(DECODE, "压缩指令译码完成");
+        LOGT(DECODE, "compressed instruction decoded");
     } else {
         decoded = state.decoder.decode(fetched.instruction, state.enabled_extensions);
-        dprintf(DECODE, "普通指令译码完成");
+        LOGT(DECODE, "normal instruction decoded");
     }
     
     // 分配ROB表项 (使用新的DynamicInst接口)
@@ -46,12 +46,12 @@ void DecodeStage::execute(CPUState& state) {
     if (!dynamic_inst) {
         // ROB分配失败，放回取指缓冲区
         state.fetch_buffer.push(fetched);
-        dprintf(DECODE, "ROB分配失败，指令放回缓冲区");
+        LOGT(DECODE, "rob allocation failed, push instruction back to fetch buffer");
         state.pipeline_stalls++;
         return;
     }
     
-    dprintf(DECODE, "分配到ROB[%d] PC=0x%" PRIx64 " 指令ID=%" PRId64, 
+    LOGT(DECODE, "allocated rob[%d], pc=0x%" PRIx64 ", inst=%" PRId64,
         dynamic_inst->get_rob_entry(), fetched.pc, instruction_id);
     
     // 继续到发射阶段的处理将在issue_stage中完成
@@ -60,11 +60,11 @@ void DecodeStage::execute(CPUState& state) {
 }
 
 void DecodeStage::flush() {
-    dprintf(DECODE, "译码阶段已刷新");
+    LOGT(DECODE, "decode stage flushed");
 }
 
 void DecodeStage::reset() {
-    dprintf(DECODE, "译码阶段已重置");
+    LOGT(DECODE, "decode stage reset");
 }
 
 } // namespace riscv 

@@ -1,5 +1,6 @@
 #include "system/syscall_handler.h"
 #include "common/cpu_interface.h"
+#include "common/debug_types.h"
 #include "core/memory.h"
 #include <iostream>
 #include <cstring>
@@ -18,7 +19,8 @@ bool SyscallHandler::handleSyscall(ICpuInterface* cpu) {
     uint64_t a1 = cpu->getRegister(11);  // a1
     uint64_t a2 = cpu->getRegister(12);  // a2
     
-    // printSyscallInfo(syscallNum, a0, a1, a2);
+    LOGT(SYSCALL, "syscall=%" PRIx64 " a0=0x%" PRIx64 " a1=0x%" PRIx64 " a2=0x%" PRIx64,
+         syscallNum, a0, a1, a2);
     
     switch (syscallNum) {
         case SYS_EXIT:
@@ -38,7 +40,7 @@ bool SyscallHandler::handleSyscall(ICpuInterface* cpu) {
             break;
             
         default:
-            std::cerr << "不支持的系统调用: " << syscallNum << std::endl;
+            std::cerr << "unsupported syscall: " << syscallNum << std::endl;
             // 对于未知系统调用，返回0而不是-1，避免无限循环
             cpu->setRegister(10, 0);
             break;
@@ -52,16 +54,16 @@ void SyscallHandler::handleExit(ICpuInterface* cpu) {
     
     // riscv-tests使用退出码表示测试结果
     if (exitCode == 0) {
-        std::cout << "\n=== 测试结果: PASS ===\n";
-        std::cout << "程序正常退出，退出码: " << exitCode << std::endl;
+        std::cout << "\n=== TEST RESULT: PASS ===\n";
+        std::cout << "Program exited normally, code: " << exitCode << std::endl;
     } else {
-        std::cout << "\n=== 测试结果: FAIL ===\n";
-        std::cout << "程序异常退出，退出码: " << exitCode << std::endl;
+        std::cout << "\n=== TEST RESULT: FAIL ===\n";
+        std::cout << "Program exited with failure, code: " << exitCode << std::endl;
         
         // 如果退出码是1，通常表示测试失败但程序正常
         // 如果退出码大于1，可能表示具体的失败测试编号
         if (exitCode > 1) {
-            std::cout << "失败的测试编号: " << exitCode << std::endl;
+            std::cout << "Failed test index: " << exitCode << std::endl;
         }
     }
     // 不需要设置返回值，程序将停机
@@ -101,11 +103,11 @@ void SyscallHandler::handleWrite(ICpuInterface* cpu) {
             cpu->setRegister(10, count);
         } else {
             // 不支持的文件描述符
-            std::cerr << "不支持的文件描述符: " << fd << std::endl;
+            LOGW(SYSCALL, "unsupported file descriptor for write: %" PRIx64, fd);
             cpu->setRegister(10, static_cast<uint64_t>(-1));
         }
     } catch (const std::exception& e) {
-        std::cerr << "写入失败: " << e.what() << std::endl;
+        LOGE(SYSCALL, "write failed: %s", e.what());
         cpu->setRegister(10, static_cast<uint64_t>(-1));
     }
 }
@@ -140,7 +142,7 @@ void SyscallHandler::handleRead(ICpuInterface* cpu) {
         cpu->setRegister(10, static_cast<uint64_t>(readLen));
     } else {
         // 不支持的文件描述符
-        std::cerr << "不支持的文件描述符: " << fd << std::endl;
+        LOGW(SYSCALL, "unsupported file descriptor for read: %" PRIx64, fd);
         cpu->setRegister(10, static_cast<uint64_t>(-1));
     }
 }
@@ -179,10 +181,8 @@ void SyscallHandler::writeStringToMemory(Address addr, const std::string& str) {
 }
 
 void SyscallHandler::printSyscallInfo(uint64_t syscallNum, uint64_t a0, uint64_t a1, uint64_t a2) const {
-    std::cout << "[SYSCALL] 调用号: " << syscallNum 
-              << " 参数: a0=0x" << std::hex << a0 
-              << " a1=0x" << a1 
-              << " a2=0x" << a2 << std::dec << std::endl;
+    LOGT(SYSCALL, "syscall=%" PRIx64 " args: a0=0x%" PRIx64 " a1=0x%" PRIx64 " a2=0x%" PRIx64,
+         syscallNum, a0, a1, a2);
 }
 
 } // namespace riscv

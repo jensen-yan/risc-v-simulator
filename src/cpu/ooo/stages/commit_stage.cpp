@@ -16,21 +16,21 @@ void CommitStage::execute(CPUState& state) {
     // 添加ROB状态调试信息
     size_t free_entries = state.reorder_buffer->get_free_entry_count();
     size_t used_entries = ReorderBuffer::MAX_ROB_ENTRIES - free_entries;
-    dprintf(COMMIT, "ROB状态: used=%zu/%d, empty=%s, full=%s",
+    LOGT(COMMIT, "rob state: used=%zu/%d, empty=%s, full=%s",
         used_entries, ReorderBuffer::MAX_ROB_ENTRIES,
-        (state.reorder_buffer->is_empty() ? "是" : "否"),
-        (state.reorder_buffer->is_full() ? "是" : "否"));
+        (state.reorder_buffer->is_empty() ? "yes" : "no"),
+        (state.reorder_buffer->is_full() ? "yes" : "no"));
     
     // 添加ROB状态检查
     if (state.reorder_buffer->is_empty()) {
-        dprintf(COMMIT, "ROB为空，无法提交");
+        LOGT(COMMIT, "rob empty, cannot commit");
         return;
     }
     
     // 检查头部指令的状态
     auto head_entry_id = state.reorder_buffer->get_head_entry();
     if (head_entry_id == ReorderBuffer::MAX_ROB_ENTRIES) {
-        dprintf(COMMIT, "没有有效的头部表项");
+        LOGT(COMMIT, "no valid head entry");
         return;
     }
     
@@ -50,13 +50,13 @@ void CommitStage::execute(CPUState& state) {
     }
     
     if (head_entry) {
-        dprintf(COMMIT, "Inst#%" PRId64 " 头部指令 ROB[%d] 状态: %s 结果准备: %s",
+        LOGT(COMMIT, "inst=%" PRId64 " head rob[%d] state=%s completed=%s",
             head_entry->get_instruction_id(), head_entry_id, state_str,
-            (head_entry->is_completed() ? "是" : "否"));
+            (head_entry->is_completed() ? "yes" : "no"));
     }
     
     if (!state.reorder_buffer->can_commit()) {
-        dprintf(COMMIT, "头部指令尚未完成，无法提交");
+        LOGT(COMMIT, "head instruction not completed, cannot commit");
         return;
     }
     
@@ -64,7 +64,7 @@ void CommitStage::execute(CPUState& state) {
     while (state.reorder_buffer->can_commit()) {
         auto commit_result = state.reorder_buffer->commit_instruction();
         if (!commit_result.success) {
-            dprintf(COMMIT, "提交失败: %s", commit_result.error_message.c_str());
+            LOGW(COMMIT, "commit failed: %s", commit_result.error_message.c_str());
             break;
         }
         
@@ -72,7 +72,7 @@ void CommitStage::execute(CPUState& state) {
         
         // 检查是否有异常
         if (committed_inst->has_exception()) {
-            dprintf(COMMIT, "提交异常指令: %s", committed_inst->get_exception_message().c_str());
+            LOGE(COMMIT, "commit exceptional instruction: %s", committed_inst->get_exception_message().c_str());
             handle_exception(state, committed_inst->get_exception_message(), committed_inst->get_pc());
             break;
         }
@@ -80,12 +80,12 @@ void CommitStage::execute(CPUState& state) {
         // 提交到架构寄存器
         if (committed_inst->get_decoded_info().rd != 0) {  // x0寄存器不能写入
             state.arch_registers[committed_inst->get_decoded_info().rd] = committed_inst->get_result();
-            dprintf(COMMIT, "Inst#%" PRId64 " x%d = 0x%" PRIx64,
+            LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
                 committed_inst->get_instruction_id(),
                 committed_inst->get_decoded_info().rd,
                 committed_inst->get_result());
         } else {
-            dprintf(COMMIT, "Inst#%" PRId64 " (无目标寄存器)",
+            LOGT(COMMIT, "inst=%" PRId64 " (no destination register)",
                 committed_inst->get_instruction_id());
         }
         
@@ -108,17 +108,17 @@ void CommitStage::execute(CPUState& state) {
         
         // DiffTest: 当乱序CPU提交一条指令时，同步执行参考CPU并比较状态
         if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
-            dprintf(DIFFTEST, "Inst#%" PRId64 " [COMMIT_TRACK] 提交指令: 指令计数=%" PRId64,
+            LOGT(DIFFTEST, "inst=%" PRId64 " [COMMIT_TRACK] commit count=%" PRId64,
                 committed_inst->get_instruction_id(), state.instruction_count);
             // 使用提交指令的PC进行DiffTest
             state.cpu_interface->performDiffTestWithCommittedPC(committed_inst->get_pc());
-            dprintf(COMMIT, "执行DiffTest状态比较");
+            LOGT(COMMIT, "run difftest comparison");
         }
         
         // 处理跳转指令：只有is_jump=true的指令才会改变PC
         if (committed_inst->is_jump()) {
             state.pc = committed_inst->get_jump_target();
-            dprintf(COMMIT, "Inst#%" PRId64 " 跳转到 0x%" PRIx64,
+            LOGT(COMMIT, "inst=%" PRId64 " jump to 0x%" PRIx64,
                 committed_inst->get_instruction_id(), committed_inst->get_jump_target());
             
             // 跳转指令提交后，刷新流水线中错误推测的指令
@@ -138,7 +138,7 @@ void CommitStage::execute(CPUState& state) {
         
         // 如果没有更多指令可提交，跳出循环
         if (!commit_result.has_more) {
-            dprintf(COMMIT, "没有更多指令可提交");
+            LOGT(COMMIT, "no more instruction can be committed");
             break;
         }
     }
@@ -146,53 +146,53 @@ void CommitStage::execute(CPUState& state) {
 
 void CommitStage::flush() {
     // 刷新提交阶段状态
-    dprintf(COMMIT, "提交阶段已刷新");
+    LOGT(COMMIT, "commit stage flushed");
 }
 
 void CommitStage::reset() {
     // 重置提交阶段到初始状态
-    dprintf(COMMIT, "提交阶段已重置");
+    LOGT(COMMIT, "commit stage reset");
 }
 
 void CommitStage::handle_ecall(CPUState& state, uint64_t instruction_pc) {
     // 处理系统调用
-    dprintf(COMMIT, "检测到ECALL系统调用，指令PC=0x%" PRIx64, instruction_pc);
+    LOGT(COMMIT, "detected ECALL at pc=0x%" PRIx64, instruction_pc);
     
     // 添加调试：显示关键寄存器值
-    dprintf(COMMIT, "ECALL调试: a7(x17)=%" PRIx64 ", a0(x10)=%" PRIx64 ", a1(x11)=%" PRIx64 ", 指令PC=0x%" PRIx64,
+    LOGT(COMMIT, "ecall args: a7(x17)=%" PRIx64 ", a0(x10)=%" PRIx64 ", a1(x11)=%" PRIx64 ", pc=0x%" PRIx64,
              state.arch_registers[17], state.arch_registers[10], 
              state.arch_registers[11], instruction_pc);
     
     // 调用系统调用处理器
     if (state.syscall_handler && state.cpu_interface) {
-        dprintf(COMMIT, "调用系统调用处理器");
+        LOGT(COMMIT, "invoke syscall handler");
         bool should_halt = state.syscall_handler->handleSyscall(state.cpu_interface);
         if (should_halt) {
             state.halted = true;
-            dprintf(COMMIT, "系统调用处理完成，程序停机");
+            LOGT(COMMIT, "syscall handling finished, halt program");
         } else {
-            dprintf(COMMIT, "系统调用处理完成，继续执行");
+            LOGT(COMMIT, "syscall handling finished, continue execution");
         }
     } else {
         // 降级处理：如果没有系统调用处理器，直接停机
-        dprintf(COMMIT, "警告：缺少系统调用处理器，直接停机");
+        LOGW(COMMIT, "missing syscall handler, halt directly");
         state.halted = true;
     }
 }
 
 void CommitStage::handle_ebreak(CPUState& state) {
-    dprintf(COMMIT, "遇到断点指令，停止执行");
+    LOGT(COMMIT, "encountered EBREAK, halt execution");
     state.halted = true;
 }
 
 void CommitStage::handle_exception(CPUState& state, const std::string& exception_msg, uint64_t pc) {
-    std::cerr << "异常: " << exception_msg << ", PC=0x" << std::hex << pc << std::dec << std::endl;
+    LOGE(COMMIT, "exception: %s, pc=0x%" PRIx64, exception_msg.c_str(), pc);
     // 异常处理会导致流水线刷新，这需要在主控制器中处理
     state.halted = true;
 }
 
 void CommitStage::flush_pipeline_after_commit(CPUState& state) {
-    dprintf(COMMIT, "跳转指令已提交，开始刷新流水线");
+    LOGT(COMMIT, "jump committed, start pipeline flush");
     
     // 1. 清空取指缓冲区（错误推测的指令）
     while (!state.fetch_buffer.empty()) {
@@ -220,7 +220,7 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state) {
     // 7. 重置所有执行单元（安全，因为当前指令已提交）
     reset_execution_units(state);
     
-    dprintf(COMMIT, "流水线刷新完成，重新开始取指");
+    LOGT(COMMIT, "pipeline flush completed, restart fetch");
 }
 
 void CommitStage::reset_execution_units(CPUState& state) {

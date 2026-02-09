@@ -48,7 +48,7 @@ DynamicInstPtr ReorderBuffer::allocate_entry(
     const DecodedInstruction& instruction, uint64_t pc, uint64_t instruction_id) {
     
     if (is_full()) {
-        dprintf(ROB, "ROB已满，无法分配表项");
+        LOGW(ROB, "rob is full, cannot allocate entry");
         return nullptr;
     }
     
@@ -66,7 +66,7 @@ DynamicInstPtr ReorderBuffer::allocate_entry(
     allocated_count++;
     
     // 使用新的dprintf宏 - 类似GEM5风格
-    dprintf(ROB, "分配ROB表项 %d, Inst#%" PRId64 ", PC=0x%" PRIx64,
+    LOGT(ROB, "allocate rob[%d], inst=%" PRId64 ", pc=0x%" PRIx64,
         rob_entry, instruction_id, pc);
     
     return dynamic_inst;
@@ -76,7 +76,7 @@ void ReorderBuffer::update_entry(DynamicInstPtr inst, uint64_t result, bool has_
                                 const std::string& exception_msg, bool is_jump, 
                                 uint64_t jump_target) {
     if (!inst) {
-        dprintf(ROB, "无效的DynamicInst指针");
+        LOGW(ROB, "invalid DynamicInst pointer");
         return;
     }
     
@@ -95,7 +95,7 @@ void ReorderBuffer::update_entry(DynamicInstPtr inst, uint64_t result, bool has_
     // 标记为执行完成
     inst->set_status(DynamicInst::Status::COMPLETED);
     
-    dprintf(ROB, "更新ROB表项 %d 执行结果: 0x%" PRIx64, inst->get_rob_entry(), result);
+    LOGT(ROB, "update rob[%d], result=0x%" PRIx64, inst->get_rob_entry(), result);
 }
 
 void ReorderBuffer::update_entry_by_index(ROBEntry rob_entry, uint64_t result, bool has_exception, 
@@ -122,7 +122,7 @@ void ReorderBuffer::mark_as_dispatched(DynamicInstPtr inst) {
     if (!inst) return;
     
     inst->set_status(DynamicInst::Status::ISSUED);
-    dprintf(ROB, "标记指令 %" PRId64 " 已发射到保留站", inst->get_instruction_id());
+    LOGT(ROB, "mark inst=%" PRId64 " as issued", inst->get_instruction_id());
 }
 
 ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
@@ -165,7 +165,7 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
         head_ptr = next_index(head_ptr);
         entry_count--;
         
-        dprintf(ROB, "提交异常指令 %" PRId64 ", PC=0x%" PRIx64,
+        LOGW(ROB, "commit exceptional inst=%" PRId64 ", pc=0x%" PRIx64,
             head_inst->get_instruction_id(), head_inst->get_pc());
         
         return result;
@@ -185,7 +185,7 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
     head_ptr = next_index(head_ptr);
     entry_count--;
     
-    dprintf(ROB, "提交指令 %" PRId64 ", PC=0x%" PRIx64 ", 结果=0x%" PRIx64,
+    LOGT(ROB, "commit inst=%" PRId64 ", pc=0x%" PRIx64 ", result=0x%" PRIx64,
         head_inst->get_instruction_id(), head_inst->get_pc(), head_inst->get_result());
     
     return result;
@@ -199,7 +199,7 @@ bool ReorderBuffer::can_commit() const {
 }
 
 void ReorderBuffer::flush_pipeline() {
-    dprintf(ROB, "刷新整个ROB流水线");
+    LOGT(ROB, "flush whole rob pipeline");
     
     flushed_count += entry_count;
     
@@ -233,7 +233,7 @@ void ReorderBuffer::flush_after_entry(ROBEntry rob_entry) {
     entry_count -= flushed;
     flushed_count += flushed;
     
-    dprintf(ROB, "部分刷新ROB，从表项 %d 之后刷新了 %d 条指令", rob_entry, flushed);
+    LOGT(ROB, "partial flush after rob[%d], flushed=%d", rob_entry, flushed);
 }
 
 bool ReorderBuffer::has_free_entry() const {
@@ -284,9 +284,9 @@ void ReorderBuffer::get_statistics(uint64_t& allocated, uint64_t& committed,
 }
 
 void ReorderBuffer::dump_reorder_buffer() const {
-    std::cout << "=== ROB状态转储 ===" << std::endl;
-    std::cout << "头指针: " << head_ptr << ", 尾指针: " << tail_ptr 
-              << ", 表项数: " << entry_count << std::endl;
+    std::cout << "=== ROB dump ===" << std::endl;
+    std::cout << "head: " << head_ptr << ", tail: " << tail_ptr
+              << ", entries: " << entry_count << std::endl;
     
     for (int i = 0; i < MAX_ROB_ENTRIES; ++i) {
         if (rob_entries[i]) {
@@ -294,15 +294,15 @@ void ReorderBuffer::dump_reorder_buffer() const {
                      << rob_entries[i]->to_string() << std::endl;
         }
     }
-    std::cout << "=================" << std::endl;
+    std::cout << "================" << std::endl;
 }
 
 void ReorderBuffer::dump_rob_summary() const {
-    std::cout << "ROB统计: 分配=" << allocated_count 
-              << ", 提交=" << committed_count 
-              << ", 刷新=" << flushed_count 
-              << ", 异常=" << exception_count 
-              << ", 当前=" << entry_count << "/" << MAX_ROB_ENTRIES << std::endl;
+    std::cout << "ROB stats: allocated=" << allocated_count
+              << ", committed=" << committed_count
+              << ", flushed=" << flushed_count
+              << ", exceptions=" << exception_count
+              << ", current=" << entry_count << "/" << MAX_ROB_ENTRIES << std::endl;
 }
 
 bool ReorderBuffer::has_pending_exception() const {
@@ -358,7 +358,7 @@ ROBEntry ReorderBuffer::allocate_rob_entry() {
     ROBEntry entry = free_entries.front();
     free_entries.pop();
     
-    dprintf(ROB, "[ALLOC_DEBUG] 分配表项%d, 头部指针=%d, 尾部指针=%d->%d", 
+    LOGT(ROB, "[ALLOC_DEBUG] allocate entry=%d, head=%d, tail=%d->%d",
             entry, head_ptr, tail_ptr, next_index(tail_ptr));
     
     tail_ptr = next_index(tail_ptr);

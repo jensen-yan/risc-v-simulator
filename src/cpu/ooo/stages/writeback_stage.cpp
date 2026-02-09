@@ -16,7 +16,7 @@ void WritebackStage::execute(CPUState& state) {
         
         // 检查指令是否有效
         if (!cdb_entry.instruction) {
-            dprintf(WRITEBACK, "CDB条目无效，跳过处理");
+            LOGW(WRITEBACK, "invalid cdb entry, skip");
             continue;
         }
         
@@ -25,7 +25,7 @@ void WritebackStage::execute(CPUState& state) {
         auto phys_dest = instruction->get_physical_dest();
         auto result = instruction->get_result();
         
-        dprintf(WRITEBACK, "CDB writeback: ROB[%d] p%d = 0x%" PRIx64,
+        LOGT(WRITEBACK, "cdb writeback: rob[%d] p%d = 0x%" PRIx64,
                 rob_entry, static_cast<int>(phys_dest), result);
         
         // 更新保留站中的操作数
@@ -41,26 +41,26 @@ void WritebackStage::execute(CPUState& state) {
             state.reorder_buffer->update_entry(instruction, result, false, "",
                                          instruction->is_jump(), instruction->get_jump_target());
         } else {
-            dprintf(WRITEBACK, "CDB条目过期，跳过更新: ROB[%d] 当前指令=%p, CDB指令=%p",
+            LOGT(WRITEBACK, "stale cdb entry, skip update: rob[%d] current=%p cdb=%p",
                    rob_entry,
                    static_cast<const void*>(rob_instruction.get()),
                    static_cast<const void*>(instruction.get()));
         }
         
-        dprintf(WRITEBACK, "ROB[%d] status updated to COMPLETED", rob_entry);
+        LOGT(WRITEBACK, "rob[%d] status updated to COMPLETED", rob_entry);
     }
     
     if (state.cdb_queue.empty()) {
-        dprintf(WRITEBACK, "CDB队列为空，无写回操作");
+        LOGT(WRITEBACK, "cdb queue empty, no writeback");
     }
 }
 
 void WritebackStage::flush() {
-    dprintf(WRITEBACK, "写回阶段已刷新");
+    LOGT(WRITEBACK, "writeback stage flushed");
 }
 
 void WritebackStage::reset() {
-    dprintf(WRITEBACK, "写回阶段已重置");
+    LOGT(WRITEBACK, "writeback stage reset");
 }
 
 } // namespace riscv 

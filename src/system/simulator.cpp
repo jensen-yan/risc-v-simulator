@@ -40,7 +40,7 @@ bool Simulator::loadProgram(const std::string& filename) {
         DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "加载程序失败: " << e.what() << "\n";
+        LOGE(SYSTEM, "failed to load program: %s", e.what());
         return false;
     }
 }
@@ -54,7 +54,7 @@ bool Simulator::loadProgramFromBytes(const std::vector<uint8_t>& program, Addres
         DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "加载程序失败: " << e.what() << "\n";
+        LOGE(SYSTEM, "failed to load program from bytes: %s", e.what());
         return false;
     }
 }
@@ -88,7 +88,7 @@ bool Simulator::loadRiscvProgram(const std::string& filename, Address loadAddr) 
         DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "加载RISC-V程序失败: " << e.what() << "\n";
+        LOGE(SYSTEM, "failed to load riscv program: %s", e.what());
         return false;
     }
 }
@@ -114,7 +114,7 @@ void Simulator::run() {
 
         if (cpuType_ == CpuType::IN_ORDER &&
             cpu_->getInstructionCount() > kMaxInOrderInstructions) {
-            dprintf(SYSTEM, "执行指令数超过限制(%llu)，自动停止",
+            LOGW(SYSTEM, "instruction count exceeds limit (%llu), auto halt",
                     static_cast<unsigned long long>(kMaxInOrderInstructions));
             cpu_->requestHalt();
             break;
@@ -122,7 +122,7 @@ void Simulator::run() {
 
         if (cpuType_ == CpuType::OUT_OF_ORDER &&
             cycle_count_ > kMaxOutOfOrderCycles) {
-            dprintf(SYSTEM, "执行周期数超过限制(%llu)，自动停止",
+            LOGW(SYSTEM, "cycle count exceeds limit (%llu), auto halt",
                     static_cast<unsigned long long>(kMaxOutOfOrderCycles));
             cpu_->requestHalt();
             break;
@@ -130,7 +130,7 @@ void Simulator::run() {
     }
 
     if (memory_->shouldExit()) {
-        dprintf(SYSTEM, "[tohost] 程序通过tohost机制退出，退出码: %d",
+        LOGI(SYSTEM, "[tohost] program exited via tohost, code=%d",
                 static_cast<int>(memory_->getExitCode()));
     }
 
@@ -165,11 +165,11 @@ void Simulator::dumpState() const {
 }
 
 void Simulator::printStatistics() const {
-    std::cout << "\n=== 执行统计 ===\n";
-    std::cout << "总执行指令数: " << getInstructionCount() << "\n";
-    std::cout << "最终PC: 0x" << std::hex << cpu_->getPC() << std::dec << "\n";
-    std::cout << "程序状态: " << (isHalted() ? "已停机" : "运行中") << "\n";
-    std::cout << "总周期数: " << cycle_count_ << "\n";
+    std::cout << "\n=== Execution Stats ===\n";
+    std::cout << "Instructions: " << getInstructionCount() << "\n";
+    std::cout << "Final PC: 0x" << std::hex << cpu_->getPC() << std::dec << "\n";
+    std::cout << "Program State: " << (isHalted() ? "halted" : "running") << "\n";
+    std::cout << "Cycles: " << cycle_count_ << "\n";
 }
 
 std::vector<uint8_t> Simulator::loadBinaryFile(const std::string& filename) {
@@ -208,7 +208,7 @@ bool Simulator::loadElfProgram(const std::string& filename) {
         ElfLoader::ElfInfo elfInfo = ElfLoader::loadElfFile(filename, memory_);
         
         if (!elfInfo.isValid) {
-            std::cerr << "无效的ELF文件: " << filename << std::endl;
+            LOGE(SYSTEM, "invalid elf file: %s", filename.c_str());
             return false;
         }
 
@@ -229,7 +229,7 @@ bool Simulator::loadElfProgram(const std::string& filename) {
             ElfLoader::ElfInfo refElfInfo = ElfLoader::loadElfFile(filename, reference_memory_);
             
             if (!refElfInfo.isValid) {
-                std::cerr << "参考CPU ELF加载失败: " << filename << std::endl;
+                LOGE(SYSTEM, "failed to load elf for reference cpu: %s", filename.c_str());
                 return false;
             }
             
@@ -246,15 +246,15 @@ bool Simulator::loadElfProgram(const std::string& filename) {
             
             // 将DiffTest设置到乱序CPU中
             cpu_->setDiffTest(difftest_.get());
-            
-	        std::cout << "DiffTest已初始化" << std::endl;
+
+            LOGI(DIFFTEST, "difftest initialized for ooo mode");
         }
         
-        std::cout << "ELF程序加载成功，入口点: 0x" << std::hex << elfInfo.entryPoint << std::dec << std::endl;
+        LOGI(SYSTEM, "elf loaded successfully, entry=0x%" PRIx64, elfInfo.entryPoint);
         DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "加载ELF程序失败: " << e.what() << std::endl;
+        LOGE(SYSTEM, "failed to load elf program: %s", e.what());
         return false;
     }
 }

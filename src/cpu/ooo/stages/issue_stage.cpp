@@ -11,7 +11,7 @@ IssueStage::IssueStage() {
 void IssueStage::execute(CPUState& state) {
     // 检查ROB中是否有待发射的指令
     if (state.reorder_buffer->is_empty()) {
-        dprintf(ISSUE, "ROB为空，跳过发射");
+        LOGT(ISSUE, "rob empty, skip issue");
         return;
     }
     
@@ -21,21 +21,21 @@ void IssueStage::execute(CPUState& state) {
     // 获取可以发射的指令
     auto dispatchable_entry = state.reorder_buffer->get_dispatchable_entry();
     if (!dispatchable_entry) {  // 没有可发射的指令
-        dprintf(ISSUE, "没有可发射的指令");
+        LOGT(ISSUE, "no dispatchable instruction");
         return;
     }
     
     if (!dispatchable_entry->is_allocated()) {
-        dprintf(ISSUE, "ROB表项状态不正确");
+        LOGW(ISSUE, "unexpected rob entry status");
         return;
     }
     
-    dprintf(ISSUE, "Inst#%" PRId64 " 尝试发射 (ROB[%d])",
+    LOGT(ISSUE, "try issue inst=%" PRId64 " (rob[%d])",
         dispatchable_entry->get_instruction_id(), dispatchable_entry->get_rob_entry());
     
     // 检查保留站是否有空闲表项
     if (!state.reservation_station->has_free_entry()) {
-        dprintf(ISSUE, "保留站已满，发射停顿");
+        LOGT(ISSUE, "reservation station full, issue stalled");
         state.pipeline_stalls++;
         return;
     }
@@ -43,7 +43,7 @@ void IssueStage::execute(CPUState& state) {
     // 进行寄存器重命名
     auto rename_result = state.register_rename->rename_instruction(dispatchable_entry->get_decoded_info());
     if (!rename_result.success) {
-        dprintf(ISSUE, "寄存器重命名失败，发射停顿");
+        LOGT(ISSUE, "rename failed, issue stalled");
         state.pipeline_stalls++;
         return;
     }
@@ -60,13 +60,13 @@ void IssueStage::execute(CPUState& state) {
     // 发射到保留站
     auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
     if (!issue_result.success) {
-        dprintf(ISSUE, "保留站发射失败，回退重命名");
+        LOGT(ISSUE, "rs issue failed, rollback rename");
         state.register_rename->release_physical_register(rename_result.dest_reg);
         state.pipeline_stalls++;
         return;
     }
     
-    dprintf(ISSUE, "Inst#%" PRId64 " 成功发射到保留站RS[%d]",
+    LOGT(ISSUE, "issued inst=%" PRId64 " to rs[%d]",
         dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
     
     // 更新指令状态，标记为已发射到保留站
@@ -74,11 +74,11 @@ void IssueStage::execute(CPUState& state) {
 }
 
 void IssueStage::flush() {
-    dprintf(ISSUE, "发射阶段已刷新");
+    LOGT(ISSUE, "issue stage flushed");
 }
 
 void IssueStage::reset() {
-    dprintf(ISSUE, "发射阶段已重置");
+    LOGT(ISSUE, "issue stage reset");
 }
 
 } // namespace riscv 

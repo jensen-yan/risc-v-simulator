@@ -18,24 +18,35 @@
 
 namespace riscv {
 
+enum class LogLevel {
+    TRACE = 0,
+    INFO,
+    WARN,
+    ERROR,
+    FATAL
+};
+
 /**
  * 调试信息结构体
  * 包含完整的调试信息，支持多种输出格式
  */
 struct DebugInfo {
-    std::string stage;
+    std::string category;
     std::string message;
+    LogLevel level = LogLevel::TRACE;
     std::optional<uint64_t> cycle;
     std::optional<uint64_t> pc;
 
     DebugInfo() = default;
 
-    DebugInfo(std::string stageValue,
+    DebugInfo(std::string categoryValue,
               std::string messageValue,
+              LogLevel levelValue = LogLevel::TRACE,
               std::optional<uint64_t> cycleValue = std::nullopt,
               std::optional<uint64_t> pcValue = std::nullopt)
-        : stage(std::move(stageValue)),
+        : category(std::move(categoryValue)),
           message(std::move(messageValue)),
+          level(levelValue),
           cycle(cycleValue),
           pc(pcValue) {}
 };
@@ -51,12 +62,28 @@ using DebugCallback = std::function<void(const DebugInfo&)>;
  */
 class DebugFormatter {
 public:
-    // 输出固定verbose格式: [STAGE] [c=] message
+    // Trace默认格式: [CAT][c=] message
+    // Event格式: [LEVEL][CAT][c=] message
     static std::string format(const DebugInfo& info) {
-        const std::string prefix = fmt::format("[{}]", info.stage);
-        const std::string cycle_part = info.cycle ? fmt::format("[c={}] ", *info.cycle) : "";
+        const std::string cat_part = fmt::format("[{}]", info.category);
+        const std::string cycle_part = info.cycle ? fmt::format("[c={}]", *info.cycle) : "[c=-]";
+        const bool with_level = info.level != LogLevel::TRACE;
+        if (with_level) {
+            return fmt::format("[{}]{}{} {}", toString(info.level), cat_part, cycle_part, info.message);
+        }
+        return fmt::format("{}{} {}", cat_part, cycle_part, info.message);
+    }
 
-        return fmt::format("{}{} {}", cycle_part, prefix, info.message);
+private:
+    static const char* toString(LogLevel level) {
+        switch (level) {
+            case LogLevel::TRACE: return "TRACE";
+            case LogLevel::INFO: return "INFO";
+            case LogLevel::WARN: return "WARN";
+            case LogLevel::ERROR: return "ERROR";
+            case LogLevel::FATAL: return "FATAL";
+            default: return "TRACE";
+        }
     }
 };
 
@@ -131,11 +158,11 @@ public:
 
     // 启用/禁用调试分类
     void enableCategory(const std::string& category) {
-        enabled_categories_.insert(category);
+        enabled_categories_.insert(toUpper(category));
     }
 
     void disableCategory(const std::string& category) {
-        enabled_categories_.erase(category);
+        enabled_categories_.erase(toUpper(category));
     }
 
     void clearCategories() {
@@ -208,11 +235,37 @@ public:
         return has_global_pc_ ? global_pc_ : 0;
     }
 
-    // 输出调试信息
-    void log(const std::string& stage,
+    // Trace日志（默认）
+    void logTrace(const std::string& category,
+                  const std::string& message,
+                  std::optional<uint64_t> cycle = std::nullopt,
+                  std::optional<uint64_t> pc = std::nullopt) {
+        logImpl(LogLevel::TRACE, category, message, cycle, pc);
+    }
+
+    // Event日志（建议用于重要事件）
+    void logEvent(LogLevel level,
+                  const std::string& category,
+                  const std::string& message,
+                  std::optional<uint64_t> cycle = std::nullopt,
+                  std::optional<uint64_t> pc = std::nullopt) {
+        logImpl(level, category, message, cycle, pc);
+    }
+
+    // 兼容旧接口：等价于Trace日志
+    void log(const std::string& category,
              const std::string& message,
              std::optional<uint64_t> cycle = std::nullopt,
              std::optional<uint64_t> pc = std::nullopt) {
+        logTrace(category, message, cycle, pc);
+    }
+
+private:
+    void logImpl(LogLevel level,
+                 const std::string& category,
+                 const std::string& message,
+                 std::optional<uint64_t> cycle,
+                 std::optional<uint64_t> pc) {
         std::optional<uint64_t> resolved_cycle = cycle;
         if (!resolved_cycle && has_global_cycle_) {
             resolved_cycle = global_cycle_;
@@ -223,17 +276,18 @@ public:
             resolved_pc = global_pc_;
         }
 
-        if (!shouldOutput(stage, resolved_cycle)) {
+        const std::string normalized_category = toUpper(category);
+        if (!shouldOutput(normalized_category, resolved_cycle)) {
             return;
         }
 
-        DebugInfo info(stage, message, resolved_cycle, resolved_pc);
+        DebugInfo info(normalized_category, message, level, resolved_cycle, resolved_pc);
 
         if (output_to_console_) {
             if (debug_callback_) {
                 debug_callback_(info);
             } else {
-                std::cout << DebugFormatter::format(info) << std::endl;
+                std::clog << DebugFormatter::format(info) << std::endl;
             }
         } else if (debug_callback_) {
             debug_callback_(info);
@@ -244,6 +298,8 @@ public:
             log_file_.flush();
         }
     }
+
+public:
 
     // 获取当前配置信息
     std::string getConfigInfo() const {
@@ -283,12 +339,11 @@ private:
         return result;
     }
 
-    bool shouldOutput(const std::string& stage,
+    bool shouldOutput(const std::string& category,
                       const std::optional<uint64_t>& cycle) const {
 
-        if (stage != "SYSTEM" &&
-            !enabled_categories_.empty() &&
-            enabled_categories_.find(stage) == enabled_categories_.end()) {
+        if (!enabled_categories_.empty() &&
+            enabled_categories_.find(category) == enabled_categories_.end()) {
             return false;
         }
 
@@ -315,7 +370,7 @@ private:
     uint64_t debug_end_cycle_ = UINT64_MAX;
     std::ofstream log_file_;
     bool output_to_file_ = false;
-    bool output_to_console_ = true;
+    bool output_to_console_ = false;
     uint64_t global_cycle_ = 0;
     bool has_global_cycle_ = false;
     uint64_t global_pc_ = 0;
@@ -329,5 +384,25 @@ private:
     ::riscv::DebugManager::getInstance().log(#stage, message); \
 } while (0)
 
+#define LOGT(stage, ...) do { \
+    const auto message = fmt::sprintf(__VA_ARGS__); \
+    ::riscv::DebugManager::getInstance().logTrace(#stage, message); \
+} while (0)
+
+#define LOGI(stage, ...) do { \
+    const auto message = fmt::sprintf(__VA_ARGS__); \
+    ::riscv::DebugManager::getInstance().logEvent(::riscv::LogLevel::INFO, #stage, message); \
+} while (0)
+
+#define LOGW(stage, ...) do { \
+    const auto message = fmt::sprintf(__VA_ARGS__); \
+    ::riscv::DebugManager::getInstance().logEvent(::riscv::LogLevel::WARN, #stage, message); \
+} while (0)
+
+#define LOGE(stage, ...) do { \
+    const auto message = fmt::sprintf(__VA_ARGS__); \
+    ::riscv::DebugManager::getInstance().logEvent(::riscv::LogLevel::ERROR, #stage, message); \
+} while (0)
+
 // 兼容旧接口
-#define dprintf(stage, ...) LOG_DEBUG(stage, __VA_ARGS__)
+#define dprintf(stage, ...) LOGT(stage, __VA_ARGS__)

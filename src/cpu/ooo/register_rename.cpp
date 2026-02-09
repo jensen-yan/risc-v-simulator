@@ -57,9 +57,9 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
     if (needs_dest_reg && free_list.empty()) {
         // 没有空闲的物理寄存器，发生停顿
         stall_count++;
-        dprintf(RENAME, "寄存器重命名失败: 需要目标寄存器x%d，但没有空闲物理寄存器", 
+        LOGW(RENAME, "rename failed: need dst x%d but no free physical register",
                 (int)instruction.rd);
-        dprintf(RENAME, "空闲寄存器数量: %zu/%d", free_list.size(), NUM_PHYSICAL_REGS);
+        LOGT(RENAME, "free physical registers: %zu/%d", free_list.size(), NUM_PHYSICAL_REGS);
         return result;
     }
     
@@ -90,7 +90,7 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
             break;
         default:
             // UNKNOWN指令类型，应该在解码阶段就被捕获
-            dprintf(RENAME, "警告: 遇到未知指令类型，假设不需要第二个源操作数");
+            LOGW(RENAME, "unknown instruction type in rename, treat as no src2");
             needs_src2 = false;
             break;
     }
@@ -122,7 +122,7 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
             result.src1_reg = old_physical_reg;
             result.src1_ready = physical_registers[old_physical_reg].ready;
             result.src1_value = physical_registers[old_physical_reg].value;
-            dprintf(RENAME, "修复自依赖: x%d rs1源使用 p%d (旧值), 目标使用 p%d (新值)", 
+            LOGT(RENAME, "self-dependency fix: x%d rs1 uses old p%d, dst uses new p%d",
                     (int)instruction.rd, (int)old_physical_reg, (int)result.dest_reg);
         }
         
@@ -131,11 +131,11 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
             result.src2_reg = old_physical_reg;
             result.src2_ready = physical_registers[old_physical_reg].ready;
             result.src2_value = physical_registers[old_physical_reg].value;
-            dprintf(RENAME, "修复自依赖: x%d rs2源使用 p%d (旧值), 目标使用 p%d (新值)", 
+            LOGT(RENAME, "self-dependency fix: x%d rs2 uses old p%d, dst uses new p%d",
                     (int)instruction.rd, (int)old_physical_reg, (int)result.dest_reg);
         }
         
-        dprintf(RENAME, "重命名: x%d 从 p%d 重命名到 p%d", 
+        LOGT(RENAME, "rename: x%d from p%d to p%d",
                 (int)instruction.rd, (int)old_physical_reg, (int)result.dest_reg);
     } else {
         result.dest_reg = 0;  // x0寄存器
@@ -163,7 +163,7 @@ void RegisterRenameUnit::update_physical_register(PhysRegNum reg, uint64_t value
     physical_registers[reg].ready = true;
     physical_registers[reg].producer_rob = rob_entry;
     
-    dprintf(RENAME, "更新物理寄存器 p%d = 0x%" PRIx64, (int)reg, value);
+    LOGT(RENAME, "update p%d = 0x%" PRIx64, (int)reg, value);
 }
 
 void RegisterRenameUnit::release_physical_register(PhysRegNum reg) {
@@ -173,7 +173,7 @@ void RegisterRenameUnit::release_physical_register(PhysRegNum reg) {
     physical_registers[reg].value = 0;
     free_list.push(reg);
     
-    dprintf(RENAME, "释放物理寄存器 p%d", (int)reg);
+    LOGT(RENAME, "release p%d", (int)reg);
 }
 
 uint64_t RegisterRenameUnit::get_physical_register_value(PhysRegNum reg) const {
@@ -211,7 +211,7 @@ void RegisterRenameUnit::flush_pipeline() {
         }
     }
     
-    dprintf(RENAME, "流水线刷新：重命名表恢复到架构状态，保留已提交状态");
+    LOGT(RENAME, "flush pipeline: restore rename table to committed architectural state");
 }
 
 void RegisterRenameUnit::commit_instruction(RegNum logical_reg, PhysRegNum physical_reg) {
@@ -226,7 +226,7 @@ void RegisterRenameUnit::commit_instruction(RegNum logical_reg, PhysRegNum physi
         rename_table[logical_reg].physical_reg == old_arch_reg) {
         rename_table[logical_reg].physical_reg = physical_reg;
         rename_table[logical_reg].valid = true;
-        dprintf(RENAME, "提交时更新rename_table[%d]为p%d", (int)logical_reg, (int)physical_reg);
+        LOGT(RENAME, "on commit update rename_table[%d] -> p%d", (int)logical_reg, (int)physical_reg);
     }
     
     // 释放旧的架构寄存器
@@ -234,7 +234,7 @@ void RegisterRenameUnit::commit_instruction(RegNum logical_reg, PhysRegNum physi
         release_physical_register(old_arch_reg);
     }
     
-    dprintf(RENAME, "提交指令: x%d 架构状态更新为 p%d", (int)logical_reg, (int)physical_reg);
+    LOGT(RENAME, "commit: architectural x%d -> p%d", (int)logical_reg, (int)physical_reg);
 }
 
 void RegisterRenameUnit::get_statistics(uint64_t& renames, uint64_t& stalls) const {
@@ -253,7 +253,7 @@ void RegisterRenameUnit::update_architecture_register(RegNum logical_reg, uint64
         physical_registers[current_arch_reg].value = value;
     }
     
-    dprintf(RENAME, "更新架构寄存器 x%d = 0x%" PRIx64, (int)logical_reg, value);
+    LOGT(RENAME, "update architectural x%d = 0x%" PRIx64, (int)logical_reg, value);
 }
 
 bool RegisterRenameUnit::has_free_register() const {
@@ -265,30 +265,31 @@ size_t RegisterRenameUnit::get_free_register_count() const {
 }
 
 void RegisterRenameUnit::dump_rename_table() const {
-    dprintf(RENAME, "重命名表");
+    LOGT(RENAME, "rename table");
     for (int i = 0; i < NUM_LOGICAL_REGS; ++i) {
-        dprintf(RENAME, "x%d -> p%d", i, (int)rename_table[i].physical_reg);
+        LOGT(RENAME, "x%d -> p%d", i, (int)rename_table[i].physical_reg);
     }
 }
 
 void RegisterRenameUnit::dump_physical_registers() const {
-    dprintf(RENAME, "物理寄存器状态");
+    LOGT(RENAME, "physical register state");
     for (int i = 0; i < NUM_PHYSICAL_REGS && i < 64; ++i) {  // 只显示前64个
         if (physical_registers[i].ready) {
-            dprintf(RENAME, "p%d:0x%" PRIx64, i, physical_registers[i].value);
+            LOGT(RENAME, "p%d:0x%" PRIx64, i, physical_registers[i].value);
         } else {
-            dprintf(RENAME, "p%d:  等待中  ", i);
+            LOGT(RENAME, "p%d: pending", i);
         }
         
-        if (i % 4 == 3) dprintf(RENAME, "---");
-        else dprintf(RENAME, "  ");
+        if (i % 4 == 3) {
+            LOGT(RENAME, "---");
+        }
     }
-    dprintf(RENAME, "---");
+    LOGT(RENAME, "---");
 }
 
 void RegisterRenameUnit::dump_free_list() const {
-    dprintf(RENAME, "空闲寄存器列表");
-    dprintf(RENAME, "空闲寄存器数量: %zu", free_list.size());
+    LOGT(RENAME, "free register list");
+    LOGT(RENAME, "free register count: %zu", free_list.size());
 }
 
 } // namespace riscv

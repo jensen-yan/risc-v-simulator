@@ -34,8 +34,8 @@ struct RenameEntry {
 class RegisterRenameUnit {
 public:
     // 配置参数
-    static const int NUM_LOGICAL_REGS = 32;     // 逻辑寄存器数量
-    static const int NUM_PHYSICAL_REGS = 128;   // 物理寄存器数量
+    static constexpr int NUM_LOGICAL_REGS = 32;     // 逻辑寄存器数量
+    static constexpr int NUM_PHYSICAL_REGS = 128;   // 物理寄存器数量
     
 private:
     // 重命名表：逻辑寄存器 -> 物理寄存器

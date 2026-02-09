@@ -35,7 +35,7 @@ void CPU::step() {
         
         // 如果指令为0，可能表明程序结束或到达无效内存区域
         if (inst == 0) {
-            std::cerr << "警告: 执行了空指令(NOP)，程序可能结束" << std::endl;
+            LOGW(INORDER, "executed zero instruction, halt as possible program end");
             halted_ = true;
             return;
         }
@@ -54,7 +54,7 @@ void CPU::step() {
             last_instruction_compressed_ = false;
         }
         
-        LOG_DEBUG(INORDER,
+        LOGT(INORDER,
                   "pc=0x%" PRIx64 " inst=0x%" PRIx32 " rd=%u rs1=%u rs2=%u imm=%d c=%s",
                   pc_before,
                   static_cast<uint32_t>(inst),
@@ -100,7 +100,7 @@ void CPU::step() {
 
         const uint64_t rd_after = getRegister(decoded.rd);
         if (decoded.rd != 0 && rd_after != rd_before) {
-            LOG_DEBUG(INORDER,
+            LOGT(INORDER,
                       "pc=0x%" PRIx64 " x%u:0x%" PRIx64 "->0x%" PRIx64
                       " rs1=x%u:0x%" PRIx64 " rs2=x%u:0x%" PRIx64 " imm=%d",
                       pc_before,
@@ -189,7 +189,7 @@ void CPU::setFPRegisterFloat(RegNum reg, float value) {
 }
 
 void CPU::dumpRegisters() const {
-    std::cout << "寄存器状态:\n";
+    std::cout << "Registers:\n";
     for (int i = 0; i < NUM_REGISTERS; i += 4) {
         for (int j = 0; j < 4 && i + j < NUM_REGISTERS; ++j) {
             std::cout << "x" << std::setw(2) << (i + j) << ": 0x" 
@@ -202,10 +202,10 @@ void CPU::dumpRegisters() const {
 }
 
 void CPU::dumpState() const {
-    std::cout << "CPU状态:\n";
+    std::cout << "CPU State:\n";
     std::cout << "PC: 0x" << std::hex << pc_ << std::dec << "\n";
-    std::cout << "指令计数: " << instruction_count_ << "\n";
-    std::cout << "停机状态: " << (halted_ ? "是" : "否") << "\n";
+    std::cout << "Instructions: " << instruction_count_ << "\n";
+    std::cout << "Halted: " << (halted_ ? "yes" : "no") << "\n";
     dumpRegisters();
 }
 

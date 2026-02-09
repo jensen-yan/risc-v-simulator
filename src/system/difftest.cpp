@@ -10,10 +10,10 @@ DiffTest::DiffTest(ICpuInterface* main_cpu, ICpuInterface* reference_cpu)
       enabled_(true), stop_on_mismatch_(true), comparison_count_(0), mismatch_count_(0) {
     
     if (!main_cpu_ || !reference_cpu_) {
-        throw std::invalid_argument("DiffTest: 主CPU和参考CPU都不能为空");
+        throw std::invalid_argument("DiffTest: main CPU and reference CPU must not be null");
     }
     
-    dprintf(DIFFTEST, "DiffTest初始化完成");
+    LOGI(DIFFTEST, "difftest initialized");
 }
 
 DiffTest::~DiffTest() = default;
@@ -60,7 +60,7 @@ bool DiffTest::stepAndCompareWithCommittedPC(ICpuInterface* ooo_cpu, uint64_t co
     
     if (ref_pc != committed_pc) {
         mismatch_count_++;
-        dprintf(DIFFTEST, "DiffTest: 参考CPU和乱序CPU的PC不一致: 参考=0x%" PRIx64 ", 乱序=0x%" PRIx64, ref_pc, committed_pc);
+        LOGE(DIFFTEST, "pc mismatch: ref=0x%" PRIx64 ", ooo=0x%" PRIx64, ref_pc, committed_pc);
         dumpState(reference_cpu_, ooo_cpu);
         return false;
     }
@@ -130,7 +130,7 @@ void DiffTest::dumpState(ICpuInterface* ref_cpu, ICpuInterface* ooo_cpu) {
         uint64_t ooo_value = ooo_cpu->getRegister(reg);
         
         if (ref_value != ooo_value) {
-            dprintf(DIFFTEST, "寄存器x%u不一致: 参考=0x%" PRIx64 ", 乱序=0x%" PRIx64, reg, ref_value, ooo_value);
+            LOGE(DIFFTEST, "register mismatch x%u: ref=0x%" PRIx64 ", ooo=0x%" PRIx64, reg, ref_value, ooo_value);
         }
     }
 }

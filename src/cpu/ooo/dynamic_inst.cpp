@@ -54,7 +54,7 @@ void DynamicInst::set_jump_info(bool is_jump, uint64_t target) {
     is_jump_ = is_jump;
     jump_target_ = target;
     if (is_jump_) {
-        dprintf(EXECUTE, "[JUMP_SET] Inst#%" PRId64 " PC=0x%" PRIx64 " 设置为跳转指令，目标=0x%" PRIx64, 
+        LOGT(EXECUTE, "[JUMP_SET] inst=%" PRId64 " pc=0x%" PRIx64 " marked jump, target=0x%" PRIx64,
                 instruction_id_, pc_, target);
     }
 }

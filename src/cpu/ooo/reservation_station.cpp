@@ -37,12 +37,12 @@ ReservationStation::IssueResult ReservationStation::issue_instruction(DynamicIns
     result.success = false;
     
     if (!dynamic_inst) {
-        result.error_message = "无效的DynamicInst指针";
+        result.error_message = "invalid DynamicInst pointer";
         return result;
     }
     
     if (!has_free_entry()) {
-        result.error_message = "保留站已满，无法发射指令";
+        result.error_message = "reservation station full";
         stall_count++;
         return result;
     }
@@ -59,7 +59,7 @@ ReservationStation::IssueResult ReservationStation::issue_instruction(DynamicIns
     result.rs_entry = rs_id;
     issued_count++;
     
-    dprintf(RS, "发射指令到保留站 RS%d, PC=0x%" PRIx64 ", InstID=%" PRId64, 
+    LOGT(RS, "issue to rs[%d], pc=0x%" PRIx64 ", inst=%" PRId64,
            (int)rs_id, dynamic_inst->get_pc(), dynamic_inst->get_instruction_id());
     
     return result;
@@ -72,13 +72,13 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
     // 选择一条准备好执行的指令
     RSEntry ready_rs = select_ready_instruction();
     if (ready_rs >= MAX_RS_ENTRIES) {
-        result.error_message = "没有准备好的指令可调度";
+        result.error_message = "no ready instruction to dispatch";
         return result;
     }
     
     DynamicInstPtr instruction = rs_entries[ready_rs];
     if (!instruction) {
-        result.error_message = "无效的指令指针";
+        result.error_message = "invalid instruction pointer";
         return result;
     }
     
@@ -87,7 +87,7 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
     
     // 检查执行单元是否可用
     if (!is_execution_unit_available(unit_type)) {
-        result.error_message = "执行单元不可用";
+        result.error_message = "execution unit unavailable";
         stall_count++;
         return result;
     }
@@ -95,7 +95,7 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
     // 分配执行单元
     int unit_id = allocate_execution_unit(unit_type);
     if (unit_id < 0) {
-        result.error_message = "执行单元分配失败";
+        result.error_message = "failed to allocate execution unit";
         return result;
     }
     
@@ -114,7 +114,7 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
     
     dispatched_count++;
     
-    dprintf(RS, "调度指令到执行单元 %s%d, PC=0x%" PRIx64 ", InstID=%" PRId64, 
+    LOGT(RS, "dispatch to %s%d, pc=0x%" PRIx64 ", inst=%" PRId64,
            (unit_type == ExecutionUnitType::ALU ? "ALU" :
             unit_type == ExecutionUnitType::BRANCH ? "BRANCH" :
             unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE"),
@@ -140,13 +140,13 @@ void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry) {
             // 检查源操作数1
             if (!inst->is_src1_ready() && inst->get_physical_src1() == phys_dest) {
                 inst->set_src1_ready(true, result);
-                dprintf(RS, "RS%d 源操作数1就绪: p%d = 0x%" PRIx64, i, phys_dest, result);
+                LOGT(RS, "rs[%d] src1 ready: p%d = 0x%" PRIx64, i, phys_dest, result);
             }
             
             // 检查源操作数2
             if (!inst->is_src2_ready() && inst->get_physical_src2() == phys_dest) {
                 inst->set_src2_ready(true, result);
-                dprintf(RS, "RS%d 源操作数2就绪: p%d = 0x%" PRIx64, i, phys_dest, result);
+                LOGT(RS, "rs[%d] src2 ready: p%d = 0x%" PRIx64, i, phys_dest, result);
             }
         }
     }
@@ -156,13 +156,13 @@ void ReservationStation::release_entry(RSEntry rs_entry) {
     if (rs_entry >= MAX_RS_ENTRIES) return;
     
     if (rs_entries[rs_entry]) {
-        dprintf(RS, "释放保留站表项 RS%d", (int)rs_entry);
+        LOGT(RS, "release rs[%d]", (int)rs_entry);
         rs_entries[rs_entry] = nullptr;
     }
 }
 
 void ReservationStation::flush_pipeline() {
-    dprintf(RS, "刷新保留站流水线");
+    LOGT(RS, "flush reservation station pipeline");
     
     // 清空所有表项
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
@@ -278,7 +278,7 @@ void ReservationStation::get_statistics(uint64_t& issued, uint64_t& dispatched, 
 }
 
 void ReservationStation::dump_reservation_station() const {
-    std::cout << "=== 保留站状态转储 ===" << std::endl;
+    std::cout << "=== Reservation Station Dump ===" << std::endl;
     
     // for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
     //     if (rs_entries[i]) {
@@ -287,11 +287,11 @@ void ReservationStation::dump_reservation_station() const {
     //     }
     // }
     
-    std::cout << "===================" << std::endl;
+    std::cout << "==============================" << std::endl;
 }
 
 void ReservationStation::dump_execution_units() const {
-    std::cout << "=== 执行单元状态 ===" << std::endl;
+    std::cout << "=== Execution Unit State ===" << std::endl;
     
     std::cout << "ALU Units: ";
     for (int i = 0; i < MAX_ALU_UNITS; ++i) {
@@ -317,7 +317,7 @@ void ReservationStation::dump_execution_units() const {
     }
     std::cout << std::endl;
     
-    std::cout << "=================" << std::endl;
+    std::cout << "============================" << std::endl;
 }
 
 DynamicInstPtr ReservationStation::get_entry(RSEntry rs_entry) const {
@@ -369,7 +369,7 @@ RSEntry ReservationStation::select_ready_instruction() const {
         }
     }
     
-    dprintf(RS, "select_ready_instruction: 选择 RS%d", (int)best_entry);
+    LOGT(RS, "select_ready_instruction: rs[%d]", (int)best_entry);
     return best_entry;
 }
 

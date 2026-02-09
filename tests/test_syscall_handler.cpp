@@ -416,7 +416,7 @@ TEST_F(SyscallHandlerTest, UnknownSyscall) {
     restoreOutput();
     
     // 验证错误输出
-    EXPECT_NE(captured_cerr_.str().find("不支持的系统调用"), std::string::npos) 
+    EXPECT_NE(captured_cerr_.str().find("unsupported syscall"), std::string::npos)
         << "应该输出未知系统调用的错误信息";
 }
 

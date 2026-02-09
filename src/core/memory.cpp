@@ -1,4 +1,5 @@
 #include "core/memory.h"
+#include "common/debug_types.h"
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -131,14 +132,14 @@ void Memory::loadProgram(const std::vector<uint8_t>& program, Address startAddr)
 
 void Memory::dump(Address startAddr, size_t length) const {
     if (startAddr >= memory_.size()) {
-        std::cout << "地址超出内存范围\n";
+        std::cout << "address out of memory range\n";
         return;
     }
     
     size_t endAddr = std::min(static_cast<size_t>(startAddr + length), 
                               memory_.size());
     
-    std::cout << "内存转储 (地址: 0x" << std::hex << startAddr 
+    std::cout << "memory dump (address: 0x" << std::hex << startAddr
               << " - 0x" << (endAddr - 1) << "):\n";
     
     for (Address addr = startAddr; addr < endAddr; addr += 16) {
@@ -188,11 +189,10 @@ void Memory::handleTohost(uint64_t value) {
         // 最低位为1表示程序退出
         exit_code_ = static_cast<int>(value >> 1);
         should_exit_ = true;
-        std::cout << "[tohost] 程序请求退出，退出码: " << exit_code_ << std::endl;
+        LOGI(SYSTEM, "[tohost] program requests exit, code=%d", exit_code_);
     } else {
         // 最低位为0表示系统调用
-        std::cout << "[tohost] 处理系统调用请求，magic_mem地址: 0x" 
-                  << std::hex << value << std::dec << std::endl;
+        LOGT(SYSTEM, "[tohost] syscall request, magic_mem=0x%" PRIx64, value);
         processSyscall(value);
     }
 }
@@ -205,8 +205,8 @@ void Memory::processSyscall(Address magic_mem_addr) {
         uint64_t arg1 = read64(magic_mem_addr + 16);
         uint64_t arg2 = read64(magic_mem_addr + 24);
         
-        std::cout << "[tohost] 系统调用: " << syscall_num 
-                  << ", args: " << arg0 << ", " << arg1 << ", " << arg2 << std::endl;
+        LOGT(SYSTEM, "[tohost] syscall=%" PRIx64 ", args=[%" PRIx64 ", %" PRIx64 ", %" PRIx64 "]",
+             syscall_num, arg0, arg1, arg2);
         
         // 处理常见的系统调用
         if (syscall_num == 64) { // SYS_write
@@ -224,7 +224,7 @@ void Memory::processSyscall(Address magic_mem_addr) {
                 write64(magic_mem_addr, arg2); // 返回写入的字节数
             }
         } else {
-            std::cout << "[tohost] 不支持的系统调用: " << syscall_num << std::endl;
+            LOGW(SYSTEM, "[tohost] unsupported syscall: %" PRIx64, syscall_num);
             // 返回错误
             write64(magic_mem_addr, static_cast<uint64_t>(-1));
         }
@@ -233,7 +233,7 @@ void Memory::processSyscall(Address magic_mem_addr) {
         write64(FROMHOST_ADDR, 1);
         
     } catch (const MemoryException& e) {
-        std::cerr << "[tohost] 系统调用处理错误: " << e.what() << std::endl;
+        LOGE(SYSTEM, "[tohost] syscall handling error: %s", e.what());
         // 写入 fromhost 表示处理完成（即使出错）
         write64(FROMHOST_ADDR, 1);
     }

@@ -1,7 +1,7 @@
 #include "system/elf_loader.h"
+#include "common/debug_types.h"
 #include "core/memory.h"
 #include <fstream>
-#include <iostream>
 #include <cstring>
 #include <limits>
 
@@ -15,13 +15,13 @@ ElfLoader::ElfInfo ElfLoader::loadElfFile(const std::string& filename, std::shar
         // 加载文件
         auto data = loadFile(filename);
         if (data.empty()) {
-            std::cerr << "无法加载文件: " << filename << std::endl;
+            LOGE(SYSTEM, "cannot load file: %s", filename.c_str());
             return info;
         }
 
         // 验证ELF文件头
         if (!validateElfHeader(data)) {
-            std::cerr << "无效的ELF文件格式" << std::endl;
+            LOGE(SYSTEM, "invalid elf header format");
             return info;
         }
 
@@ -29,9 +29,7 @@ ElfLoader::ElfInfo ElfLoader::loadElfFile(const std::string& filename, std::shar
         ElfHeader header = parseElfHeader(data);
         info.entryPoint = header.e_entry;
 
-        std::cout << "ELF文件信息:" << std::endl;
-        std::cout << "  入口点: 0x" << std::hex << info.entryPoint << std::dec << std::endl;
-        std::cout << "  程序头数量: " << header.e_phnum << std::endl;
+        LOGI(SYSTEM, "elf info: entry=0x%" PRIx64 ", phnum=%u", info.entryPoint, header.e_phnum);
 
         // 解析程序头表
         for (int i = 0; i < header.e_phnum; i++) {
@@ -67,18 +65,20 @@ ElfLoader::ElfInfo ElfLoader::loadElfFile(const std::string& filename, std::shar
 
                 info.segments.push_back(segment);
 
-                std::cout << "  加载段: 0x" << std::hex << segment.virtualAddr 
-                          << " 大小: " << std::dec << segment.fileSize
-                          << " 内存大小: " << segment.memorySize
-                          << " 权限: " << (segment.readable ? "R" : "-")
-                          << (segment.writable ? "W" : "-")
-                          << (segment.executable ? "X" : "-") << std::endl;
+                LOGI(SYSTEM,
+                     "load segment: vaddr=0x%" PRIx64 ", file_size=%zu, mem_size=%zu, perm=%s%s%s",
+                     segment.virtualAddr,
+                     segment.fileSize,
+                     segment.memorySize,
+                     (segment.readable ? "R" : "-"),
+                     (segment.writable ? "W" : "-"),
+                     (segment.executable ? "X" : "-"));
             }
         }
 
         info.isValid = true;
     } catch (const std::exception& e) {
-        std::cerr << "加载ELF文件失败: " << e.what() << std::endl;
+        LOGE(SYSTEM, "failed to load elf file: %s", e.what());
     }
 
     return info;

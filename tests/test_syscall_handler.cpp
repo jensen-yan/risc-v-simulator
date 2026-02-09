@@ -13,6 +13,7 @@ class MockCPU : public ICpuInterface {
 private:
     uint64_t registers_[32] = {0};
     uint64_t fp_registers_[32] = {0};
+    uint64_t csr_registers_[4096] = {0};
     uint64_t pc_ = 0;
     bool halted_ = false;
     uint32_t enabled_extensions_ = 0;
@@ -24,6 +25,7 @@ public:
     void reset() override {
         std::fill(registers_, registers_ + 32, 0);
         std::fill(fp_registers_, fp_registers_ + 32, 0);
+        std::fill(csr_registers_, csr_registers_ + 4096, 0);
         pc_ = 0;
         halted_ = false;
     }
@@ -59,6 +61,13 @@ public:
     }
     void setFPRegisterFloat(RegNum reg, float value) override {
         fp_registers_[reg] = *reinterpret_cast<uint32_t*>(&value);
+    }
+
+    uint64_t getCSR(uint32_t addr) const override {
+        return csr_registers_[addr & 0xFFFU];
+    }
+    void setCSR(uint32_t addr, uint64_t value) override {
+        csr_registers_[addr & 0xFFFU] = value;
     }
 
     // PC访问

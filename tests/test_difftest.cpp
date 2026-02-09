@@ -263,7 +263,47 @@ TEST_F(DiffTestTest, StateComparisonMismatch) {
     EXPECT_GT(stats.mismatch_count, 0) << "应该检测到不匹配";
 }
 
-// 测试12：PC不匹配的情况
+// 测试12：浮点寄存器不匹配检测
+TEST_F(DiffTestTest, FPRegisterMismatch) {
+    difftest_ = std::make_unique<DiffTest>(main_cpu_.get(), reference_cpu_.get());
+    difftest_->setStopOnMismatch(false);
+
+    const uint64_t test_pc = 0x1000;
+    main_cpu_->setPC(test_pc);
+    reference_cpu_->setPC(test_pc);
+    memory_->writeWord(test_pc, createITypeInstruction(0, 0, 0x0, 0, 0x13));  // NOP
+
+    main_cpu_->setFPRegister(1, 0x3F800000);      // 1.0f
+    reference_cpu_->setFPRegister(1, 0x40000000); // 2.0f
+
+    const bool result = difftest_->stepAndCompareWithCommittedPC(main_cpu_.get(), test_pc);
+    EXPECT_FALSE(result) << "浮点寄存器不匹配应被检测到";
+
+    const auto stats = difftest_->getStatistics();
+    EXPECT_GT(stats.mismatch_count, 0);
+}
+
+// 测试13：关键CSR不匹配检测
+TEST_F(DiffTestTest, CSRMismatch) {
+    difftest_ = std::make_unique<DiffTest>(main_cpu_.get(), reference_cpu_.get());
+    difftest_->setStopOnMismatch(false);
+
+    const uint64_t test_pc = 0x1000;
+    main_cpu_->setPC(test_pc);
+    reference_cpu_->setPC(test_pc);
+    memory_->writeWord(test_pc, createITypeInstruction(0, 0, 0x0, 0, 0x13));  // NOP
+
+    main_cpu_->setCSR(0x300, 0x1);
+    reference_cpu_->setCSR(0x300, 0x2);
+
+    const bool result = difftest_->stepAndCompareWithCommittedPC(main_cpu_.get(), test_pc);
+    EXPECT_FALSE(result) << "关键CSR不匹配应被检测到";
+
+    const auto stats = difftest_->getStatistics();
+    EXPECT_GT(stats.mismatch_count, 0);
+}
+
+// 测试14：PC不匹配的情况
 TEST_F(DiffTestTest, PCMismatch) {
     difftest_ = std::make_unique<DiffTest>(main_cpu_.get(), reference_cpu_.get());
     difftest_->setStopOnMismatch(false);
@@ -282,7 +322,7 @@ TEST_F(DiffTestTest, PCMismatch) {
     EXPECT_GT(stats.mismatch_count, 0) << "PC不匹配应该增加不匹配计数";
 }
 
-// 测试13：禁用状态下的比较
+// 测试15：禁用状态下的比较
 TEST_F(DiffTestTest, ComparisonWhenDisabled) {
     difftest_ = std::make_unique<DiffTest>(main_cpu_.get(), reference_cpu_.get());
     difftest_->setEnabled(false);

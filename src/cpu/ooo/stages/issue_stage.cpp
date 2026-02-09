@@ -1,6 +1,7 @@
 #include "cpu/ooo/stages/issue_stage.h"
 #include "cpu/ooo/dynamic_inst.h"
 #include "common/debug_types.h"
+#include "core/instruction_executor.h"
 
 namespace riscv {
 
@@ -32,6 +33,18 @@ void IssueStage::execute(CPUState& state) {
     
     LOGT(ISSUE, "try issue inst=%" PRId64 " (rob[%d])",
         dispatchable_entry->get_instruction_id(), dispatchable_entry->get_rob_entry());
+
+    // CSR 指令按程序顺序执行，避免 CSR 读写乱序导致状态不一致
+    const auto& decoded_info = dispatchable_entry->get_decoded_info();
+    if (decoded_info.opcode == Opcode::SYSTEM &&
+        InstructionExecutor::isCsrInstruction(decoded_info)) {
+        const auto head_entry = state.reorder_buffer->get_head_entry();
+        if (head_entry != dispatchable_entry->get_rob_entry()) {
+            LOGT(ISSUE, "csr instruction waits for ROB head commit");
+            state.pipeline_stalls++;
+            return;
+        }
+    }
     
     // 检查保留站是否有空闲表项
     if (!state.reservation_station->has_free_entry()) {

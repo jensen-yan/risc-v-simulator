@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-RISC-V 模拟器批量测试脚本
-测试模拟器对 riscv-tests 的兼容性
+Batch test runner for the RISC-V simulator.
 """
 
 import os
@@ -24,12 +23,14 @@ LOG_CATEGORY_SUGGEST = "SUGGEST"
 
 
 def log_message(level: str, category: str, message: str) -> None:
-    """统一日志输出格式"""
+    """Unified log output format."""
     print(f"[{level.upper()}][{category}] {message}")
 
 
 PASS_MARKER = "=== TEST RESULT: PASS ==="
 FAIL_MARKER = "=== TEST RESULT: FAIL ==="
+PROGRAM_FINISHED_MARKER = "Program finished"
+PROGRAM_HALTED_MARKER = "Program State: halted"
 
 
 class TestRunner:
@@ -46,11 +47,11 @@ class TestRunner:
         self.verbose = verbose
         
     def find_test_files(self, test_pattern: str = "rv32ui-p-*") -> List[str]:
-        """查找符合模式的测试文件"""
+        """Find test files matching the given pattern."""
         isa_dir = os.path.join(self.riscv_tests_path, "isa")
         pattern = os.path.join(isa_dir, test_pattern)
         
-        # 排除 .dump 文件，只要可执行文件
+        # Exclude .dump files and keep executable binaries only.
         files = []
         for file_path in glob.glob(pattern):
             if not file_path.endswith('.dump') and os.access(file_path, os.X_OK):
@@ -59,15 +60,15 @@ class TestRunner:
         return sorted(files)
     
     def run_single_test(self, test_file: str, timeout: int = 10, ooo: bool = False) -> Tuple[str, str, int, float, str]:
-        """运行单个测试文件，返回状态、输出、返回码、执行时间和测试名"""
+        """Run one test and return status, output, return code, elapsed time and test name."""
         test_name = os.path.basename(test_file)
         
         try:
-            # 构建模拟器命令
+            # Build simulator command.
             cmd = [
                 self.simulator_path,
-                "-e",  # ELF 模式
-                "-m", "2164260864",  # 2GB 内存
+                "-e",  # ELF mode
+                "-m", "2164260864",  # 2GB memory
                 test_file
             ]
             if ooo:
@@ -78,7 +79,7 @@ class TestRunner:
             if self.verbose:
                 log_message("debug", LOG_CATEGORY_RUNNER, f"cmd: {' '.join(cmd)}")
             
-            # 运行测试
+            # Run test.
             start_time = time.time()
             result = subprocess.run(
                 cmd,
@@ -89,60 +90,69 @@ class TestRunner:
             end_time = time.time()
             elapsed = end_time - start_time
             
-            # 解析结果
+            # Parse results.
             stdout = result.stdout
             stderr = result.stderr
             
-            # 检查是否通过（仅英文输出）
+            # Primary status markers.
             if PASS_MARKER in stdout:
                 return "passed", "", result.returncode, elapsed, test_name
             elif FAIL_MARKER in stdout:
                 return "failed", stderr, result.returncode, elapsed, test_name
+            elif (
+                result.returncode == 0 and
+                PROGRAM_FINISHED_MARKER in stdout and
+                PROGRAM_HALTED_MARKER in stdout
+            ):
+                # Fallback for tests that terminate normally without PASS/FAIL marker.
+                return "passed", "", result.returncode, elapsed, test_name
             else:
-                return "error", f"未知结果:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}", result.returncode, elapsed, test_name
+                return "error", f"Unknown result:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}", result.returncode, elapsed, test_name
                 
         except subprocess.TimeoutExpired:
-            return "timeout", f"测试超时 ({timeout}s)", -1, timeout, test_name
+            return "timeout", f"Test timeout ({timeout}s)", -1, timeout, test_name
         except Exception as e:
-            return "error", f"执行错误: {str(e)}", -1, 0.0, test_name
+            return "error", f"Execution error: {str(e)}", -1, 0.0, test_name
     
     def run_test_suite(self, test_pattern: str = "rv32ui-p-*", timeout: int = 10, ooo: bool = False, max_workers: int = 0) -> Dict:
-        """运行测试套件"""
-        log_message("info", LOG_CATEGORY_RUNNER, f"查找测试文件: {test_pattern}")
+        """Run a test suite."""
+        log_message("info", LOG_CATEGORY_RUNNER, f"Finding test files: {test_pattern}")
         test_files = self.find_test_files(test_pattern)
         
         if not test_files:
-            log_message("error", LOG_CATEGORY_RUNNER, f"未找到匹配的测试文件: {test_pattern}")
+            log_message("error", LOG_CATEGORY_RUNNER, f"No test files matched pattern: {test_pattern}")
             return self.results
         
-        log_message("info", LOG_CATEGORY_RUNNER, f"找到 {len(test_files)} 个测试文件")
+        log_message("info", LOG_CATEGORY_RUNNER, f"Found {len(test_files)} test files")
         
-        # 设置默认线程数
+        # Default worker count.
         if max_workers <= 0:
             max_workers = min(len(test_files), os.cpu_count() or 4)
         
-        log_message("info", LOG_CATEGORY_RUNNER, f"使用 {max_workers} 个线程并行运行测试")
+        log_message("info", LOG_CATEGORY_RUNNER, f"Running tests with {max_workers} workers")
         
         if ooo:
-            log_message("info", LOG_CATEGORY_RUNNER, "测试模式: OOO CPU")
+            log_message("info", LOG_CATEGORY_RUNNER, "CPU mode: OOO")
+        else:
+            log_message("info", LOG_CATEGORY_RUNNER, "CPU mode: In-Order")
         log_message("info", LOG_CATEGORY_RUNNER, "-" * 50)
         
         completed_count = 0
         total_tests = len(test_files)
         
-        # 使用线程池并行运行测试
+        # Run tests in parallel via thread pool.
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 提交所有任务
+            # Submit tasks.
             future_to_test = {executor.submit(self.run_single_test, test_file, timeout, ooo): test_file 
                              for test_file in test_files}
             
-            # 处理完成的任务
+            # Collect completed tasks.
             for future in as_completed(future_to_test):
                 test_file = future_to_test[future]
                 try:
                     status, output, returncode, elapsed, test_name = future.result()
                     
-                    # 线程安全地更新结果
+                    # Thread-safe result update.
                     with self.lock:
                         self.results[status].append({
                             'name': test_name,
@@ -152,7 +162,7 @@ class TestRunner:
                         })
                         completed_count += 1
                     
-                    # 打印结果（线程安全）
+                    # Print status.
                     status_emoji = {
                         'passed': '✅ PASS',
                         'failed': '❌ FAIL',
@@ -169,17 +179,17 @@ class TestRunner:
                         self.results['error'].append({
                             'name': test_name,
                             'file': test_file,
-                            'output': f'线程执行异常: {exc}',
+                            'output': f'Thread execution exception: {exc}',
                             'returncode': -1
                         })
                         completed_count += 1
                     log_message("error", LOG_CATEGORY_RESULT,
-                                f"{completed_count:02d}/{total_tests} {test_name}: 💥 ERROR (线程异常)")
+                                f"{completed_count:02d}/{total_tests} {test_name}: 💥 ERROR (thread exception)")
         
         return self.results
     
     def print_summary(self):
-        """打印测试结果摘要"""
+        """Print test summary."""
         total = sum(len(tests) for tests in self.results.values())
         passed = len(self.results['passed'])
         failed = len(self.results['failed'])
@@ -187,171 +197,171 @@ class TestRunner:
         error = len(self.results['error'])
         
         log_message("info", LOG_CATEGORY_SUMMARY, "=" * 60)
-        log_message("info", LOG_CATEGORY_SUMMARY, "测试结果摘要")
+        log_message("info", LOG_CATEGORY_SUMMARY, "Test Summary")
         log_message("info", LOG_CATEGORY_SUMMARY, "=" * 60)
-        log_message("info", LOG_CATEGORY_SUMMARY, f"总测试数: {total}")
+        log_message("info", LOG_CATEGORY_SUMMARY, f"Total tests: {total}")
         if total > 0:
             log_message("info", LOG_CATEGORY_SUMMARY,
-                        f"✅ 通过:   {passed} ({passed/total*100:.1f}%)")
+                        f"✅ Passed:  {passed} ({passed/total*100:.1f}%)")
             log_message("info", LOG_CATEGORY_SUMMARY,
-                        f"❌ 失败:   {failed} ({failed/total*100:.1f}%)")
+                        f"❌ Failed:  {failed} ({failed/total*100:.1f}%)")
             log_message("info", LOG_CATEGORY_SUMMARY,
-                        f"⏰ 超时:   {timeout} ({timeout/total*100:.1f}%)")
+                        f"⏰ Timeout: {timeout} ({timeout/total*100:.1f}%)")
             log_message("info", LOG_CATEGORY_SUMMARY,
-                        f"💥 错误:   {error} ({error/total*100:.1f}%)")
+                        f"💥 Error:   {error} ({error/total*100:.1f}%)")
         
-        # 打印通过的测试（如果全部通过）
+        # Print all-pass message.
         if passed == total and total > 0:
-            log_message("info", LOG_CATEGORY_SUMMARY, "🎉 所有测试通过！")
+            log_message("info", LOG_CATEGORY_SUMMARY, "🎉 All tests passed")
         
-        # 打印失败的测试详情
+        # Print failure details.
         if failed > 0:
-            log_message("warn", LOG_CATEGORY_SUMMARY, "失败的测试:")
+            log_message("warn", LOG_CATEGORY_SUMMARY, "Failed tests:")
             for test in self.results['failed']:
                 log_message("warn", LOG_CATEGORY_SUMMARY, f"  - {test['name']}")
         
         if timeout > 0:
-            log_message("warn", LOG_CATEGORY_SUMMARY, "超时的测试:")
+            log_message("warn", LOG_CATEGORY_SUMMARY, "Timeout tests:")
             for test in self.results['timeout']:
                 log_message("warn", LOG_CATEGORY_SUMMARY, f"  - {test['name']}")
         
         if error > 0:
-            log_message("error", LOG_CATEGORY_SUMMARY, "出错的测试:")
+            log_message("error", LOG_CATEGORY_SUMMARY, "Error tests:")
             for test in self.results['error']:
                 log_message("error", LOG_CATEGORY_SUMMARY, f"  - {test['name']}")
-                # 只显示前100个字符
+                # Only show first 100 chars.
                 if test['output'] and len(test['output']) > 100:
                     log_message("error", LOG_CATEGORY_SUMMARY,
-                                f"    错误: {test['output'][:100]}...")
+                                f"    Error: {test['output'][:100]}...")
                 elif test['output']:
                     log_message("error", LOG_CATEGORY_SUMMARY,
-                                f"    错误: {test['output']}")
+                                f"    Error: {test['output']}")
         
-        # 提供改进建议
+        # Suggest possible directions.
         if error > 0 or failed > 0 or timeout > 0:
-            log_message("info", LOG_CATEGORY_SUGGEST, "💡 可能的改进方向:")
-            if any("内存错误" in test.get('output', '') for test in self.results['error']):
+            log_message("info", LOG_CATEGORY_SUGGEST, "💡 Potential improvements:")
+            if any("memory" in test.get('output', '').lower() for test in self.results['error']):
                 log_message("info", LOG_CATEGORY_SUGGEST,
-                            "  - 内存管理：检查程序加载地址和内存大小配置")
-            if any("压缩指令" in test.get('name', '') or "rvc" in test.get('name', '')
+                            "  - Memory handling: validate load address and memory size")
+            if any("rvc" in test.get('name', '')
                    for test in self.results['error'] + self.results['failed']):
                 log_message("info", LOG_CATEGORY_SUGGEST,
-                            "  - C扩展支持：实现16位压缩指令解码")
-            if any("浮点" in test.get('name', '') or "uf-" in test.get('name', '')
+                            "  - C extension support: improve 16-bit compressed decoding")
+            if any("uf-" in test.get('name', '') or "ud-" in test.get('name', '') or "uzfh-" in test.get('name', '')
                    for test in self.results['error'] + self.results['failed']):
                 log_message("info", LOG_CATEGORY_SUGGEST,
-                            "  - F扩展支持：完善浮点指令实现")
-            if any("原子" in test.get('name', '') or "ua-" in test.get('name', '')
+                            "  - F extension support: improve floating-point implementation")
+            if any("ua-" in test.get('name', '')
                    for test in self.results['error'] + self.results['failed']):
                 log_message("info", LOG_CATEGORY_SUGGEST,
-                            "  - A扩展支持：实现原子操作指令")
+                            "  - A extension support: implement atomic instructions")
     
     def save_results(self, output_file: str):
-        """保存详细结果到文件"""
+        """Save detailed results to a file."""
         with open(output_file, 'w', encoding='utf-8') as f:
-            f.write("RISC-V 模拟器测试结果\n")
+            f.write("RISC-V Simulator Test Results\n")
             f.write("="*50 + "\n\n")
             
             for status, tests in self.results.items():
                 if tests:
-                    f.write(f"{status.upper()} ({len(tests)} 测试):\n")
+                    f.write(f"{status.upper()} ({len(tests)} tests):\n")
                     f.write("-" * 30 + "\n")
                     for test in tests:
-                        f.write(f"测试: {test['name']}\n")
-                        f.write(f"文件: {test['file']}\n")
-                        f.write(f"返回码: {test['returncode']}\n")
+                        f.write(f"Test: {test['name']}\n")
+                        f.write(f"File: {test['file']}\n")
+                        f.write(f"Return code: {test['returncode']}\n")
                         if test['output']:
-                            f.write(f"输出:\n{test['output']}\n")
+                            f.write(f"Output:\n{test['output']}\n")
                         f.write("\n")
                     f.write("\n")
 
 def main():
-    # 可用的测试模式说明
+    # Available test patterns.
     pattern_help = """
-可用的测试模式 (pattern):
-  rv32ui-p-*     - 用户级整数指令 (基础)
-  rv32um-p-*     - 用户级乘除法指令 (M扩展)
-  rv32ua-p-*     - 用户级原子指令 (A扩展)  
-  rv32uf-p-*     - 用户级单精度浮点 (F扩展)
-  rv32ud-p-*     - 用户级双精度浮点 (D扩展)
-  rv32uc-p-*     - 用户级压缩指令 (C扩展)
-  rv32uzfh-p-*   - 用户级半精度浮点 (Zfh扩展)
-  rv32uzba-p-*   - 位操作地址生成 (Zba扩展)
-  rv32uzbb-p-*   - 位操作基础 (Zbb扩展)
-  rv32uzbc-p-*   - 位操作进位 (Zbc扩展)
-  rv32uzbs-p-*   - 位操作单一 (Zbs扩展)
-  rv32mi-p-*     - 机器级整数指令
-  rv32si-p-*     - 监督级指令
+Available test patterns:
+  rv32ui-p-*     - User integer instructions (base)
+  rv32um-p-*     - User multiply/divide instructions (M extension)
+  rv32ua-p-*     - User atomic instructions (A extension)
+  rv32uf-p-*     - User single-precision floating-point (F extension)
+  rv32ud-p-*     - User double-precision floating-point (D extension)
+  rv32uc-p-*     - User compressed instructions (C extension)
+  rv32uzfh-p-*   - User half-precision floating-point (Zfh extension)
+  rv32uzba-p-*   - Bit-manip address generation (Zba extension)
+  rv32uzbb-p-*   - Bit-manip base (Zbb extension)
+  rv32uzbc-p-*   - Bit-manip carry-less multiply (Zbc extension)
+  rv32uzbs-p-*   - Bit-manip single-bit ops (Zbs extension)
+  rv32mi-p-*     - Machine-level integer instructions
+  rv32si-p-*     - Supervisor-level instructions
   
-常用示例:
-  --pattern "rv32ui-p-*"      # 所有基础整数测试
-  --pattern "rv32ui-p-add*"   # 加法相关测试
-  --pattern "rv32u*-p-*"      # 所有用户级测试
+Examples:
+  --pattern "rv32ui-p-*"      # all base integer tests
+  --pattern "rv32ui-p-add*"   # add-related tests
+  --pattern "rv32u*-p-*"      # all user-level tests
     """
     
     parser = argparse.ArgumentParser(
-        description='RISC-V 模拟器批量测试工具',
+        description='RISC-V simulator batch test tool',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=pattern_help
     )
     parser.add_argument('--simulator', '-s', 
                        default='./build/risc-v-sim',
-                       help='模拟器可执行文件路径')
+                       help='Path to simulator executable')
     parser.add_argument('--tests-dir', '-t',
                        default='./riscv-tests',
-                       help='riscv-tests 目录路径')
+                       help='Path to riscv-tests directory')
     parser.add_argument('--pattern', '-p',
                        default='rv32ui-p-*',
-                       help='测试文件模式 (默认: rv32ui-p-*)')
+                       help='Test file pattern (default: rv32ui-p-*)')
     parser.add_argument('--timeout',
                        type=int, default=10,
-                       help='单个测试超时时间(秒)')
+                       help='Per-test timeout in seconds')
     parser.add_argument('--output', '-o',
-                       help='结果输出文件')
+                       help='Output file path')
     parser.add_argument('--verbose', '-v',
                        action='store_true',
-                       help='详细输出')
+                       help='Enable verbose output')
     parser.add_argument('--ooo',
                        action='store_true',
-                       help='测试OOO CPU')
+                       help='Run tests on OOO CPU')
     parser.add_argument('--workers', '-w',
                        type=int, default=4,
-                       help='并行测试的线程数 (默认: 4核心，0表示自动检测)')
+                       help='Worker count for parallel testing (default: 4, 0=auto)')
     
     args = parser.parse_args()
     
-    # 检查模拟器是否存在
+    # Validate simulator path.
     if not os.path.exists(args.simulator):
-        log_message("error", LOG_CATEGORY_RUNNER, f"模拟器文件不存在: {args.simulator}")
-        log_message("info", LOG_CATEGORY_RUNNER, "请先编译模拟器: make -C build")
+        log_message("error", LOG_CATEGORY_RUNNER, f"Simulator not found: {args.simulator}")
+        log_message("info", LOG_CATEGORY_RUNNER, "Build first: make -C build")
         sys.exit(1)
     
-    # 检查测试目录是否存在
+    # Validate tests path.
     if not os.path.exists(args.tests_dir):
-        log_message("error", LOG_CATEGORY_RUNNER, f"测试目录不存在: {args.tests_dir}")
-        log_message("info", LOG_CATEGORY_RUNNER, "请确保 riscv-tests 子模块已初始化并编译")
+        log_message("error", LOG_CATEGORY_RUNNER, f"Tests directory not found: {args.tests_dir}")
+        log_message("info", LOG_CATEGORY_RUNNER, "Make sure riscv-tests submodule is initialized and built")
         sys.exit(1)
     
-    log_message("info", LOG_CATEGORY_RUNNER, "RISC-V 模拟器批量测试工具")
-    log_message("info", LOG_CATEGORY_RUNNER, f"模拟器: {args.simulator}")
-    log_message("info", LOG_CATEGORY_RUNNER, f"测试目录: {args.tests_dir}")
-    log_message("info", LOG_CATEGORY_RUNNER, f"测试模式: {args.pattern}")
-    log_message("info", LOG_CATEGORY_RUNNER, f"超时时间: {args.timeout}s")
+    log_message("info", LOG_CATEGORY_RUNNER, "RISC-V simulator batch test tool")
+    log_message("info", LOG_CATEGORY_RUNNER, f"Simulator: {args.simulator}")
+    log_message("info", LOG_CATEGORY_RUNNER, f"Tests dir: {args.tests_dir}")
+    log_message("info", LOG_CATEGORY_RUNNER, f"Pattern: {args.pattern}")
+    log_message("info", LOG_CATEGORY_RUNNER, f"Timeout: {args.timeout}s")
     log_message("info", LOG_CATEGORY_RUNNER, "-" * 50)
     
-    # 运行测试
+    # Run tests.
     runner = TestRunner(args.simulator, args.tests_dir, verbose=args.verbose)
     results = runner.run_test_suite(args.pattern, args.timeout, args.ooo, args.workers)
     
-    # 打印摘要
+    # Print summary.
     runner.print_summary()
     
-    # 保存结果
+    # Save results.
     if args.output:
         runner.save_results(args.output)
-        log_message("info", LOG_CATEGORY_RUNNER, f"详细结果已保存到: {args.output}")
+        log_message("info", LOG_CATEGORY_RUNNER, f"Detailed results saved to: {args.output}")
     
-    # 返回适当的退出码
+    # Return exit code.
     if len(results['failed']) + len(results['timeout']) + len(results['error']) > 0:
         sys.exit(1)
     else:

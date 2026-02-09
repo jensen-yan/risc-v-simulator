@@ -76,8 +76,14 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
         switch (inst.type) {
             case InstructionType::R_TYPE:
                 if (inst.opcode == Opcode::OP) {
-                    // 寄存器-寄存器运算
-                    unit.result = InstructionExecutor::executeRegisterOperation(inst, instruction->get_src1_value(), instruction->get_src2_value());
+                    // OP指令包含基础整数和M扩展，按funct7分流
+                    if (inst.funct7 == Funct7::M_EXT) {
+                        unit.result = InstructionExecutor::executeMExtension(
+                            inst, instruction->get_src1_value(), instruction->get_src2_value());
+                    } else {
+                        unit.result = InstructionExecutor::executeRegisterOperation(
+                            inst, instruction->get_src1_value(), instruction->get_src2_value());
+                    }
                 } else if (inst.opcode == Opcode::OP_32) {
                     // RV64I: 32位寄存器运算（W后缀）
                     unit.result = InstructionExecutor::executeRegisterOperation32(inst, instruction->get_src1_value(), instruction->get_src2_value());
@@ -111,6 +117,9 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     unit.jump_target = InstructionExecutor::calculateJumpAndLinkTarget(inst, instruction->get_pc(), instruction->get_src1_value());
                     unit.is_jump = true;  // 标记为跳转指令
                     instruction->set_jump_info(true, unit.jump_target);
+                } else if (inst.opcode == Opcode::MISC_MEM) {
+                    // FENCE/FENCE.I：在当前单核模型中作为NOP处理
+                    unit.result = 0;
                 } else {
                     unit.has_exception = true;
                     unit.exception_msg = "unsupported I-type instruction";
@@ -146,9 +155,8 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     const uint32_t csr_addr = static_cast<uint32_t>(inst.imm) & 0xFFFU;
                     const auto csr_result = InstructionExecutor::executeCsrInstruction(
                         inst, instruction->get_src1_value(), state.csr_registers[csr_addr]);
-                    state.csr_registers[csr_addr] = csr_result.write_value;
                     unit.result = csr_result.read_value;
-                    LOGT(EXECUTE, "inst=%" PRId64 " csr[0x%03x]: old=0x%" PRIx64 ", new=0x%" PRIx64,
+                    LOGT(EXECUTE, "inst=%" PRId64 " csr[0x%03x]: old=0x%" PRIx64 ", pending_new=0x%" PRIx64,
                          instruction->get_instruction_id(), csr_addr,
                          csr_result.read_value, csr_result.write_value);
                 }

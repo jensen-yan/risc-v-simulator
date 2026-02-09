@@ -2,8 +2,24 @@
 #include "common/cpu_interface.h"
 #include "cpu/ooo/ooo_cpu.h"
 #include "common/debug_types.h"
+#include <array>
 
 namespace riscv {
+
+namespace {
+constexpr std::array<uint32_t, 10> kKeyCsrAddrs = {
+    0x300,  // mstatus
+    0x305,  // mtvec
+    0x341,  // mepc
+    0x342,  // mcause
+    0x343,  // mtval
+    0x344,  // mip
+    0x340,  // mscratch
+    0xC00,  // cycle
+    0xC01,  // time
+    0xF14,  // mhartid
+};
+}  // namespace
 
 DiffTest::DiffTest(ICpuInterface* main_cpu, ICpuInterface* reference_cpu) 
     : main_cpu_(main_cpu), reference_cpu_(reference_cpu),
@@ -45,7 +61,11 @@ void DiffTest::syncReferenceState(ICpuInterface* ooo_cpu) {
         uint64_t value = ooo_cpu->getFPRegister(reg);
         reference_cpu_->setFPRegister(reg, value);
     }
-    
+
+    // 同步关键CSR状态，避免参考核和主核在系统指令后起始状态漂移
+    for (uint32_t csr_addr : kKeyCsrAddrs) {
+        reference_cpu_->setCSR(csr_addr, ooo_cpu->getCSR(csr_addr));
+    }
 }
 
 bool DiffTest::stepAndCompareWithCommittedPC(ICpuInterface* ooo_cpu, uint64_t committed_pc) {
@@ -68,10 +88,10 @@ bool DiffTest::stepAndCompareWithCommittedPC(ICpuInterface* ooo_cpu, uint64_t co
     // 让参考CPU执行这条指令
     reference_cpu_->step();
     
-    // 比较关键寄存器状态
-    bool registers_match = compareRegisters(ooo_cpu);
-    
-    if (!registers_match) {
+    const bool gpr_match = compareRegisters(ooo_cpu);
+    const bool fpr_match = compareFPRegisters(ooo_cpu);
+    const bool csr_match = compareCSRRegisters(ooo_cpu);
+    if (!(gpr_match && fpr_match && csr_match)) {
         mismatch_count_++;
         dumpState(reference_cpu_, ooo_cpu);
         
@@ -123,6 +143,17 @@ bool DiffTest::compareFPRegisters(ICpuInterface* ooo_cpu) {
     return true;
 }
 
+bool DiffTest::compareCSRRegisters(ICpuInterface* ooo_cpu) {
+    for (uint32_t csr_addr : kKeyCsrAddrs) {
+        const uint64_t ref_value = reference_cpu_->getCSR(csr_addr);
+        const uint64_t ooo_value = ooo_cpu->getCSR(csr_addr);
+        if (ref_value != ooo_value) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void DiffTest::dumpState(ICpuInterface* ref_cpu, ICpuInterface* ooo_cpu) {
     // 转储关键寄存器状态用于调试
     for (RegNum reg = 1; reg < 32; reg++) {
@@ -131,6 +162,24 @@ void DiffTest::dumpState(ICpuInterface* ref_cpu, ICpuInterface* ooo_cpu) {
         
         if (ref_value != ooo_value) {
             LOGE(DIFFTEST, "register mismatch x%u: ref=0x%" PRIx64 ", ooo=0x%" PRIx64, reg, ref_value, ooo_value);
+        }
+    }
+
+    for (RegNum reg = 0; reg < 32; reg++) {
+        const uint64_t ref_value = ref_cpu->getFPRegister(reg);
+        const uint64_t ooo_value = ooo_cpu->getFPRegister(reg);
+        if (ref_value != ooo_value) {
+            LOGE(DIFFTEST, "fp register mismatch f%u: ref=0x%" PRIx64 ", ooo=0x%" PRIx64,
+                 reg, ref_value, ooo_value);
+        }
+    }
+
+    for (uint32_t csr_addr : kKeyCsrAddrs) {
+        const uint64_t ref_value = ref_cpu->getCSR(csr_addr);
+        const uint64_t ooo_value = ooo_cpu->getCSR(csr_addr);
+        if (ref_value != ooo_value) {
+            LOGE(DIFFTEST, "csr mismatch [0x%03x]: ref=0x%" PRIx64 ", ooo=0x%" PRIx64,
+                 csr_addr, ref_value, ooo_value);
         }
     }
 }

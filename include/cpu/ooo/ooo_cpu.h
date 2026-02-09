@@ -61,6 +61,10 @@ public:
     void setFPRegister(RegNum reg, uint64_t value) override;
     float getFPRegisterFloat(RegNum reg) const override;
     void setFPRegisterFloat(RegNum reg, float value) override;
+
+    // CSR寄存器访问
+    uint64_t getCSR(uint32_t addr) const override;
+    void setCSR(uint32_t addr, uint64_t value) override;
     
     // 程序计数器
     uint64_t getPC() const override { return cpu_state_.pc; }

@@ -190,6 +190,20 @@ void CPU::setFPRegisterFloat(RegNum reg, float value) {
     fp_registers_[reg] = *reinterpret_cast<const uint32_t*>(&value);
 }
 
+uint64_t CPU::getCSR(uint32_t addr) const {
+    if (addr >= NUM_CSR_REGISTERS) {
+        throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
+    }
+    return csr_registers_[addr];
+}
+
+void CPU::setCSR(uint32_t addr, uint64_t value) {
+    if (addr >= NUM_CSR_REGISTERS) {
+        throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
+    }
+    csr_registers_[addr] = value;
+}
+
 void CPU::dumpRegisters() const {
     std::cout << "Registers:\n";
     for (int i = 0; i < NUM_REGISTERS; i += 4) {

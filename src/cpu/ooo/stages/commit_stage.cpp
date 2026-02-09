@@ -106,15 +106,6 @@ void CommitStage::execute(CPUState& state) {
         // 这确保Store指令提交到内存后，相应的Store Buffer条目被清除
         state.store_buffer->retire_stores_before(committed_inst->get_instruction_id());
         
-        // DiffTest: 当乱序CPU提交一条指令时，同步执行参考CPU并比较状态
-        if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
-            LOGT(DIFFTEST, "inst=%" PRId64 " [COMMIT_TRACK] commit count=%" PRId64,
-                committed_inst->get_instruction_id(), state.instruction_count);
-            // 使用提交指令的PC进行DiffTest
-            state.cpu_interface->performDiffTestWithCommittedPC(committed_inst->get_pc());
-            LOGT(COMMIT, "run difftest comparison");
-        }
-        
         // 处理跳转指令：只有is_jump=true的指令才会改变PC
         if (committed_inst->is_jump()) {
             state.pc = committed_inst->get_jump_target();
@@ -127,13 +118,31 @@ void CommitStage::execute(CPUState& state) {
         
         // 处理系统调用
         if (committed_inst->get_decoded_info().opcode == Opcode::SYSTEM) {
-            if (InstructionExecutor::isSystemCall(committed_inst->get_decoded_info())) {
+            const auto& sys_inst = committed_inst->get_decoded_info();
+
+            if (InstructionExecutor::isCsrInstruction(sys_inst)) {
+                const uint32_t csr_addr = static_cast<uint32_t>(sys_inst.imm) & 0xFFFU;
+                const auto csr_result = InstructionExecutor::executeCsrInstruction(
+                    sys_inst, committed_inst->get_src1_value(), state.csr_registers[csr_addr]);
+                state.csr_registers[csr_addr] = csr_result.write_value;
+                LOGT(COMMIT, "inst=%" PRId64 " commit csr[0x%03x]: old=0x%" PRIx64 ", new=0x%" PRIx64,
+                     committed_inst->get_instruction_id(), csr_addr,
+                     csr_result.read_value, csr_result.write_value);
+            } else if (InstructionExecutor::isSystemCall(sys_inst)) {
                 // ECALL
                 handle_ecall(state, committed_inst->get_pc());
-            } else if (InstructionExecutor::isBreakpoint(committed_inst->get_decoded_info())) {
+            } else if (InstructionExecutor::isBreakpoint(sys_inst)) {
                 // EBREAK
                 handle_ebreak(state);
             }
+        }
+
+        // DiffTest: 在提交阶段所有体系结构状态更新完成后再做比较
+        if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
+            LOGT(DIFFTEST, "inst=%" PRId64 " [COMMIT_TRACK] commit count=%" PRId64,
+                committed_inst->get_instruction_id(), state.instruction_count);
+            state.cpu_interface->performDiffTestWithCommittedPC(committed_inst->get_pc());
+            LOGT(COMMIT, "run difftest comparison");
         }
         
         // 如果没有更多指令可提交，跳出循环

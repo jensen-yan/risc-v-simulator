@@ -208,6 +208,20 @@ void OutOfOrderCPU::setFPRegisterFloat(RegNum reg, float value) {
     cpu_state_.arch_fp_registers[reg] = *reinterpret_cast<const uint32_t*>(&value);
 }
 
+uint64_t OutOfOrderCPU::getCSR(uint32_t addr) const {
+    if (addr >= cpu_state_.csr_registers.size()) {
+        throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
+    }
+    return cpu_state_.csr_registers[addr];
+}
+
+void OutOfOrderCPU::setCSR(uint32_t addr, uint64_t value) {
+    if (addr >= cpu_state_.csr_registers.size()) {
+        throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
+    }
+    cpu_state_.csr_registers[addr] = value;
+}
+
 void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint64_t pc) {
     LOGE(SYSTEM, "exception: %s, pc=0x%" PRIx64, exception_msg.c_str(), pc);
     flush_pipeline();

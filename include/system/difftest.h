@@ -79,6 +79,7 @@ private:
     bool compareRegisters(ICpuInterface* ooo_cpu);
     bool comparePC(ICpuInterface* ooo_cpu);
     bool compareFPRegisters(ICpuInterface* ooo_cpu);
+    bool compareCSRRegisters(ICpuInterface* ooo_cpu);
     
     /**
      * 转储状态信息用于调试

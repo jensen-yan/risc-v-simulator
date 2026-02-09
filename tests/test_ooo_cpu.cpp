@@ -170,6 +170,46 @@ TEST_F(OutOfOrderCPUTest, MultipleInstructions) {
     EXPECT_EQ(cpu->getRegister(3), 30) << "x3应该等于30";
 }
 
+TEST_F(OutOfOrderCPUTest, MExtensionMulInstruction) {
+    // ADDI x1, x0, 6
+    // ADDI x2, x0, 7
+    // MUL  x3, x1, x2
+    // ECALL
+    writeInstruction(0x0, createITypeInstruction(6, 0, 0x0, 1, 0x13));
+    writeInstruction(0x4, createITypeInstruction(7, 0, 0x0, 2, 0x13));
+    writeInstruction(0x8, createRTypeInstruction(0x01, 2, 1, 0x0, 3, 0x33));
+    writeInstruction(0xC, createECallInstruction());
+
+    cpu->setPC(0x0);
+
+    for (int i = 0; i < 80 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
+    EXPECT_EQ(cpu->getRegister(3), 42) << "MUL结果应为42";
+}
+
+TEST_F(OutOfOrderCPUTest, FenceInstructionAsNop) {
+    // ADDI  x1, x0, 1
+    // FENCE
+    // ADDI  x2, x1, 1
+    // ECALL
+    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
+    writeInstruction(0x4, createITypeInstruction(0, 0, 0x0, 0, 0x0F));
+    writeInstruction(0x8, createITypeInstruction(1, 1, 0x0, 2, 0x13));
+    writeInstruction(0xC, createECallInstruction());
+
+    cpu->setPC(0x0);
+
+    for (int i = 0; i < 80 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
+    EXPECT_EQ(cpu->getRegister(2), 2) << "FENCE应按NOP处理，不影响后续计算";
+}
+
 // 测试6：CPU状态重置
 TEST_F(OutOfOrderCPUTest, SystemCSRInstructions) {
     // 指令序列:

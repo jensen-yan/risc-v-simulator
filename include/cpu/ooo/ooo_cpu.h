@@ -107,6 +107,7 @@ private:
     
     // DiffTest组件（由Simulator管理，这里只保存引用）
     class DiffTest* difftest_;
+    bool difftest_synced_once_ = false;
     
     // 异常处理
     void handle_exception(const std::string& exception_msg, uint64_t pc);

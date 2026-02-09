@@ -484,6 +484,34 @@ TEST_F(InstructionExecutorTest, SystemInstructions) {
     // URET
     auto uret_inst = createDecodedInst(Opcode::SYSTEM, Funct3::ECALL_EBREAK, Funct7::NORMAL, 0, 0, 0, 0x002);
     EXPECT_TRUE(InstructionExecutor::isUserReturn(uret_inst)) << "应该识别URET指令";
+
+    EXPECT_TRUE(InstructionExecutor::isTrapLikeSystemInstruction(ecall_inst))
+        << "ECALL应归类为trap类系统指令";
+    EXPECT_FALSE(InstructionExecutor::isTrapLikeSystemInstruction(
+                     createDecodedInst(Opcode::SYSTEM, static_cast<Funct3>(0b001), Funct7::NORMAL, 1, 2, 0, 0x300)))
+        << "CSR指令不应归类为trap类系统指令";
+}
+
+TEST_F(InstructionExecutorTest, CsrInstructions) {
+    auto csrrw_inst = createDecodedInst(Opcode::SYSTEM, static_cast<Funct3>(0b001), Funct7::NORMAL, 2, 1, 0, 0x300);
+    auto csrrs_inst = createDecodedInst(Opcode::SYSTEM, static_cast<Funct3>(0b010), Funct7::NORMAL, 3, 1, 0, 0x300);
+    auto csrrwi_inst = createDecodedInst(Opcode::SYSTEM, static_cast<Funct3>(0b101), Funct7::NORMAL, 4, 7, 0, 0x300);
+
+    EXPECT_TRUE(InstructionExecutor::isCsrInstruction(csrrw_inst));
+    EXPECT_TRUE(InstructionExecutor::isCsrInstruction(csrrs_inst));
+    EXPECT_TRUE(InstructionExecutor::isCsrInstruction(csrrwi_inst));
+
+    auto csrrw_result = InstructionExecutor::executeCsrInstruction(csrrw_inst, 0x55, 0xAA);
+    EXPECT_EQ(csrrw_result.read_value, 0xAA);
+    EXPECT_EQ(csrrw_result.write_value, 0x55);
+
+    auto csrrs_result = InstructionExecutor::executeCsrInstruction(csrrs_inst, 0x0F, 0xF0);
+    EXPECT_EQ(csrrs_result.read_value, 0xF0);
+    EXPECT_EQ(csrrs_result.write_value, 0xFF);
+
+    auto csrrwi_result = InstructionExecutor::executeCsrInstruction(csrrwi_inst, 0x0, 0x11);
+    EXPECT_EQ(csrrwi_result.read_value, 0x11);
+    EXPECT_EQ(csrrwi_result.write_value, 7);
 }
 
 // ========== 辅助方法测试 ==========

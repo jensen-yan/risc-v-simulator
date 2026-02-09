@@ -48,11 +48,11 @@ DecodedInstruction Decoder::decode(Instruction instruction, uint32_t enabled_ext
     if (decoded.opcode == Opcode::BRANCH || decoded.opcode == Opcode::STORE) {
         // BRANCH和STORE指令（B_TYPE和S_TYPE）没有rd字段，bit[11:7]是立即数的一部分
         decoded.rd = 0;  // 这些指令不写回寄存器
-    } else if (decoded.opcode == Opcode::SYSTEM) {
-        // 对于ECALL/EBREAK/mret等系统指令，不应写回寄存器
-        // 对于CSRRW/CSRRS/CSRRC等CSR指令，需要根据具体指令决定是否写回
-        // 简化处理：所有SYSTEM指令都不写回寄存器
-        decoded.rd = 0;  // SYSTEM指令不写回寄存器
+    } else if (decoded.opcode == Opcode::SYSTEM &&
+               decoded.funct3 == Funct3::ECALL_EBREAK) {
+        // 仅ECALL/EBREAK/MRET/SRET/URET这类SYSTEM指令不写回寄存器。
+        // CSR指令（funct3!=000）保留rd，用于写回旧CSR值。
+        decoded.rd = 0;
     }
     
     // 初始化静态执行属性 - 避免ExecuteStage重复解析

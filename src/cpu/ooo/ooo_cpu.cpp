@@ -15,7 +15,68 @@
 
 namespace riscv {
 
-OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory), difftest_(nullptr) {
+namespace {
+
+template <typename T>
+void clearQueue(std::queue<T>& q) {
+    while (!q.empty()) {
+        q.pop();
+    }
+}
+
+void resetSingleExecutionUnit(ExecutionUnit& unit) {
+    unit.busy = false;
+    unit.remaining_cycles = 0;
+    unit.instruction = nullptr;
+    unit.result = 0;
+    unit.has_exception = false;
+    unit.exception_msg.clear();
+    unit.jump_target = 0;
+    unit.is_jump = false;
+    unit.load_address = 0;
+    unit.load_size = 0;
+}
+
+void resetAllExecutionUnits(CPUState& state) {
+    for (auto& unit : state.alu_units) resetSingleExecutionUnit(unit);
+    for (auto& unit : state.branch_units) resetSingleExecutionUnit(unit);
+    for (auto& unit : state.load_units) resetSingleExecutionUnit(unit);
+    for (auto& unit : state.store_units) resetSingleExecutionUnit(unit);
+}
+
+void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& memory) {
+    state.register_rename = std::make_unique<RegisterRenameUnit>();
+    state.reservation_station = std::make_unique<ReservationStation>();
+    state.reorder_buffer = std::make_unique<ReorderBuffer>();
+    state.store_buffer = std::make_unique<StoreBuffer>();
+    state.syscall_handler = std::make_unique<SyscallHandler>(memory);
+}
+
+void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memory) {
+    state.pc = 0;
+    state.halted = false;
+    state.instruction_count = 0;
+    state.cycle_count = 0;
+    state.branch_mispredicts = 0;
+    state.pipeline_stalls = 0;
+    state.global_instruction_id = 0;
+
+    state.arch_registers.fill(0);
+    state.arch_fp_registers.fill(0);
+    state.csr_registers.fill(0);
+    state.physical_registers.fill(0);
+    state.physical_fp_registers.fill(0);
+
+    recreateRuntimeComponents(state, memory);
+    resetAllExecutionUnits(state);
+    clearQueue(state.fetch_buffer);
+    clearQueue(state.cdb_queue);
+}
+
+} // namespace
+
+OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
+    : memory_(memory), difftest_(nullptr), difftest_synced_once_(false) {
     // 初始化CPUState
     cpu_state_.memory = memory_;
     cpu_state_.cpu_interface = this;  // 设置CPU接口引用，让Stage可以调用CPU方法
@@ -24,12 +85,8 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory) : memory_(memory), 
                                    static_cast<uint32_t>(Extension::F) | 
                                    static_cast<uint32_t>(Extension::C);
     
-    // 初始化组件
-    cpu_state_.register_rename = std::make_unique<RegisterRenameUnit>();
-    cpu_state_.reservation_station = std::make_unique<ReservationStation>();
-    cpu_state_.reorder_buffer = std::make_unique<ReorderBuffer>();
-    cpu_state_.store_buffer = std::make_unique<StoreBuffer>();
-    cpu_state_.syscall_handler = std::make_unique<SyscallHandler>(memory_);
+    // 初始化可变运行态（寄存器、队列、ooo组件等）
+    resetCpuStateForReuse(cpu_state_, memory_);
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
     
     // DiffTest将由Simulator通过setDiffTest()方法设置
@@ -79,47 +136,11 @@ void OutOfOrderCPU::run() {
 }
 
 void OutOfOrderCPU::reset() {
-    // 重置CPU状态
-    cpu_state_.pc = 0;
-    cpu_state_.halted = false;
-    cpu_state_.instruction_count = 0;
-    cpu_state_.cycle_count = 0;
-    cpu_state_.branch_mispredicts = 0;
-    cpu_state_.pipeline_stalls = 0;
-    
-    // 重置寄存器
-    cpu_state_.arch_registers.fill(0);
-    cpu_state_.arch_fp_registers.fill(0);
-    cpu_state_.physical_registers.fill(0);
-    cpu_state_.physical_fp_registers.fill(0);
-    
-    // 重置乱序执行组件
-    cpu_state_.register_rename = std::make_unique<RegisterRenameUnit>();
-    cpu_state_.reservation_station = std::make_unique<ReservationStation>();
-    cpu_state_.reorder_buffer = std::make_unique<ReorderBuffer>();
-    
-    // 重置CPUState中的组件
-    cpu_state_.register_rename = std::make_unique<RegisterRenameUnit>();
-    cpu_state_.reservation_station = std::make_unique<ReservationStation>();
-    cpu_state_.reorder_buffer = std::make_unique<ReorderBuffer>();
-    
-    // 清空缓冲区
-    while (!cpu_state_.fetch_buffer.empty()) {
-        cpu_state_.fetch_buffer.pop();
-    }
-    while (!cpu_state_.cdb_queue.empty()) {
-        cpu_state_.cdb_queue.pop();
-    }
-    
-    // 清空CPUState中的缓冲区
-    while (!cpu_state_.fetch_buffer.empty()) {
-        cpu_state_.fetch_buffer.pop();
-    }
-    while (!cpu_state_.cdb_queue.empty()) {
-        cpu_state_.cdb_queue.pop();
-    }
+    resetCpuStateForReuse(cpu_state_, memory_);
+    syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
     
     // 重置DiffTest组件
+    difftest_synced_once_ = false;
     if (difftest_) {
         difftest_->reset();
     }
@@ -310,12 +331,16 @@ void OutOfOrderCPU::dumpPipelineState() const {
 
 void OutOfOrderCPU::setDiffTest(DiffTest* difftest) {
     difftest_ = difftest;
+    difftest_synced_once_ = false;
     LOGI(DIFFTEST, "difftest attached to ooo cpu");
 }
 
 void OutOfOrderCPU::enableDiffTest(bool enable) {
     if (difftest_) {
         difftest_->setEnabled(enable);
+        if (enable) {
+            difftest_synced_once_ = false;
+        }
         LOGI(DIFFTEST, "difftest %s", enable ? "enabled" : "disabled");
     }
 }
@@ -327,12 +352,11 @@ bool OutOfOrderCPU::isDiffTestEnabled() const {
 void OutOfOrderCPU::performDiffTestWithCommittedPC(uint64_t committed_pc) {
     if (difftest_ && difftest_->isEnabled()) {
         // 第一次调用时，同步参考CPU的完整状态
-        static bool first_call = true;
-        if (first_call) {
+        if (!difftest_synced_once_) {
             // 对于第一次同步，使用提交的PC来同步参考CPU
             difftest_->setReferencePC(committed_pc);
             difftest_->syncReferenceState(this);
-            first_call = false;
+            difftest_synced_once_ = true;
         }
         
         // 执行参考CPU一步并比较状态，使用提交指令的PC

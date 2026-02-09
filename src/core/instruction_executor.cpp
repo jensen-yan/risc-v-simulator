@@ -368,6 +368,75 @@ bool InstructionExecutor::isUserReturn(const DecodedInstruction& inst) {
            inst.imm == SystemInst::URET;
 }
 
+bool InstructionExecutor::isTrapLikeSystemInstruction(const DecodedInstruction& inst) {
+    return isSystemCall(inst) ||
+           isBreakpoint(inst) ||
+           isMachineReturn(inst) ||
+           isSupervisorReturn(inst) ||
+           isUserReturn(inst);
+}
+
+bool InstructionExecutor::isCsrInstruction(const DecodedInstruction& inst) {
+    if (inst.opcode != Opcode::SYSTEM) {
+        return false;
+    }
+
+    switch (inst.funct3) {
+        case static_cast<Funct3>(0b001):  // CSRRW
+        case static_cast<Funct3>(0b010):  // CSRRS
+        case static_cast<Funct3>(0b011):  // CSRRC
+        case static_cast<Funct3>(0b101):  // CSRRWI
+        case static_cast<Funct3>(0b110):  // CSRRSI
+        case static_cast<Funct3>(0b111):  // CSRRCI
+            return true;
+        default:
+            return false;
+    }
+}
+
+InstructionExecutor::CsrExecuteResult InstructionExecutor::executeCsrInstruction(
+    const DecodedInstruction& inst, uint64_t rs1_value, uint64_t current_csr_value) {
+    if (!isCsrInstruction(inst)) {
+        throw IllegalInstructionException("非CSR系统指令");
+    }
+
+    CsrExecuteResult result{current_csr_value, current_csr_value};
+    const uint64_t zimm = static_cast<uint64_t>(inst.rs1 & 0x1F);
+
+    switch (inst.funct3) {
+        case static_cast<Funct3>(0b001):  // CSRRW
+            result.write_value = rs1_value;
+            break;
+        case static_cast<Funct3>(0b010):  // CSRRS
+            if (inst.rs1 != 0) {
+                result.write_value = current_csr_value | rs1_value;
+            }
+            break;
+        case static_cast<Funct3>(0b011):  // CSRRC
+            if (inst.rs1 != 0) {
+                result.write_value = current_csr_value & ~rs1_value;
+            }
+            break;
+        case static_cast<Funct3>(0b101):  // CSRRWI
+            result.write_value = zimm;
+            break;
+        case static_cast<Funct3>(0b110):  // CSRRSI
+            if (inst.rs1 != 0) {
+                result.write_value = current_csr_value | zimm;
+            }
+            break;
+        case static_cast<Funct3>(0b111):  // CSRRCI
+            if (inst.rs1 != 0) {
+                result.write_value = current_csr_value & ~zimm;
+            }
+            break;
+        default:
+            throw IllegalInstructionException("未知CSR指令功能码");
+    }
+
+    return result;
+}
+
 // 私有辅助方法实现
 
 uint64_t InstructionExecutor::performShiftOperation(uint64_t value, uint64_t shift_amount, Funct3 funct3, Funct7 funct7) {

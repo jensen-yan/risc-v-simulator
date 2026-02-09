@@ -118,10 +118,40 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                 break;
 
             case InstructionType::SYSTEM_TYPE:
-                // CSR指令或系统调用 - 暂时作为NOP处理
-                LOGT(EXECUTE, "inst=%" PRId64 " execute SYSTEM_TYPE as NOP",
-                    instruction->get_instruction_id());
-                unit.result = 0;
+                if (inst.opcode != Opcode::SYSTEM) {
+                    unit.has_exception = true;
+                    unit.exception_msg = "invalid SYSTEM_TYPE opcode";
+                    break;
+                }
+
+                if (inst.funct3 == Funct3::ECALL_EBREAK) {
+                    // ECALL/EBREAK/MRET/SRET/URET 等在提交阶段处理，不在执行阶段改状态。
+                    if (InstructionExecutor::isTrapLikeSystemInstruction(inst)) {
+                        unit.result = 0;
+                        break;
+                    }
+
+                    unit.has_exception = true;
+                    unit.exception_msg = "unsupported system instruction";
+                    break;
+                }
+
+                if (!InstructionExecutor::isCsrInstruction(inst)) {
+                    unit.has_exception = true;
+                    unit.exception_msg = "unsupported system funct3";
+                    break;
+                }
+
+                {
+                    const uint32_t csr_addr = static_cast<uint32_t>(inst.imm) & 0xFFFU;
+                    const auto csr_result = InstructionExecutor::executeCsrInstruction(
+                        inst, instruction->get_src1_value(), state.csr_registers[csr_addr]);
+                    state.csr_registers[csr_addr] = csr_result.write_value;
+                    unit.result = csr_result.read_value;
+                    LOGT(EXECUTE, "inst=%" PRId64 " csr[0x%03x]: old=0x%" PRIx64 ", new=0x%" PRIx64,
+                         instruction->get_instruction_id(), csr_addr,
+                         csr_result.read_value, csr_result.write_value);
+                }
                 break;
                 
             case InstructionType::B_TYPE:

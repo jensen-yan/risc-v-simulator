@@ -15,6 +15,11 @@ namespace riscv {
  */
 class InstructionExecutor {
 public:
+    struct CsrExecuteResult {
+        uint64_t read_value;
+        uint64_t write_value;
+    };
+
     // 基本算术运算
     static uint64_t executeImmediateOperation(const DecodedInstruction& inst, uint64_t rs1_val);
     static uint64_t executeRegisterOperation(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val);
@@ -52,6 +57,10 @@ public:
     static bool isMachineReturn(const DecodedInstruction& inst);
     static bool isSupervisorReturn(const DecodedInstruction& inst);
     static bool isUserReturn(const DecodedInstruction& inst);
+    static bool isTrapLikeSystemInstruction(const DecodedInstruction& inst);
+    static bool isCsrInstruction(const DecodedInstruction& inst);
+    static CsrExecuteResult executeCsrInstruction(const DecodedInstruction& inst, uint64_t rs1_value,
+                                                  uint64_t current_csr_value);
     
 private:
     // 私有辅助方法

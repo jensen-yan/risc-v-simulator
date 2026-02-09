@@ -62,6 +62,7 @@ struct CPUState {
     
     std::array<uint64_t, NUM_REGISTERS> arch_registers;     // 架构寄存器
     std::array<uint32_t, NUM_FP_REGISTERS> arch_fp_registers; // 架构浮点寄存器
+    std::array<uint64_t, 4096> csr_registers;               // CSR寄存器文件（12位地址空间）
     std::array<uint64_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_registers;    // 物理寄存器
     std::array<uint32_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_fp_registers; // 物理浮点寄存器
     
@@ -109,6 +110,7 @@ struct CPUState {
         // 批量初始化所有寄存器为0
         arch_registers.fill(0);
         arch_fp_registers.fill(0);
+        csr_registers.fill(0);
         physical_registers.fill(0);
         physical_fp_registers.fill(0);
         

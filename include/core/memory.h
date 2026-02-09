@@ -3,6 +3,7 @@
 #include "common/types.h"
 #include <vector>
 #include <memory>
+#include <cstdlib>
 
 namespace riscv {
 
@@ -42,7 +43,7 @@ public:
     
     // 内存管理
     void clear();
-    size_t getSize() const { return memory_.size(); }
+    size_t getSize() const { return memory_size_; }
     
     // 加载程序到内存
     void loadProgram(const std::vector<uint8_t>& program, Address startAddr = 0);
@@ -56,7 +57,8 @@ public:
     void resetExitStatus() { should_exit_ = false; exit_code_ = 0; }
     
 private:
-    std::vector<uint8_t> memory_;
+    std::unique_ptr<uint8_t, decltype(&std::free)> memory_;
+    size_t memory_size_;
     
     // tohost/fromhost 特殊地址
     static constexpr Address TOHOST_ADDR = 0x80001000;

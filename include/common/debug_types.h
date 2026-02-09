@@ -235,6 +235,16 @@ public:
         return has_global_pc_ ? global_pc_ : 0;
     }
 
+    // 快速判断是否需要记录该分类日志（用于避免无效格式化开销）
+    bool shouldLog(const std::string& category,
+                   std::optional<uint64_t> cycle = std::nullopt) const {
+        std::optional<uint64_t> resolved_cycle = cycle;
+        if (!resolved_cycle && has_global_cycle_) {
+            resolved_cycle = global_cycle_;
+        }
+        return shouldOutput(toUpper(category), resolved_cycle);
+    }
+
     // Trace日志（默认）
     void logTrace(const std::string& category,
                   const std::string& message,
@@ -380,28 +390,43 @@ private:
 } // namespace riscv
 
 #define LOG_DEBUG(stage, ...) do { \
-    const auto message = fmt::sprintf(__VA_ARGS__); \
-    ::riscv::DebugManager::getInstance().log(#stage, message); \
+    auto& _dm = ::riscv::DebugManager::getInstance(); \
+    if (_dm.shouldLog(#stage)) { \
+        const auto message = fmt::sprintf(__VA_ARGS__); \
+        _dm.log(#stage, message); \
+    } \
 } while (0)
 
 #define LOGT(stage, ...) do { \
-    const auto message = fmt::sprintf(__VA_ARGS__); \
-    ::riscv::DebugManager::getInstance().logTrace(#stage, message); \
+    auto& _dm = ::riscv::DebugManager::getInstance(); \
+    if (_dm.shouldLog(#stage)) { \
+        const auto message = fmt::sprintf(__VA_ARGS__); \
+        _dm.logTrace(#stage, message); \
+    } \
 } while (0)
 
 #define LOGI(stage, ...) do { \
-    const auto message = fmt::sprintf(__VA_ARGS__); \
-    ::riscv::DebugManager::getInstance().logEvent(::riscv::LogLevel::INFO, #stage, message); \
+    auto& _dm = ::riscv::DebugManager::getInstance(); \
+    if (_dm.shouldLog(#stage)) { \
+        const auto message = fmt::sprintf(__VA_ARGS__); \
+        _dm.logEvent(::riscv::LogLevel::INFO, #stage, message); \
+    } \
 } while (0)
 
 #define LOGW(stage, ...) do { \
-    const auto message = fmt::sprintf(__VA_ARGS__); \
-    ::riscv::DebugManager::getInstance().logEvent(::riscv::LogLevel::WARN, #stage, message); \
+    auto& _dm = ::riscv::DebugManager::getInstance(); \
+    if (_dm.shouldLog(#stage)) { \
+        const auto message = fmt::sprintf(__VA_ARGS__); \
+        _dm.logEvent(::riscv::LogLevel::WARN, #stage, message); \
+    } \
 } while (0)
 
 #define LOGE(stage, ...) do { \
-    const auto message = fmt::sprintf(__VA_ARGS__); \
-    ::riscv::DebugManager::getInstance().logEvent(::riscv::LogLevel::ERROR, #stage, message); \
+    auto& _dm = ::riscv::DebugManager::getInstance(); \
+    if (_dm.shouldLog(#stage)) { \
+        const auto message = fmt::sprintf(__VA_ARGS__); \
+        _dm.logEvent(::riscv::LogLevel::ERROR, #stage, message); \
+    } \
 } while (0)
 
 // 兼容旧接口

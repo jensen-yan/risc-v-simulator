@@ -4,31 +4,39 @@
 #include <iomanip>
 #include <fstream>
 #include <algorithm>
+#include <cstring>
 
 namespace riscv {
 
-Memory::Memory(size_t size) : memory_(size, 0) {
+Memory::Memory(size_t size)
+    : memory_(nullptr, &std::free), memory_size_(size) {
     if (size == 0) {
         throw MemoryException("内存大小不能为0");
     }
+
+    void* raw = std::calloc(memory_size_, sizeof(uint8_t));
+    if (!raw) {
+        throw MemoryException("内存分配失败");
+    }
+    memory_.reset(static_cast<uint8_t*>(raw));
 }
 
 uint8_t Memory::readByte(Address addr) const {
     checkAddress(addr, 1);
-    return memory_[addr];
+    return memory_.get()[addr];
 }
 
 void Memory::writeByte(Address addr, uint8_t value) {
     checkAddress(addr, 1);
-    memory_[addr] = value;
+    memory_.get()[addr] = value;
 }
 
 uint16_t Memory::readHalfWord(Address addr) const {
     checkAddress(addr, 2);
     
     // 小端序读取
-    uint16_t result = memory_[addr];
-    result |= static_cast<uint16_t>(memory_[addr + 1]) << 8;
+    uint16_t result = memory_.get()[addr];
+    result |= static_cast<uint16_t>(memory_.get()[addr + 1]) << 8;
     return result;
 }
 
@@ -36,18 +44,18 @@ void Memory::writeHalfWord(Address addr, uint16_t value) {
     checkAddress(addr, 2);
     
     // 小端序存储
-    memory_[addr] = static_cast<uint8_t>(value & 0xFF);
-    memory_[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    memory_.get()[addr] = static_cast<uint8_t>(value & 0xFF);
+    memory_.get()[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
 }
 
 uint32_t Memory::readWord(Address addr) const {
     checkAddress(addr, 4);
     
     // 小端序读取
-    uint32_t result = memory_[addr];
-    result |= static_cast<uint32_t>(memory_[addr + 1]) << 8;
-    result |= static_cast<uint32_t>(memory_[addr + 2]) << 16;
-    result |= static_cast<uint32_t>(memory_[addr + 3]) << 24;
+    uint32_t result = memory_.get()[addr];
+    result |= static_cast<uint32_t>(memory_.get()[addr + 1]) << 8;
+    result |= static_cast<uint32_t>(memory_.get()[addr + 2]) << 16;
+    result |= static_cast<uint32_t>(memory_.get()[addr + 3]) << 24;
     return result;
 }
 
@@ -55,24 +63,24 @@ void Memory::writeWord(Address addr, uint32_t value) {
     checkAddress(addr, 4);
     
     // 小端序存储
-    memory_[addr] = static_cast<uint8_t>(value & 0xFF);
-    memory_[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
-    memory_[addr + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
-    memory_[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+    memory_.get()[addr] = static_cast<uint8_t>(value & 0xFF);
+    memory_.get()[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    memory_.get()[addr + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    memory_.get()[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
 }
 
 uint64_t Memory::read64(Address addr) const {
     checkAddress(addr, 8);
     
     // 小端序读取
-    uint64_t result = memory_[addr];
-    result |= static_cast<uint64_t>(memory_[addr + 1]) << 8;
-    result |= static_cast<uint64_t>(memory_[addr + 2]) << 16;
-    result |= static_cast<uint64_t>(memory_[addr + 3]) << 24;
-    result |= static_cast<uint64_t>(memory_[addr + 4]) << 32;
-    result |= static_cast<uint64_t>(memory_[addr + 5]) << 40;
-    result |= static_cast<uint64_t>(memory_[addr + 6]) << 48;
-    result |= static_cast<uint64_t>(memory_[addr + 7]) << 56;
+    uint64_t result = memory_.get()[addr];
+    result |= static_cast<uint64_t>(memory_.get()[addr + 1]) << 8;
+    result |= static_cast<uint64_t>(memory_.get()[addr + 2]) << 16;
+    result |= static_cast<uint64_t>(memory_.get()[addr + 3]) << 24;
+    result |= static_cast<uint64_t>(memory_.get()[addr + 4]) << 32;
+    result |= static_cast<uint64_t>(memory_.get()[addr + 5]) << 40;
+    result |= static_cast<uint64_t>(memory_.get()[addr + 6]) << 48;
+    result |= static_cast<uint64_t>(memory_.get()[addr + 7]) << 56;
     return result;
 }
 
@@ -86,14 +94,14 @@ void Memory::write64(Address addr, uint64_t value) {
     checkAddress(addr, 8);
     
     // 小端序存储
-    memory_[addr] = static_cast<uint8_t>(value & 0xFF);
-    memory_[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
-    memory_[addr + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
-    memory_[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
-    memory_[addr + 4] = static_cast<uint8_t>((value >> 32) & 0xFF);
-    memory_[addr + 5] = static_cast<uint8_t>((value >> 40) & 0xFF);
-    memory_[addr + 6] = static_cast<uint8_t>((value >> 48) & 0xFF);
-    memory_[addr + 7] = static_cast<uint8_t>((value >> 56) & 0xFF);
+    memory_.get()[addr] = static_cast<uint8_t>(value & 0xFF);
+    memory_.get()[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    memory_.get()[addr + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    memory_.get()[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+    memory_.get()[addr + 4] = static_cast<uint8_t>((value >> 32) & 0xFF);
+    memory_.get()[addr + 5] = static_cast<uint8_t>((value >> 40) & 0xFF);
+    memory_.get()[addr + 6] = static_cast<uint8_t>((value >> 48) & 0xFF);
+    memory_.get()[addr + 7] = static_cast<uint8_t>((value >> 56) & 0xFF);
 }
 
 Instruction Memory::fetchInstruction(Address addr) const {
@@ -118,26 +126,25 @@ Instruction Memory::fetchInstruction(Address addr) const {
 }
 
 void Memory::clear() {
-    std::fill(memory_.begin(), memory_.end(), 0);
+    std::memset(memory_.get(), 0, memory_size_);
 }
 
 void Memory::loadProgram(const std::vector<uint8_t>& program, Address startAddr) {
-    if (startAddr + program.size() > memory_.size()) {
+    if (startAddr + program.size() > memory_size_) {
         throw MemoryException("程序太大，超出内存范围");
     }
     
-    std::copy(program.begin(), program.end(), 
-              memory_.begin() + startAddr);
+    std::copy(program.begin(), program.end(), memory_.get() + startAddr);
 }
 
 void Memory::dump(Address startAddr, size_t length) const {
-    if (startAddr >= memory_.size()) {
+    if (startAddr >= memory_size_) {
         std::cout << "address out of memory range\n";
         return;
     }
     
     size_t endAddr = std::min(static_cast<size_t>(startAddr + length), 
-                              memory_.size());
+                              memory_size_);
     
     std::cout << "memory dump (address: 0x" << std::hex << startAddr
               << " - 0x" << (endAddr - 1) << "):\n";
@@ -149,7 +156,7 @@ void Memory::dump(Address startAddr, size_t length) const {
         // 打印十六进制数据
         for (int i = 0; i < 16 && addr + i < endAddr; ++i) {
             std::cout << std::hex << std::setfill('0') << std::setw(2) 
-                      << static_cast<int>(memory_[addr + i]) << " ";
+                      << static_cast<int>(memory_.get()[addr + i]) << " ";
         }
         
         // 对齐
@@ -161,7 +168,7 @@ void Memory::dump(Address startAddr, size_t length) const {
         
         // 打印ASCII字符
         for (int i = 0; i < 16 && addr + i < endAddr; ++i) {
-            char c = static_cast<char>(memory_[addr + i]);
+            char c = static_cast<char>(memory_.get()[addr + i]);
             std::cout << (std::isprint(c) ? c : '.');
         }
         
@@ -171,11 +178,11 @@ void Memory::dump(Address startAddr, size_t length) const {
 }
 
 void Memory::checkAddress(Address addr, size_t accessSize) const {
-    if (addr + accessSize > memory_.size()) {
+    if (addr + accessSize > memory_size_) {
         throw MemoryException("内存访问越界: 地址=0x" + 
                              std::to_string(addr) + 
                              ", 访问大小=" + std::to_string(accessSize) +
-                             ", 内存大小=" + std::to_string(memory_.size()));
+                             ", 内存大小=" + std::to_string(memory_size_));
     }
 }
 

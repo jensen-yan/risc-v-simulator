@@ -201,6 +201,34 @@ void CPU::setCSR(uint32_t addr, uint64_t value) {
     if (addr >= NUM_CSR_REGISTERS) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
+
+    // fflags/frm/fcsr 共享同一组状态位，需要保持别名一致。
+    constexpr uint32_t FFLAGS = 0x001;
+    constexpr uint32_t FRM = 0x002;
+    constexpr uint32_t FCSR = 0x003;
+
+    if (addr == FFLAGS) {
+        const uint64_t fflags = value & 0x1FU;
+        csr_registers_[FFLAGS] = fflags;
+        csr_registers_[FCSR] = (csr_registers_[FCSR] & ~0x1FU) | fflags;
+        return;
+    }
+
+    if (addr == FRM) {
+        const uint64_t frm = value & 0x7U;
+        csr_registers_[FRM] = frm;
+        csr_registers_[FCSR] = (csr_registers_[FCSR] & ~0xE0U) | (frm << 5);
+        return;
+    }
+
+    if (addr == FCSR) {
+        const uint64_t fcsr = value & 0xFFU;
+        csr_registers_[FCSR] = fcsr;
+        csr_registers_[FFLAGS] = fcsr & 0x1FU;
+        csr_registers_[FRM] = (fcsr >> 5) & 0x7U;
+        return;
+    }
+
     csr_registers_[addr] = value;
 }
 
@@ -252,7 +280,8 @@ void CPU::executeJALR(const DecodedInstruction& inst) {
 
 void CPU::executeRType(const DecodedInstruction& inst) {
     // 检查是否为M扩展指令
-    if (inst.opcode == Opcode::OP && inst.funct7 == Funct7::M_EXT) {
+    if ((inst.opcode == Opcode::OP || inst.opcode == Opcode::OP_32) &&
+        inst.funct7 == Funct7::M_EXT) {
         executeMExtension(inst);
         return;
     }
@@ -377,8 +406,8 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
         } else if (InstructionExecutor::isCsrInstruction(inst)) {
             const uint32_t csr_addr = static_cast<uint32_t>(inst.imm) & 0xFFFU;
             const auto csr_result = InstructionExecutor::executeCsrInstruction(
-                inst, getRegister(inst.rs1), csr_registers_[csr_addr]);
-            csr_registers_[csr_addr] = csr_result.write_value;
+                inst, getRegister(inst.rs1), getCSR(csr_addr));
+            setCSR(csr_addr, csr_result.write_value);
             setRegister(inst.rd, csr_result.read_value);
             incrementPC();
         } else {
@@ -414,38 +443,31 @@ int32_t CPU::signExtend(uint32_t value, int bits) const {
 void CPU::executeMExtension(const DecodedInstruction& inst) {
     uint64_t rs1_val = getRegister(inst.rs1);
     uint64_t rs2_val = getRegister(inst.rs2);
-    
-    uint64_t result = InstructionExecutor::executeMExtension(inst, rs1_val, rs2_val);
+
+    uint64_t result = 0;
+    if (inst.opcode == Opcode::OP_32) {
+        result = InstructionExecutor::executeMExtension32(inst, rs1_val, rs2_val);
+    } else {
+        result = InstructionExecutor::executeMExtension(inst, rs1_val, rs2_val);
+    }
     setRegister(inst.rd, result);
     
     incrementPC();
 }
 
 void CPU::executeFPExtension(const DecodedInstruction& inst) {
-    // 简化的F扩展实现 - 仅支持基本操作
-    float rs1_val = getFPRegisterFloat(inst.rs1);
-    float rs2_val = getFPRegisterFloat(inst.rs2);
-    
-    uint32_t result = InstructionExecutor::executeFPExtension(inst, rs1_val, rs2_val);
-    
-    // 根据指令类型决定结果存储位置
-    uint8_t operation = static_cast<uint8_t>(inst.funct7) >> 2;
-    if (operation == 0x14) { // 浮点比较指令，结果存入整数寄存器
-        setRegister(inst.rd, result);
-    } else if (operation == 0x18) { // 浮点转整数指令，结果存入整数寄存器
-        setRegister(inst.rd, result);
-    } else if (operation == 0x1A) { // 整数转浮点指令，结果存入浮点寄存器
-        // 将uint32_t结果重新解释为float
-        union { uint32_t i; float f; } converter;
-        converter.i = result;
-        setFPRegisterFloat(inst.rd, converter.f);
-    } else { // 其他浮点运算指令，结果存入浮点寄存器
-        // 将uint32_t结果重新解释为float
-        union { uint32_t i; float f; } converter;
-        converter.i = result;
-        setFPRegisterFloat(inst.rd, converter.f);
+    const auto fp_result = InstructionExecutor::executeFPOperation(
+        inst,
+        static_cast<uint32_t>(getFPRegister(inst.rs1)),
+        static_cast<uint32_t>(getFPRegister(inst.rs2)),
+        getRegister(inst.rs1));
+
+    if (fp_result.write_int_reg) {
+        setRegister(inst.rd, fp_result.value);
+    } else if (fp_result.write_fp_reg) {
+        setFPRegister(inst.rd, static_cast<uint32_t>(fp_result.value));
     }
-    
+
     incrementPC();
 }
 

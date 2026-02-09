@@ -34,11 +34,22 @@ void IssueStage::execute(CPUState& state) {
     LOGT(ISSUE, "try issue inst=%" PRId64 " (rob[%d])",
         dispatchable_entry->get_instruction_id(), dispatchable_entry->get_rob_entry());
 
+    const auto head_entry = state.reorder_buffer->get_head_entry();
+    if (head_entry != ReorderBuffer::MAX_ROB_ENTRIES) {
+        auto head_inst = state.reorder_buffer->get_entry(head_entry);
+        if (head_inst &&
+            head_inst->get_decoded_info().opcode == Opcode::OP_FP &&
+            head_entry != dispatchable_entry->get_rob_entry()) {
+            LOGT(ISSUE, "fp instruction at ROB head, block younger issue");
+            state.pipeline_stalls++;
+            return;
+        }
+    }
+
     // CSR 指令按程序顺序执行，避免 CSR 读写乱序导致状态不一致
     const auto& decoded_info = dispatchable_entry->get_decoded_info();
     if (decoded_info.opcode == Opcode::SYSTEM &&
         InstructionExecutor::isCsrInstruction(decoded_info)) {
-        const auto head_entry = state.reorder_buffer->get_head_entry();
         if (head_entry != dispatchable_entry->get_rob_entry()) {
             LOGT(ISSUE, "csr instruction waits for ROB head commit");
             state.pipeline_stalls++;
@@ -51,6 +62,35 @@ void IssueStage::execute(CPUState& state) {
         LOGT(ISSUE, "reservation station full, issue stalled");
         state.pipeline_stalls++;
         return;
+    }
+
+    // OP_FP 保持顺序执行；写浮点寄存器的指令不参与整数寄存器重命名。
+    if (decoded_info.opcode == Opcode::OP_FP) {
+        if (head_entry != dispatchable_entry->get_rob_entry()) {
+            LOGT(ISSUE, "fp instruction waits for ROB head commit");
+            state.pipeline_stalls++;
+            return;
+        }
+
+        if (!InstructionExecutor::isFPIntegerDestination(decoded_info)) {
+            dispatchable_entry->set_physical_src1(0);
+            dispatchable_entry->set_physical_src2(0);
+            dispatchable_entry->set_physical_dest(0);
+            dispatchable_entry->set_src1_ready(true, 0);
+            dispatchable_entry->set_src2_ready(true, 0);
+
+            auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
+            if (!issue_result.success) {
+                LOGT(ISSUE, "rs issue failed for fp instruction");
+                state.pipeline_stalls++;
+                return;
+            }
+
+            LOGT(ISSUE, "issued fp inst=%" PRId64 " to rs[%d]",
+                 dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
+            dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
+            return;
+        }
     }
     
     // 进行寄存器重命名

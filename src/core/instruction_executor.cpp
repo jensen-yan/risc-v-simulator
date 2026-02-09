@@ -1,8 +1,52 @@
 #include "core/instruction_executor.h"
 #include "common/types.h"
 #include <cmath>
+#include <limits>
 
 namespace riscv {
+
+namespace {
+float bitsToFloat(uint32_t bits) {
+    union {
+        uint32_t u;
+        float f;
+    } conv{bits};
+    return conv.f;
+}
+
+uint32_t floatToBits(float value) {
+    union {
+        uint32_t u;
+        float f;
+    } conv{};
+    conv.f = value;
+    return conv.u;
+}
+
+uint32_t classifyFloat32(uint32_t bits) {
+    const float value = bitsToFloat(bits);
+    const bool sign = (bits >> 31) != 0;
+    const uint32_t exp = (bits >> 23) & 0xFFU;
+    const uint32_t frac = bits & 0x7FFFFFU;
+
+    if (exp == 0xFFU) {
+        if (frac == 0) {
+            return sign ? (1U << 0) : (1U << 7);  // -inf / +inf
+        }
+        const bool quiet_nan = (frac & (1U << 22)) != 0;
+        return quiet_nan ? (1U << 9) : (1U << 8);
+    }
+
+    if (exp == 0U) {
+        if (frac == 0U) {
+            return sign ? (1U << 3) : (1U << 4);  // -0 / +0
+        }
+        return sign ? (1U << 2) : (1U << 5);  // subnormal
+    }
+
+    return sign ? (1U << 1) : (1U << 6);  // normal
+}
+}  // namespace
 
 uint64_t InstructionExecutor::executeImmediateOperation(const DecodedInstruction& inst, uint64_t rs1_val) {
     switch (inst.funct3) {
@@ -279,6 +323,56 @@ uint64_t InstructionExecutor::executeMExtension(const DecodedInstruction& inst, 
     }
 }
 
+uint64_t InstructionExecutor::executeMExtension32(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val) {
+    const int32_t lhs = static_cast<int32_t>(rs1_val);
+    const int32_t rhs = static_cast<int32_t>(rs2_val);
+    const uint32_t lhs_u = static_cast<uint32_t>(rs1_val);
+    const uint32_t rhs_u = static_cast<uint32_t>(rs2_val);
+    int32_t result = 0;
+
+    switch (inst.funct3) {
+        case Funct3::MUL:
+            result = static_cast<int32_t>(static_cast<int64_t>(lhs) * static_cast<int64_t>(rhs));
+            break;
+        case Funct3::DIV:
+            if (rhs == 0) {
+                result = -1;
+            } else if (lhs == std::numeric_limits<int32_t>::min() && rhs == -1) {
+                result = std::numeric_limits<int32_t>::min();
+            } else {
+                result = lhs / rhs;
+            }
+            break;
+        case Funct3::DIVU:
+            if (rhs_u == 0) {
+                result = static_cast<int32_t>(0xFFFFFFFFU);
+            } else {
+                result = static_cast<int32_t>(lhs_u / rhs_u);
+            }
+            break;
+        case Funct3::REM:
+            if (rhs == 0) {
+                result = lhs;
+            } else if (lhs == std::numeric_limits<int32_t>::min() && rhs == -1) {
+                result = 0;
+            } else {
+                result = lhs % rhs;
+            }
+            break;
+        case Funct3::REMU:
+            if (rhs_u == 0) {
+                result = static_cast<int32_t>(lhs_u);
+            } else {
+                result = static_cast<int32_t>(lhs_u % rhs_u);
+            }
+            break;
+        default:
+            throw IllegalInstructionException("未知的M扩展32位指令功能码");
+    }
+
+    return static_cast<uint64_t>(static_cast<int64_t>(result));
+}
+
 uint32_t InstructionExecutor::executeFPExtension(const DecodedInstruction& inst, float rs1_val, float rs2_val) {
     switch (inst.funct7) {
         case Funct7::FADD_S:
@@ -320,6 +414,153 @@ uint32_t InstructionExecutor::executeFPExtension(const DecodedInstruction& inst,
         default:
             throw IllegalInstructionException("未知的F扩展指令功能码");
     }
+}
+
+InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
+    const DecodedInstruction& inst, uint32_t rs1_bits, uint32_t rs2_bits, uint64_t rs1_int) {
+    FpExecuteResult result{};
+    const float rs1 = bitsToFloat(rs1_bits);
+    const float rs2 = bitsToFloat(rs2_bits);
+
+    switch (inst.funct7) {
+        case Funct7::FADD_S:
+            result.value = floatToBits(rs1 + rs2);
+            result.write_fp_reg = true;
+            return result;
+        case Funct7::FSUB_S:
+            result.value = floatToBits(rs1 - rs2);
+            result.write_fp_reg = true;
+            return result;
+        case Funct7::FMUL_S:
+            result.value = floatToBits(rs1 * rs2);
+            result.write_fp_reg = true;
+            return result;
+        case Funct7::FDIV_S:
+            if (rs2 == 0.0f) {
+                result.value = floatToBits(rs1 > 0.0f ? INFINITY : -INFINITY);
+            } else {
+                result.value = floatToBits(rs1 / rs2);
+            }
+            result.write_fp_reg = true;
+            return result;
+        case Funct7::FMIN_S:
+            result.value = floatToBits(std::fmin(rs1, rs2));
+            result.write_fp_reg = true;
+            return result;
+        case Funct7::FMAX_S:
+            result.value = floatToBits(std::fmax(rs1, rs2));
+            result.write_fp_reg = true;
+            return result;
+        case Funct7::FEQ_S:
+            result.value = (rs1 == rs2) ? 1U : 0U;
+            result.write_int_reg = true;
+            return result;
+        case Funct7::FLT_S:
+            result.value = (rs1 < rs2) ? 1U : 0U;
+            result.write_int_reg = true;
+            return result;
+        case Funct7::FLE_S:
+            result.value = (rs1 <= rs2) ? 1U : 0U;
+            result.write_int_reg = true;
+            return result;
+        default:
+            break;
+    }
+
+    const auto funct7_raw = static_cast<uint8_t>(inst.funct7);
+    if (funct7_raw == 0x10) {  // FSGNJ.S / FSGNJN.S / FSGNJX.S
+        const uint32_t sign1 = rs1_bits & 0x80000000U;
+        const uint32_t sign2 = rs2_bits & 0x80000000U;
+        uint32_t sign = sign2;
+        if (inst.funct3 == static_cast<Funct3>(0b001)) {
+            sign = (~sign2) & 0x80000000U;
+        } else if (inst.funct3 == static_cast<Funct3>(0b010)) {
+            sign = (sign1 ^ sign2) & 0x80000000U;
+        }
+        result.value = (rs1_bits & 0x7FFFFFFFU) | sign;
+        result.write_fp_reg = true;
+        return result;
+    }
+
+    if (funct7_raw == 0x60) {  // FCVT to integer from single-precision
+        switch (inst.rs2) {
+            case 0:  // FCVT.W.S
+                result.value = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(rs1)));
+                break;
+            case 1:  // FCVT.WU.S
+                result.value = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rs1))));
+                break;
+            case 2:  // FCVT.L.S
+                result.value = static_cast<uint64_t>(static_cast<int64_t>(rs1));
+                break;
+            case 3:  // FCVT.LU.S
+                result.value = static_cast<uint64_t>(rs1);
+                break;
+            default:
+                throw IllegalInstructionException("未知的FCVT到整数变体");
+        }
+        result.write_int_reg = true;
+        return result;
+    }
+
+    if (funct7_raw == 0x68) {  // FCVT to single-precision from integer
+        float converted = 0.0f;
+        switch (inst.rs2) {
+            case 0:  // FCVT.S.W
+                converted = static_cast<float>(static_cast<int32_t>(rs1_int));
+                break;
+            case 1:  // FCVT.S.WU
+                converted = static_cast<float>(static_cast<uint32_t>(rs1_int));
+                break;
+            case 2:  // FCVT.S.L
+                converted = static_cast<float>(static_cast<int64_t>(rs1_int));
+                break;
+            case 3:  // FCVT.S.LU
+                converted = static_cast<float>(rs1_int);
+                break;
+            default:
+                throw IllegalInstructionException("未知的FCVT到单精度变体");
+        }
+        result.value = floatToBits(converted);
+        result.write_fp_reg = true;
+        return result;
+    }
+
+    if (funct7_raw == 0x70 && inst.rs2 == 0) {  // FMV.X.W / FCLASS.S
+        if (inst.funct3 == static_cast<Funct3>(0b000)) {
+            result.value = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(rs1_bits)));
+            result.write_int_reg = true;
+            return result;
+        }
+        if (inst.funct3 == static_cast<Funct3>(0b001)) {
+            result.value = classifyFloat32(rs1_bits);
+            result.write_int_reg = true;
+            return result;
+        }
+    }
+
+    if (funct7_raw == 0x78 && inst.rs2 == 0 && inst.funct3 == static_cast<Funct3>(0b000)) {  // FMV.W.X
+        result.value = static_cast<uint32_t>(rs1_int);
+        result.write_fp_reg = true;
+        return result;
+    }
+
+    throw IllegalInstructionException("未知的F扩展指令功能码");
+}
+
+bool InstructionExecutor::isFPIntegerDestination(const DecodedInstruction& inst) {
+    const auto funct7_raw = static_cast<uint8_t>(inst.funct7);
+    if (funct7_raw == 0x50 || funct7_raw == 0x51 || funct7_raw == 0x52) {
+        return true;  // FEQ/FLT/FLE
+    }
+    if (funct7_raw == 0x60) {
+        return true;  // FCVT to integer
+    }
+    if (funct7_raw == 0x70 && inst.rs2 == 0 &&
+        (inst.funct3 == static_cast<Funct3>(0b000) || inst.funct3 == static_cast<Funct3>(0b001))) {
+        return true;  // FMV.X.W / FCLASS.S
+    }
+    return false;
 }
 
 int32_t InstructionExecutor::signExtend(uint32_t value, int bits) {

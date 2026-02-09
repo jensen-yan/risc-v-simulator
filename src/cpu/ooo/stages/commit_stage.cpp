@@ -8,6 +8,45 @@
 
 namespace riscv {
 
+namespace {
+constexpr uint32_t kFflagsCsr = 0x001;
+constexpr uint32_t kFrmCsr = 0x002;
+constexpr uint32_t kFcsrCsr = 0x003;
+
+uint64_t readCsrWithAlias(const std::array<uint64_t, 4096>& csr, uint32_t addr) {
+    if (addr == kFflagsCsr) {
+        return csr[kFcsrCsr] & 0x1FU;
+    }
+    if (addr == kFrmCsr) {
+        return (csr[kFcsrCsr] >> 5) & 0x7U;
+    }
+    return csr[addr];
+}
+
+void writeCsrWithAlias(std::array<uint64_t, 4096>& csr, uint32_t addr, uint64_t value) {
+    if (addr == kFflagsCsr) {
+        const uint64_t fflags = value & 0x1FU;
+        csr[kFflagsCsr] = fflags;
+        csr[kFcsrCsr] = (csr[kFcsrCsr] & ~0x1FU) | fflags;
+        return;
+    }
+    if (addr == kFrmCsr) {
+        const uint64_t frm = value & 0x7U;
+        csr[kFrmCsr] = frm;
+        csr[kFcsrCsr] = (csr[kFcsrCsr] & ~0xE0U) | (frm << 5);
+        return;
+    }
+    if (addr == kFcsrCsr) {
+        const uint64_t fcsr = value & 0xFFU;
+        csr[kFcsrCsr] = fcsr;
+        csr[kFflagsCsr] = fcsr & 0x1FU;
+        csr[kFrmCsr] = (fcsr >> 5) & 0x7U;
+        return;
+    }
+    csr[addr] = value;
+}
+}  // namespace
+
 CommitStage::CommitStage() {
     // 构造函数：初始化提交阶段
 }
@@ -69,6 +108,7 @@ void CommitStage::execute(CPUState& state) {
         }
         
         const auto& committed_inst = commit_result.instruction;
+        const auto& decoded_info = committed_inst->get_decoded_info();
         
         // 检查是否有异常
         if (committed_inst->has_exception()) {
@@ -76,28 +116,62 @@ void CommitStage::execute(CPUState& state) {
             handle_exception(state, committed_inst->get_exception_message(), committed_inst->get_pc());
             break;
         }
-        
-        // 提交到架构寄存器
-        if (committed_inst->get_decoded_info().rd != 0) {  // x0寄存器不能写入
-            state.arch_registers[committed_inst->get_decoded_info().rd] = committed_inst->get_result();
-            LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
-                committed_inst->get_instruction_id(),
-                committed_inst->get_decoded_info().rd,
-                committed_inst->get_result());
+
+        bool wrote_integer_reg = false;
+        if (decoded_info.opcode == Opcode::OP_FP) {
+            const auto fp_result = InstructionExecutor::executeFPOperation(
+                decoded_info,
+                state.arch_fp_registers[decoded_info.rs1],
+                state.arch_fp_registers[decoded_info.rs2],
+                state.arch_registers[decoded_info.rs1]);
+
+            if (fp_result.write_int_reg && decoded_info.rd != 0) {
+                const uint64_t int_result = committed_inst->get_result();
+                state.arch_registers[decoded_info.rd] = int_result;
+                wrote_integer_reg = true;
+                LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
+                    committed_inst->get_instruction_id(),
+                    decoded_info.rd,
+                    int_result);
+
+                // 写整数寄存器的OP_FP指令仍使用整数重命名链路。
+                state.register_rename->commit_instruction(committed_inst->get_logical_dest(),
+                                                         committed_inst->get_physical_dest());
+                state.register_rename->update_architecture_register(decoded_info.rd, int_result);
+            } else if (fp_result.write_fp_reg) {
+                state.arch_fp_registers[decoded_info.rd] = static_cast<uint32_t>(fp_result.value);
+                LOGT(COMMIT, "inst=%" PRId64 " f%d = 0x%08" PRIx32,
+                    committed_inst->get_instruction_id(),
+                    decoded_info.rd,
+                    static_cast<uint32_t>(fp_result.value));
+            } else {
+                LOGT(COMMIT, "inst=%" PRId64 " (no destination register)",
+                    committed_inst->get_instruction_id());
+            }
         } else {
-            LOGT(COMMIT, "inst=%" PRId64 " (no destination register)",
-                committed_inst->get_instruction_id());
-        }
-        
-        // 释放物理寄存器
-        state.register_rename->commit_instruction(committed_inst->get_logical_dest(), 
-                                                 committed_inst->get_physical_dest());
-        
-        // 确保架构寄存器状态与寄存器重命名模块同步
-        // 这是为了确保DiffTest比较时状态一致
-        if (committed_inst->get_decoded_info().rd != 0) {
-            state.register_rename->update_architecture_register(committed_inst->get_decoded_info().rd, 
-                                                              committed_inst->get_result());
+            // 提交到架构寄存器
+            if (decoded_info.rd != 0) {  // x0寄存器不能写入
+                state.arch_registers[decoded_info.rd] = committed_inst->get_result();
+                wrote_integer_reg = true;
+                LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
+                    committed_inst->get_instruction_id(),
+                    decoded_info.rd,
+                    committed_inst->get_result());
+            } else {
+                LOGT(COMMIT, "inst=%" PRId64 " (no destination register)",
+                    committed_inst->get_instruction_id());
+            }
+
+            // 释放物理寄存器
+            state.register_rename->commit_instruction(committed_inst->get_logical_dest(),
+                                                     committed_inst->get_physical_dest());
+
+            // 确保架构寄存器状态与寄存器重命名模块同步
+            // 这是为了确保DiffTest比较时状态一致
+            if (wrote_integer_reg) {
+                state.register_rename->update_architecture_register(decoded_info.rd,
+                                                                  committed_inst->get_result());
+            }
         }
         
         state.instruction_count++;
@@ -117,14 +191,14 @@ void CommitStage::execute(CPUState& state) {
         }
         
         // 处理系统调用
-        if (committed_inst->get_decoded_info().opcode == Opcode::SYSTEM) {
-            const auto& sys_inst = committed_inst->get_decoded_info();
+        if (decoded_info.opcode == Opcode::SYSTEM) {
+            const auto& sys_inst = decoded_info;
 
             if (InstructionExecutor::isCsrInstruction(sys_inst)) {
                 const uint32_t csr_addr = static_cast<uint32_t>(sys_inst.imm) & 0xFFFU;
                 const auto csr_result = InstructionExecutor::executeCsrInstruction(
-                    sys_inst, committed_inst->get_src1_value(), state.csr_registers[csr_addr]);
-                state.csr_registers[csr_addr] = csr_result.write_value;
+                    sys_inst, committed_inst->get_src1_value(), readCsrWithAlias(state.csr_registers, csr_addr));
+                writeCsrWithAlias(state.csr_registers, csr_addr, csr_result.write_value);
                 LOGT(COMMIT, "inst=%" PRId64 " commit csr[0x%03x]: old=0x%" PRIx64 ", new=0x%" PRIx64,
                      committed_inst->get_instruction_id(), csr_addr,
                      csr_result.read_value, csr_result.write_value);

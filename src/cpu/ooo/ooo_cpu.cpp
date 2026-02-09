@@ -212,6 +212,17 @@ uint64_t OutOfOrderCPU::getCSR(uint32_t addr) const {
     if (addr >= cpu_state_.csr_registers.size()) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
+
+    constexpr uint32_t FFLAGS = 0x001;
+    constexpr uint32_t FRM = 0x002;
+    constexpr uint32_t FCSR = 0x003;
+    if (addr == FFLAGS) {
+        return cpu_state_.csr_registers[FCSR] & 0x1FU;
+    }
+    if (addr == FRM) {
+        return (cpu_state_.csr_registers[FCSR] >> 5) & 0x7U;
+    }
+
     return cpu_state_.csr_registers[addr];
 }
 
@@ -219,6 +230,33 @@ void OutOfOrderCPU::setCSR(uint32_t addr, uint64_t value) {
     if (addr >= cpu_state_.csr_registers.size()) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
+
+    constexpr uint32_t FFLAGS = 0x001;
+    constexpr uint32_t FRM = 0x002;
+    constexpr uint32_t FCSR = 0x003;
+
+    if (addr == FFLAGS) {
+        const uint64_t fflags = value & 0x1FU;
+        cpu_state_.csr_registers[FFLAGS] = fflags;
+        cpu_state_.csr_registers[FCSR] = (cpu_state_.csr_registers[FCSR] & ~0x1FU) | fflags;
+        return;
+    }
+
+    if (addr == FRM) {
+        const uint64_t frm = value & 0x7U;
+        cpu_state_.csr_registers[FRM] = frm;
+        cpu_state_.csr_registers[FCSR] = (cpu_state_.csr_registers[FCSR] & ~0xE0U) | (frm << 5);
+        return;
+    }
+
+    if (addr == FCSR) {
+        const uint64_t fcsr = value & 0xFFU;
+        cpu_state_.csr_registers[FCSR] = fcsr;
+        cpu_state_.csr_registers[FFLAGS] = fcsr & 0x1FU;
+        cpu_state_.csr_registers[FRM] = (fcsr >> 5) & 0x7U;
+        return;
+    }
+
     cpu_state_.csr_registers[addr] = value;
 }
 

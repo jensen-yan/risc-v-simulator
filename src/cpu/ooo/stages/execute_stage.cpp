@@ -6,6 +6,21 @@
 
 namespace riscv {
 
+namespace {
+uint64_t readCsrWithAlias(const std::array<uint64_t, 4096>& csr, uint32_t addr) {
+    constexpr uint32_t kFflagsCsr = 0x001;
+    constexpr uint32_t kFrmCsr = 0x002;
+    constexpr uint32_t kFcsrCsr = 0x003;
+    if (addr == kFflagsCsr) {
+        return csr[kFcsrCsr] & 0x1FU;
+    }
+    if (addr == kFrmCsr) {
+        return (csr[kFcsrCsr] >> 5) & 0x7U;
+    }
+    return csr[addr];
+}
+}  // namespace
+
 ExecuteStage::ExecuteStage() {
     // 构造函数：初始化执行阶段
 }
@@ -75,7 +90,14 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
         
         switch (inst.type) {
             case InstructionType::R_TYPE:
-                if (inst.opcode == Opcode::OP) {
+                if (inst.opcode == Opcode::OP_FP) {
+                    const auto fp_result = InstructionExecutor::executeFPOperation(
+                        inst,
+                        state.arch_fp_registers[inst.rs1],
+                        state.arch_fp_registers[inst.rs2],
+                        state.arch_registers[inst.rs1]);
+                    unit.result = fp_result.value;
+                } else if (inst.opcode == Opcode::OP) {
                     // OP指令包含基础整数和M扩展，按funct7分流
                     if (inst.funct7 == Funct7::M_EXT) {
                         unit.result = InstructionExecutor::executeMExtension(
@@ -85,8 +107,14 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                             inst, instruction->get_src1_value(), instruction->get_src2_value());
                     }
                 } else if (inst.opcode == Opcode::OP_32) {
-                    // RV64I: 32位寄存器运算（W后缀）
-                    unit.result = InstructionExecutor::executeRegisterOperation32(inst, instruction->get_src1_value(), instruction->get_src2_value());
+                    // RV64I: 32位寄存器运算（W后缀），含M扩展
+                    if (inst.funct7 == Funct7::M_EXT) {
+                        unit.result = InstructionExecutor::executeMExtension32(
+                            inst, instruction->get_src1_value(), instruction->get_src2_value());
+                    } else {
+                        unit.result = InstructionExecutor::executeRegisterOperation32(
+                            inst, instruction->get_src1_value(), instruction->get_src2_value());
+                    }
                 } else {
                     // 其他R_TYPE指令（如M扩展、F扩展等）
                     unit.result = InstructionExecutor::executeRegisterOperation(inst, instruction->get_src1_value(), instruction->get_src2_value());
@@ -154,7 +182,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                 {
                     const uint32_t csr_addr = static_cast<uint32_t>(inst.imm) & 0xFFFU;
                     const auto csr_result = InstructionExecutor::executeCsrInstruction(
-                        inst, instruction->get_src1_value(), state.csr_registers[csr_addr]);
+                        inst, instruction->get_src1_value(), readCsrWithAlias(state.csr_registers, csr_addr));
                     unit.result = csr_result.read_value;
                     LOGT(EXECUTE, "inst=%" PRId64 " csr[0x%03x]: old=0x%" PRIx64 ", pending_new=0x%" PRIx64,
                          instruction->get_instruction_id(), csr_addr,

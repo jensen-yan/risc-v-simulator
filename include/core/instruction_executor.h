@@ -20,6 +20,12 @@ public:
         uint64_t write_value;
     };
 
+    struct FpExecuteResult {
+        uint64_t value = 0;
+        bool write_int_reg = false;
+        bool write_fp_reg = false;
+    };
+
     // 基本算术运算
     static uint64_t executeImmediateOperation(const DecodedInstruction& inst, uint64_t rs1_val);
     static uint64_t executeRegisterOperation(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val);
@@ -40,9 +46,13 @@ public:
     
     // M扩展指令（乘除法）
     static uint64_t executeMExtension(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val);
+    static uint64_t executeMExtension32(const DecodedInstruction& inst, uint64_t rs1_val, uint64_t rs2_val);
     
     // F扩展指令（单精度浮点）
     static uint32_t executeFPExtension(const DecodedInstruction& inst, float rs1_val, float rs2_val);
+    static FpExecuteResult executeFPOperation(const DecodedInstruction& inst, uint32_t rs1_bits,
+                                              uint32_t rs2_bits, uint64_t rs1_int);
+    static bool isFPIntegerDestination(const DecodedInstruction& inst);
     
     // RV64I 32位算术运算
     static uint64_t executeImmediateOperation32(const DecodedInstruction& inst, uint64_t rs1_val);

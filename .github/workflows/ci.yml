@@ -24,10 +24,20 @@ jobs:
       - name: Install Test Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtest-dev gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+          sudo apt-get install -y \
+            libgtest-dev \
+            gcc-riscv64-unknown-elf \
+            binutils-riscv64-unknown-elf \
+            picolibc-riscv64-unknown-elf
           sudo cmake -S /usr/src/googletest -B /tmp/gtest
           sudo cmake --build /tmp/gtest
           sudo install -m 644 /tmp/gtest/lib/libgtest*.a /usr/lib
+
+      - name: Setup RISC-V libc include/lib paths
+        run: |
+          echo "CPATH=/usr/lib/picolibc/riscv64-unknown-elf/include" >> "${GITHUB_ENV}"
+          echo "C_INCLUDE_PATH=/usr/lib/picolibc/riscv64-unknown-elf/include" >> "${GITHUB_ENV}"
+          echo "LIBRARY_PATH=/usr/lib/picolibc/riscv64-unknown-elf/lib/rv64imafdc/lp64d" >> "${GITHUB_ENV}"
 
       - name: Init Submodules
         run: git submodule update --init --recursive

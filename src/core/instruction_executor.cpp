@@ -554,6 +554,7 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
     const float rs1 = bitsToFloat(rs1_bits);
     const float rs2 = bitsToFloat(rs2_bits);
     const uint8_t rm = resolveRoundingMode(inst, current_frm);
+    const auto funct7_raw = static_cast<uint8_t>(inst.funct7);
 
     switch (inst.funct7) {
         case Funct7::FADD_S: {
@@ -600,68 +601,83 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
             result.write_fp_reg = true;
             return result;
         }
-        case Funct7::FMIN_S:
-        case Funct7::FMAX_S: {
-            const bool rs1_nan = isNaN32(rs1_bits);
-            const bool rs2_nan = isNaN32(rs2_bits);
-            if (isSignalingNaN32(rs1_bits) || isSignalingNaN32(rs2_bits)) {
-                result.fflags |= kFFlagsNv;
-            }
-
-            if (rs1_nan && rs2_nan) {
-                result.value = 0x7FC00000U;
-            } else if (rs1_nan) {
-                result.value = rs2_bits;
-            } else if (rs2_nan) {
-                result.value = rs1_bits;
-            } else if (inst.funct7 == Funct7::FMIN_S) {
-                // 处理 +0/-0：fmin(-0,+0) = -0
-                if (rs1 == rs2 && rs1 == 0.0f) {
-                    result.value = (rs1_bits | rs2_bits);
-                } else {
-                    result.value = (rs1 < rs2) ? rs1_bits : rs2_bits;
-                }
-            } else {
-                // 处理 +0/-0：fmax(-0,+0) = +0
-                if (rs1 == rs2 && rs1 == 0.0f) {
-                    result.value = (rs1_bits & rs2_bits);
-                } else {
-                    result.value = (rs1 > rs2) ? rs1_bits : rs2_bits;
-                }
-            }
-            result.write_fp_reg = true;
-            return result;
-        }
-        case Funct7::FEQ_S: {
-            const bool rs1_nan = isNaN32(rs1_bits);
-            const bool rs2_nan = isNaN32(rs2_bits);
-            if (isSignalingNaN32(rs1_bits) || isSignalingNaN32(rs2_bits)) {
-                result.fflags |= kFFlagsNv;
-            }
-            result.value = (!rs1_nan && !rs2_nan && rs1 == rs2) ? 1U : 0U;
-            result.write_int_reg = true;
-            return result;
-        }
-        case Funct7::FLT_S:
-        case Funct7::FLE_S: {
-            const bool rs1_nan = isNaN32(rs1_bits);
-            const bool rs2_nan = isNaN32(rs2_bits);
-            if (rs1_nan || rs2_nan) {
-                result.fflags |= kFFlagsNv;
-                result.value = 0;
-            } else if (inst.funct7 == Funct7::FLT_S) {
-                result.value = (rs1 < rs2) ? 1U : 0U;
-            } else {
-                result.value = (rs1 <= rs2) ? 1U : 0U;
-            }
-            result.write_int_reg = true;
-            return result;
-        }
         default:
             break;
     }
 
-    const auto funct7_raw = static_cast<uint8_t>(inst.funct7);
+    if (funct7_raw == 0x2C && inst.rs2 == 0) {  // FSQRT.S
+        float out = 0.0f;
+        result.fflags = withFpEnv(rm, [&]() { out = std::sqrt(rs1); });
+        uint32_t bits = floatToBits(out);
+        if (isNaN32(bits)) {
+            bits = 0x7FC00000U;
+        }
+        result.value = bits;
+        result.write_fp_reg = true;
+        return result;
+    }
+
+    if (funct7_raw == 0x14 &&
+        (inst.funct3 == static_cast<Funct3>(0b000) || inst.funct3 == static_cast<Funct3>(0b001))) {  // FMIN/FMAX
+        const bool rs1_nan = isNaN32(rs1_bits);
+        const bool rs2_nan = isNaN32(rs2_bits);
+        if (isSignalingNaN32(rs1_bits) || isSignalingNaN32(rs2_bits)) {
+            result.fflags |= kFFlagsNv;
+        }
+
+        if (rs1_nan && rs2_nan) {
+            result.value = 0x7FC00000U;
+        } else if (rs1_nan) {
+            result.value = rs2_bits;
+        } else if (rs2_nan) {
+            result.value = rs1_bits;
+        } else if (inst.funct3 == static_cast<Funct3>(0b000)) {  // FMIN
+            // 处理 +0/-0：fmin(-0,+0) = -0
+            if (rs1 == rs2 && rs1 == 0.0f) {
+                result.value = (rs1_bits | rs2_bits);
+            } else {
+                result.value = (rs1 < rs2) ? rs1_bits : rs2_bits;
+            }
+        } else {  // FMAX
+            // 处理 +0/-0：fmax(-0,+0) = +0
+            if (rs1 == rs2 && rs1 == 0.0f) {
+                result.value = (rs1_bits & rs2_bits);
+            } else {
+                result.value = (rs1 > rs2) ? rs1_bits : rs2_bits;
+            }
+        }
+        result.write_fp_reg = true;
+        return result;
+    }
+
+    if (funct7_raw == 0x50) {  // FEQ/FLT/FLE
+        const bool rs1_nan = isNaN32(rs1_bits);
+        const bool rs2_nan = isNaN32(rs2_bits);
+        switch (inst.funct3) {
+            case Funct3::FEQ:
+                if (isSignalingNaN32(rs1_bits) || isSignalingNaN32(rs2_bits)) {
+                    result.fflags |= kFFlagsNv;
+                }
+                result.value = (!rs1_nan && !rs2_nan && rs1 == rs2) ? 1U : 0U;
+                result.write_int_reg = true;
+                return result;
+            case Funct3::FLT:
+            case Funct3::FLE:
+                if (rs1_nan || rs2_nan) {
+                    result.fflags |= kFFlagsNv;
+                    result.value = 0;
+                } else if (inst.funct3 == Funct3::FLT) {
+                    result.value = (rs1 < rs2) ? 1U : 0U;
+                } else {
+                    result.value = (rs1 <= rs2) ? 1U : 0U;
+                }
+                result.write_int_reg = true;
+                return result;
+            default:
+                break;
+        }
+    }
+
     if (funct7_raw == 0x10) {  // FSGNJ.S / FSGNJN.S / FSGNJX.S
         const uint32_t sign1 = rs1_bits & 0x80000000U;
         const uint32_t sign2 = rs2_bits & 0x80000000U;
@@ -714,22 +730,22 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
 
         switch (inst.rs2) {
             case 0:  // FCVT.W.S
-                result.value = convert_with_bounds(
+                result.value = signExtend32To64(static_cast<uint32_t>(convert_with_bounds(
                     static_cast<long double>(std::numeric_limits<int32_t>::min()),
                     static_cast<long double>(std::numeric_limits<int32_t>::max()),
                     static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
                     static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int32_t>::min())),
                     static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
-                    true);
+                    true)));
                 break;
             case 1:  // FCVT.WU.S
-                result.value = convert_with_bounds(
+                result.value = signExtend32To64(static_cast<uint32_t>(convert_with_bounds(
                     0.0L,
                     static_cast<long double>(std::numeric_limits<uint32_t>::max()),
-                    std::numeric_limits<uint64_t>::max(),
+                    static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()),
                     0,
-                    std::numeric_limits<uint64_t>::max(),
-                    false);
+                    static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()),
+                    false)));
                 break;
             case 2:  // FCVT.L.S
                 result.value = convert_with_bounds(
@@ -924,7 +940,8 @@ InstructionExecutor::AtomicExecuteResult InstructionExecutor::executeAtomicOpera
 
 bool InstructionExecutor::isFPIntegerDestination(const DecodedInstruction& inst) {
     const auto funct7_raw = static_cast<uint8_t>(inst.funct7);
-    if (funct7_raw == 0x50 || funct7_raw == 0x51 || funct7_raw == 0x52) {
+    if (funct7_raw == 0x50 &&
+        (inst.funct3 == Funct3::FEQ || inst.funct3 == Funct3::FLT || inst.funct3 == Funct3::FLE)) {
         return true;  // FEQ/FLT/FLE
     }
     if (funct7_raw == 0x60) {

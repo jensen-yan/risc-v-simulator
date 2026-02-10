@@ -57,6 +57,21 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 └── tasks/          # 任务说明、重构计划与执行记录（新增任务文档统一放此目录）
 ```
 
+## 开发原则（DRY / KISS）
+
+为避免 InOrder/OOO 出现两套语义实现并长期分叉，后续开发默认遵循以下约束：
+
+- 指令语义统一下沉到 `src/core/instruction_executor.cpp`（及对应头文件）。
+- `src/cpu/inorder/` 与 `src/cpu/ooo/` 只处理流水线/调度/提交/异常传播等控制流逻辑。
+- 禁止在 InOrder 与 OOO 中重复实现同一条指令的算术、比较、访存宽度、CSR 位语义。
+- 新增 ISA 能力时，优先扩展 `InstructionExecutor`，然后让 InOrder/OOO 复用同一语义入口。
+
+建议在提交前自检：
+
+- 该指令的语义是否只在 `InstructionExecutor` 出现一次。
+- InOrder 与 OOO 是否都调用了同一语义实现。
+- 是否补充了对应单测与 `run_tests.py` 回归。
+
 ## 文档
 
 - 架构设计（精简）：`docs/代码架构文档.md`

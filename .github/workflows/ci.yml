@@ -49,13 +49,16 @@ jobs:
 
       - name: Cache Spike Install
         id: cache_spike
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cache/riscv-isa-sim/install
           key: spike-${{ runner.os }}-${{ steps.spike_ref.outputs.commit }}
+          restore-keys: |
+            spike-${{ runner.os }}-
 
       - name: Build and Install Spike (riscv-isa-sim)
+        id: build_spike
         run: |
           set -euo pipefail
           SPIKE_PREFIX="${HOME}/.cache/riscv-isa-sim/install"
@@ -72,6 +75,14 @@ jobs:
           echo "${SPIKE_PREFIX}/bin" >> "$GITHUB_PATH"
           export PATH="${SPIKE_PREFIX}/bin:${PATH}"
           command -v spike
+
+      - name: Save Spike Cache
+        if: ${{ always() && steps.cache_spike.outputs.cache-hit != 'true' && steps.build_spike.outcome == 'success' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/riscv-isa-sim/install
+          key: spike-${{ runner.os }}-${{ steps.spike_ref.outputs.commit }}
 
       - name: Install RISCOF
         run: |

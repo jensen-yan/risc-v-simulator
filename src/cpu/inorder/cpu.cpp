@@ -429,6 +429,7 @@ void CPU::executeJType(const DecodedInstruction& inst) {
 }
 
 void CPU::executeSystem(const DecodedInstruction& inst) {
+    constexpr uint32_t CSR_MEPC = 0x341;
     if (inst.opcode == Opcode::SYSTEM) {
         // 使用更精确的指令判断函数
         if (InstructionExecutor::isSystemCall(inst)) {
@@ -438,8 +439,8 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
             // EBREAK - 断点
             handleEbreak();
         } else if (InstructionExecutor::isMachineReturn(inst)) {
-            // MRET - 机器模式返回, 暂时不实现
-            incrementPC();
+            // MRET - 从机器模式异常返回到MEPC
+            pc_ = getCSR(CSR_MEPC);
         } else if (InstructionExecutor::isSupervisorReturn(inst)) {
             // SRET - 监管模式返回（可选实现）
             incrementPC();
@@ -476,8 +477,20 @@ void CPU::handleEcall() {
 }
 
 void CPU::handleEbreak() {
-    // TODO: 实现断点
-    halted_ = true;
+    // 对齐 RISC-V 异常语义：记录异常上下文并跳转到 mtvec。
+    constexpr uint32_t CSR_MTVEC = 0x305;
+    constexpr uint32_t CSR_MEPC = 0x341;
+    constexpr uint32_t CSR_MCAUSE = 0x342;
+    constexpr uint32_t CSR_MTVAL = 0x343;
+    constexpr uint64_t BREAKPOINT_CAUSE = 3;
+
+    setCSR(CSR_MEPC, pc_);
+    setCSR(CSR_MCAUSE, BREAKPOINT_CAUSE);
+    // riscv-arch-test 的 trap 例程会把 mtval 当作故障地址进行重定位校验。
+    setCSR(CSR_MTVAL, pc_);
+
+    const uint64_t mtvec = getCSR(CSR_MTVEC);
+    pc_ = mtvec & ~0x3ULL;
 }
 
 int32_t CPU::signExtend(uint32_t value, int bits) const {

@@ -407,14 +407,11 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                         int32_t imm_5 = (instruction >> 2) & 0x1;     // bit[2] -> imm[5]
                         int32_t imm = (imm_9 << 9) | (imm_8_7 << 7) | (imm_6 << 6) | (imm_5 << 5) | (imm_4 << 4);
                         decoded.imm = (imm & 0x200) ? (imm | 0xFFFFFE00) : imm; // 符号扩展
-                    } else { // C.LUI
-                        if (rd == 0) {
-                            throw IllegalInstructionException("C.LUI with rd=x0 is illegal");
-                        }
-                        // 检查立即数是否为0（C.LUI不允许立即数为0）
+                    } else { // C.LUI (rd=x0 按 hint 语义处理为无副作用写零寄存器)
+                        // rd!=x0 时，立即数为0在压缩编码中保留，按非法指令处理
                         int32_t imm_17 = (instruction >> 12) & 0x1;     // bit[12] -> imm[17]
                         int32_t imm_16_12 = (instruction >> 2) & 0x1F;  // bit[6:2] -> imm[16:12]
-                        if (imm_17 == 0 && imm_16_12 == 0) {
+                        if (rd != 0 && imm_17 == 0 && imm_16_12 == 0) {
                             throw IllegalInstructionException("C.LUI with imm=0 is illegal");
                         }
                         decoded.opcode = Opcode::LUI;

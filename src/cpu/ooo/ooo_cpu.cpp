@@ -83,7 +83,8 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
     cpu_state_.enabled_extensions = static_cast<uint32_t>(Extension::I) | 
                                    static_cast<uint32_t>(Extension::M) | 
                                    static_cast<uint32_t>(Extension::A) |
-                                   static_cast<uint32_t>(Extension::F) | 
+                                   static_cast<uint32_t>(Extension::F) |
+                                   static_cast<uint32_t>(Extension::D) |
                                    static_cast<uint32_t>(Extension::C);
     
     // 初始化可变运行态（寄存器、队列、ooo组件等）
@@ -199,14 +200,23 @@ float OutOfOrderCPU::getFPRegisterFloat(RegNum reg) const {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }
-    return *reinterpret_cast<const float*>(&cpu_state_.arch_fp_registers[reg]);
+    union {
+        uint32_t u;
+        float f;
+    } conv{static_cast<uint32_t>(cpu_state_.arch_fp_registers[reg])};
+    return conv.f;
 }
 
 void OutOfOrderCPU::setFPRegisterFloat(RegNum reg, float value) {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }
-    cpu_state_.arch_fp_registers[reg] = *reinterpret_cast<const uint32_t*>(&value);
+    union {
+        uint32_t u;
+        float f;
+    } conv{};
+    conv.f = value;
+    cpu_state_.arch_fp_registers[reg] = 0xFFFFFFFF00000000ULL | static_cast<uint64_t>(conv.u);
 }
 
 uint64_t OutOfOrderCPU::getCSR(uint32_t addr) const {

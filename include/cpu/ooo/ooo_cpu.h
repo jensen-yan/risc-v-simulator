@@ -128,8 +128,8 @@ private:
     // 辅助方法
     uint64_t get_physical_register_value(PhysRegNum reg) const;
     void set_physical_register_value(PhysRegNum reg, uint64_t value);
-    uint32_t get_physical_fp_register_value(PhysRegNum reg) const;
-    void set_physical_fp_register_value(PhysRegNum reg, uint32_t value);
+    uint64_t get_physical_fp_register_value(PhysRegNum reg) const;
+    void set_physical_fp_register_value(PhysRegNum reg, uint64_t value);
     
     // 内存访问辅助方法
     uint64_t loadFromMemory(Address addr, Funct3 funct3);

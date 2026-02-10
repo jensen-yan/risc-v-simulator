@@ -2,6 +2,43 @@
 
 namespace riscv {
 
+namespace {
+bool isFloatingPointOpcode(Opcode opcode) {
+    return opcode == Opcode::OP_FP ||
+           opcode == Opcode::LOAD_FP ||
+           opcode == Opcode::STORE_FP ||
+           opcode == Opcode::FMADD ||
+           opcode == Opcode::FMSUB ||
+           opcode == Opcode::FNMSUB ||
+           opcode == Opcode::FNMADD;
+}
+
+bool requiresDExtension(const DecodedInstruction& decoded) {
+    if (!isFloatingPointOpcode(decoded.opcode)) {
+        return false;
+    }
+
+    if (decoded.opcode == Opcode::LOAD_FP || decoded.opcode == Opcode::STORE_FP) {
+        return decoded.funct3 == Funct3::LD || decoded.funct3 == Funct3::SD;  // FLD/FSD
+    }
+
+    const uint8_t funct7_raw = static_cast<uint8_t>(decoded.funct7);
+    const uint8_t fmt = funct7_raw & 0x3U;
+    const uint8_t funct5 = funct7_raw >> 2U;
+
+    if (fmt == 0x1U) {  // *.D
+        return true;
+    }
+
+    // FCVT.S.D（fmt=00, rs2=1）也依赖 D 扩展
+    if (decoded.opcode == Opcode::OP_FP && funct5 == 0x08U && decoded.rs2 == 1) {
+        return true;
+    }
+
+    return false;
+}
+} // namespace
+
 DecodedInstruction Decoder::decode(Instruction instruction, uint32_t enabled_extensions) const {
     DecodedInstruction decoded;
     decoded.opcode = extractOpcode(instruction);
@@ -167,15 +204,12 @@ void Decoder::validateInstruction(const DecodedInstruction& decoded, uint32_t en
     }
     
     // 检查F扩展指令
-    if (decoded.opcode == Opcode::OP_FP ||
-        decoded.opcode == Opcode::LOAD_FP ||
-        decoded.opcode == Opcode::STORE_FP ||
-        decoded.opcode == Opcode::FMADD ||
-        decoded.opcode == Opcode::FMSUB ||
-        decoded.opcode == Opcode::FNMSUB ||
-        decoded.opcode == Opcode::FNMADD) {
+    if (isFloatingPointOpcode(decoded.opcode)) {
         if (!isExtensionEnabled(enabled_extensions, Extension::F)) {
             throw IllegalInstructionException("F扩展指令未启用");
+        }
+        if (requiresDExtension(decoded) && !isExtensionEnabled(enabled_extensions, Extension::D)) {
+            throw IllegalInstructionException("D扩展指令未启用");
         }
     }
 

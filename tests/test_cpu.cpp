@@ -408,21 +408,21 @@ TEST_F(CPUTest, FloatingLoadStoreWordInstruction) {
     cpu->step();
     cpu->step();
 
-    EXPECT_EQ(cpu->getFPRegister(2), 0x3F800000u);
+    EXPECT_EQ(cpu->getFPRegister(2), 0xFFFFFFFF3F800000ULL);
     EXPECT_EQ(memory->readWord(260), 0x3F800000u);
 }
 
 TEST_F(CPUTest, FmaddSingleInstruction) {
-    cpu->setFPRegister(1, 0x3FC00000u); // 1.5f
-    cpu->setFPRegister(2, 0x40000000u); // 2.0f
-    cpu->setFPRegister(3, 0x3F000000u); // 0.5f
+    cpu->setFPRegister(1, 0xFFFFFFFF3FC00000ULL); // 1.5f (NaN-boxed)
+    cpu->setFPRegister(2, 0xFFFFFFFF40000000ULL); // 2.0f (NaN-boxed)
+    cpu->setFPRegister(3, 0xFFFFFFFF3F000000ULL); // 0.5f (NaN-boxed)
 
     uint32_t fmadd = createR4Type(Opcode::FMADD, 4, 1, 2, 3, 0);
     memory->writeWord(0, fmadd);
 
     cpu->step();
 
-    EXPECT_EQ(cpu->getFPRegister(4), 0x40600000u); // 3.5f
+    EXPECT_EQ(cpu->getFPRegister(4), 0xFFFFFFFF40600000ULL); // 3.5f (NaN-boxed)
 }
 
 TEST_F(CPUTest, LUI_Instruction) {

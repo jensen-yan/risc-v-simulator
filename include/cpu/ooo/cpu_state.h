@@ -61,10 +61,10 @@ struct CPUState {
     static constexpr size_t NUM_FP_REGISTERS = 32;
     
     std::array<uint64_t, NUM_REGISTERS> arch_registers;     // 架构寄存器
-    std::array<uint32_t, NUM_FP_REGISTERS> arch_fp_registers; // 架构浮点寄存器
+    std::array<uint64_t, NUM_FP_REGISTERS> arch_fp_registers; // 架构浮点寄存器
     std::array<uint64_t, 4096> csr_registers;               // CSR寄存器文件（12位地址空间）
     std::array<uint64_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_registers;    // 物理寄存器
-    std::array<uint32_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_fp_registers; // 物理浮点寄存器
+    std::array<uint64_t, RegisterRenameUnit::NUM_PHYSICAL_REGS> physical_fp_registers; // 物理浮点寄存器
     
     // 流水线缓冲区
     std::queue<FetchedInstruction> fetch_buffer;  // 取指缓冲区
@@ -103,7 +103,8 @@ struct CPUState {
         enabled_extensions(static_cast<uint32_t>(Extension::I) | 
                           static_cast<uint32_t>(Extension::M) | 
                           static_cast<uint32_t>(Extension::A) |
-                          static_cast<uint32_t>(Extension::F) | 
+                          static_cast<uint32_t>(Extension::F) |
+                          static_cast<uint32_t>(Extension::D) |
                           static_cast<uint32_t>(Extension::C)),
         cpu_interface(nullptr),
         branch_mispredicts(0), pipeline_stalls(0), global_instruction_id(0) {

@@ -164,9 +164,9 @@ void CommitStage::execute(CPUState& state) {
                 LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
                     committed_inst->get_instruction_id(), decoded_info.rd, int_result);
             } else if (fp_result.write_fp_reg) {
-                state.arch_fp_registers[decoded_info.rd] = static_cast<uint32_t>(fp_result.value);
-                LOGT(COMMIT, "inst=%" PRId64 " f%d = 0x%08" PRIx32,
-                    committed_inst->get_instruction_id(), decoded_info.rd, static_cast<uint32_t>(fp_result.value));
+                state.arch_fp_registers[decoded_info.rd] = fp_result.value;
+                LOGT(COMMIT, "inst=%" PRId64 " f%d = 0x%016" PRIx64,
+                    committed_inst->get_instruction_id(), decoded_info.rd, fp_result.value);
             } else {
                 LOGT(COMMIT, "inst=%" PRId64 " (no destination register)",
                     committed_inst->get_instruction_id());

@@ -9,6 +9,11 @@ namespace riscv {
 #pragma STDC FENV_ACCESS ON
 
 namespace {
+constexpr uint32_t kCanonicalNaN32 = 0x7FC00000U;
+constexpr uint64_t kCanonicalNaN64 = 0x7FF8000000000000ULL;
+constexpr uint64_t kNanBoxMask = 0xFFFFFFFF00000000ULL;
+constexpr uint64_t kNanBoxPrefix = 0xFFFFFFFF00000000ULL;
+
 float bitsToFloat(uint32_t bits) {
     union {
         uint32_t u;
@@ -26,6 +31,55 @@ uint32_t floatToBits(float value) {
     return conv.u;
 }
 
+double bitsToDouble(uint64_t bits) {
+    union {
+        uint64_t u;
+        double d;
+    } conv{bits};
+    return conv.d;
+}
+
+uint64_t doubleToBits(double value) {
+    union {
+        uint64_t u;
+        double d;
+    } conv{};
+    conv.d = value;
+    return conv.u;
+}
+
+uint64_t nanBoxSingle(uint32_t bits) {
+    return kNanBoxPrefix | static_cast<uint64_t>(bits);
+}
+
+uint32_t unpackSingleOperand(uint64_t bits) {
+    if ((bits & kNanBoxMask) == kNanBoxPrefix) {
+        return static_cast<uint32_t>(bits);
+    }
+    return kCanonicalNaN32;
+}
+
+uint8_t fpFunct5(const DecodedInstruction& inst) {
+    return static_cast<uint8_t>(inst.funct7) >> 2U;
+}
+
+uint8_t fpFormat(const DecodedInstruction& inst) {
+    if (inst.opcode == Opcode::LOAD_FP || inst.opcode == Opcode::STORE_FP) {
+        if (inst.funct3 == Funct3::LW) {
+            return 0;
+        }
+        if (inst.funct3 == Funct3::LD) {
+            return 1;
+        }
+        return 0xFF;
+    }
+    return static_cast<uint8_t>(inst.funct7) & 0x3U;
+}
+
+bool isDoubleFormat(const DecodedInstruction& inst) {
+    return fpFormat(inst) == 1U;
+}
+
 uint32_t classifyFloat32(uint32_t bits) {
     const bool sign = (bits >> 31) != 0;
     const uint32_t exp = (bits >> 23) & 0xFFU;
@@ -41,6 +95,29 @@ uint32_t classifyFloat32(uint32_t bits) {
 
     if (exp == 0U) {
         if (frac == 0U) {
+            return sign ? (1U << 3) : (1U << 4);  // -0 / +0
+        }
+        return sign ? (1U << 2) : (1U << 5);  // subnormal
+    }
+
+    return sign ? (1U << 1) : (1U << 6);  // normal
+}
+
+uint32_t classifyFloat64(uint64_t bits) {
+    const bool sign = (bits >> 63) != 0;
+    const uint64_t exp = (bits >> 52) & 0x7FFULL;
+    const uint64_t frac = bits & 0x000FFFFFFFFFFFFFULL;
+
+    if (exp == 0x7FFULL) {
+        if (frac == 0) {
+            return sign ? (1U << 0) : (1U << 7);  // -inf / +inf
+        }
+        const bool quiet_nan = (frac & (1ULL << 51)) != 0;
+        return quiet_nan ? (1U << 9) : (1U << 8);
+    }
+
+    if (exp == 0ULL) {
+        if (frac == 0ULL) {
             return sign ? (1U << 3) : (1U << 4);  // -0 / +0
         }
         return sign ? (1U << 2) : (1U << 5);  // subnormal
@@ -69,11 +146,24 @@ bool isNaN32(uint32_t bits) {
     return exp == 0xFFU && frac != 0;
 }
 
+bool isNaN64(uint64_t bits) {
+    const uint64_t exp = (bits >> 52) & 0x7FFULL;
+    const uint64_t frac = bits & 0x000FFFFFFFFFFFFFULL;
+    return exp == 0x7FFULL && frac != 0ULL;
+}
+
 bool isSignalingNaN32(uint32_t bits) {
     if (!isNaN32(bits)) {
         return false;
     }
     return (bits & 0x00400000U) == 0;
+}
+
+bool isSignalingNaN64(uint64_t bits) {
+    if (!isNaN64(bits)) {
+        return false;
+    }
+    return (bits & (1ULL << 51)) == 0;
 }
 
 uint8_t mapFEnvToFFlags(int excepts) {
@@ -141,6 +231,42 @@ float roundToMode(float value, uint8_t rm, uint8_t& out_flags) {
             float mag = floor_v;
             if (frac > 0.5f || frac == 0.5f) {
                 mag = floor_v + 1.0f;
+            }
+            rounded = std::copysign(mag, value);
+            break;
+        }
+        default:
+            throw IllegalInstructionException("非法舍入模式");
+    }
+
+    if (rounded != value) {
+        out_flags |= kFFlagsNx;
+    }
+    return rounded;
+}
+
+long double roundToModeLongDouble(long double value, uint8_t rm, uint8_t& out_flags) {
+    long double rounded = value;
+    switch (rm) {
+        case 0b000:  // RNE
+            rounded = std::nearbyint(value);
+            break;
+        case 0b001:  // RTZ
+            rounded = std::trunc(value);
+            break;
+        case 0b010:  // RDN
+            rounded = std::floor(value);
+            break;
+        case 0b011:  // RUP
+            rounded = std::ceil(value);
+            break;
+        case 0b100: {  // RMM: ties to max magnitude
+            const long double abs_v = std::fabs(value);
+            const long double floor_v = std::floor(abs_v);
+            const long double frac = abs_v - floor_v;
+            long double mag = floor_v;
+            if (frac > 0.5L || frac == 0.5L) {
+                mag = floor_v + 1.0L;
             }
             rounded = std::copysign(mag, value);
             break;
@@ -305,7 +431,7 @@ void InstructionExecutor::storeToMemory(std::shared_ptr<Memory> memory, uint64_t
 uint64_t InstructionExecutor::loadFPFromMemory(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 funct3) {
     switch (funct3) {
         case Funct3::LW:  // FLW
-            return memory->readWord(addr);
+            return nanBoxSingle(memory->readWord(addr));
         case Funct3::LD:  // FLD
             return memory->read64(addr);
         default:
@@ -549,55 +675,81 @@ uint32_t InstructionExecutor::executeFPExtension(const DecodedInstruction& inst,
 }
 
 InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
-    const DecodedInstruction& inst, uint32_t rs1_bits, uint32_t rs2_bits, uint64_t rs1_int, uint8_t current_frm) {
+    const DecodedInstruction& inst, uint64_t rs1_bits_raw, uint64_t rs2_bits_raw, uint64_t rs1_int,
+    uint8_t current_frm) {
     FpExecuteResult result{};
-    const float rs1 = bitsToFloat(rs1_bits);
-    const float rs2 = bitsToFloat(rs2_bits);
     const uint8_t rm = resolveRoundingMode(inst, current_frm);
-    const auto funct7_raw = static_cast<uint8_t>(inst.funct7);
+    const uint8_t funct5 = fpFunct5(inst);
+    const bool is_double = isDoubleFormat(inst);
 
-    switch (inst.funct7) {
-        case Funct7::FADD_S: {
-            float out = 0.0f;
-            result.fflags = withFpEnv(rm, [&]() { out = rs1 + rs2; });
-            uint32_t bits = floatToBits(out);
-            if (isNaN32(bits)) {
-                bits = 0x7FC00000U;
+    const uint32_t rs1_s_bits = unpackSingleOperand(rs1_bits_raw);
+    const uint32_t rs2_s_bits = unpackSingleOperand(rs2_bits_raw);
+    const float rs1_s = bitsToFloat(rs1_s_bits);
+    const float rs2_s = bitsToFloat(rs2_s_bits);
+
+    const uint64_t rs1_d_bits = rs1_bits_raw;
+    const uint64_t rs2_d_bits = rs2_bits_raw;
+    const double rs1_d = bitsToDouble(rs1_d_bits);
+    const double rs2_d = bitsToDouble(rs2_d_bits);
+
+    switch (funct5) {
+        case 0x00: {  // FADD.S/FADD.D
+            if (is_double) {
+                double out = 0.0;
+                result.fflags = withFpEnv(rm, [&]() { out = rs1_d + rs2_d; });
+                uint64_t bits = doubleToBits(out);
+                result.value = isNaN64(bits) ? kCanonicalNaN64 : bits;
+            } else {
+                float out = 0.0f;
+                result.fflags = withFpEnv(rm, [&]() { out = rs1_s + rs2_s; });
+                uint32_t bits = floatToBits(out);
+                result.value = nanBoxSingle(isNaN32(bits) ? kCanonicalNaN32 : bits);
             }
-            result.value = bits;
             result.write_fp_reg = true;
             return result;
         }
-        case Funct7::FSUB_S: {
-            float out = 0.0f;
-            result.fflags = withFpEnv(rm, [&]() { out = rs1 - rs2; });
-            uint32_t bits = floatToBits(out);
-            if (isNaN32(bits)) {
-                bits = 0x7FC00000U;
+        case 0x01: {  // FSUB.S/FSUB.D
+            if (is_double) {
+                double out = 0.0;
+                result.fflags = withFpEnv(rm, [&]() { out = rs1_d - rs2_d; });
+                uint64_t bits = doubleToBits(out);
+                result.value = isNaN64(bits) ? kCanonicalNaN64 : bits;
+            } else {
+                float out = 0.0f;
+                result.fflags = withFpEnv(rm, [&]() { out = rs1_s - rs2_s; });
+                uint32_t bits = floatToBits(out);
+                result.value = nanBoxSingle(isNaN32(bits) ? kCanonicalNaN32 : bits);
             }
-            result.value = bits;
             result.write_fp_reg = true;
             return result;
         }
-        case Funct7::FMUL_S: {
-            float out = 0.0f;
-            result.fflags = withFpEnv(rm, [&]() { out = rs1 * rs2; });
-            uint32_t bits = floatToBits(out);
-            if (isNaN32(bits)) {
-                bits = 0x7FC00000U;
+        case 0x02: {  // FMUL.S/FMUL.D
+            if (is_double) {
+                double out = 0.0;
+                result.fflags = withFpEnv(rm, [&]() { out = rs1_d * rs2_d; });
+                uint64_t bits = doubleToBits(out);
+                result.value = isNaN64(bits) ? kCanonicalNaN64 : bits;
+            } else {
+                float out = 0.0f;
+                result.fflags = withFpEnv(rm, [&]() { out = rs1_s * rs2_s; });
+                uint32_t bits = floatToBits(out);
+                result.value = nanBoxSingle(isNaN32(bits) ? kCanonicalNaN32 : bits);
             }
-            result.value = bits;
             result.write_fp_reg = true;
             return result;
         }
-        case Funct7::FDIV_S: {
-            float out = 0.0f;
-            result.fflags = withFpEnv(rm, [&]() { out = rs1 / rs2; });
-            uint32_t bits = floatToBits(out);
-            if (isNaN32(bits)) {
-                bits = 0x7FC00000U;
+        case 0x03: {  // FDIV.S/FDIV.D
+            if (is_double) {
+                double out = 0.0;
+                result.fflags = withFpEnv(rm, [&]() { out = rs1_d / rs2_d; });
+                uint64_t bits = doubleToBits(out);
+                result.value = isNaN64(bits) ? kCanonicalNaN64 : bits;
+            } else {
+                float out = 0.0f;
+                result.fflags = withFpEnv(rm, [&]() { out = rs1_s / rs2_s; });
+                uint32_t bits = floatToBits(out);
+                result.value = nanBoxSingle(isNaN32(bits) ? kCanonicalNaN32 : bits);
             }
-            result.value = bits;
             result.write_fp_reg = true;
             return result;
         }
@@ -605,60 +757,95 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
             break;
     }
 
-    if (funct7_raw == 0x2C && inst.rs2 == 0) {  // FSQRT.S
-        float out = 0.0f;
-        result.fflags = withFpEnv(rm, [&]() { out = std::sqrt(rs1); });
-        uint32_t bits = floatToBits(out);
-        if (isNaN32(bits)) {
-            bits = 0x7FC00000U;
+    if (funct5 == 0x0B && inst.rs2 == 0) {  // FSQRT.S/FSQRT.D
+        if (is_double) {
+            double out = 0.0;
+            result.fflags = withFpEnv(rm, [&]() { out = std::sqrt(rs1_d); });
+            uint64_t bits = doubleToBits(out);
+            result.value = isNaN64(bits) ? kCanonicalNaN64 : bits;
+        } else {
+            float out = 0.0f;
+            result.fflags = withFpEnv(rm, [&]() { out = std::sqrt(rs1_s); });
+            uint32_t bits = floatToBits(out);
+            result.value = nanBoxSingle(isNaN32(bits) ? kCanonicalNaN32 : bits);
         }
-        result.value = bits;
         result.write_fp_reg = true;
         return result;
     }
 
-    if (funct7_raw == 0x14 &&
+    if (funct5 == 0x05 &&
         (inst.funct3 == static_cast<Funct3>(0b000) || inst.funct3 == static_cast<Funct3>(0b001))) {  // FMIN/FMAX
-        const bool rs1_nan = isNaN32(rs1_bits);
-        const bool rs2_nan = isNaN32(rs2_bits);
-        if (isSignalingNaN32(rs1_bits) || isSignalingNaN32(rs2_bits)) {
-            result.fflags |= kFFlagsNv;
-        }
-
-        if (rs1_nan && rs2_nan) {
-            result.value = 0x7FC00000U;
-        } else if (rs1_nan) {
-            result.value = rs2_bits;
-        } else if (rs2_nan) {
-            result.value = rs1_bits;
-        } else if (inst.funct3 == static_cast<Funct3>(0b000)) {  // FMIN
-            // 处理 +0/-0：fmin(-0,+0) = -0
-            if (rs1 == rs2 && rs1 == 0.0f) {
-                result.value = (rs1_bits | rs2_bits);
-            } else {
-                result.value = (rs1 < rs2) ? rs1_bits : rs2_bits;
+        if (is_double) {
+            const bool rs1_nan = isNaN64(rs1_d_bits);
+            const bool rs2_nan = isNaN64(rs2_d_bits);
+            if (isSignalingNaN64(rs1_d_bits) || isSignalingNaN64(rs2_d_bits)) {
+                result.fflags |= kFFlagsNv;
             }
-        } else {  // FMAX
-            // 处理 +0/-0：fmax(-0,+0) = +0
-            if (rs1 == rs2 && rs1 == 0.0f) {
-                result.value = (rs1_bits & rs2_bits);
+
+            if (rs1_nan && rs2_nan) {
+                result.value = kCanonicalNaN64;
+            } else if (rs1_nan) {
+                result.value = rs2_d_bits;
+            } else if (rs2_nan) {
+                result.value = rs1_d_bits;
+            } else if (inst.funct3 == static_cast<Funct3>(0b000)) {  // FMIN
+                if (rs1_d == rs2_d && rs1_d == 0.0) {
+                    result.value = (rs1_d_bits | rs2_d_bits);
+                } else {
+                    result.value = (rs1_d < rs2_d) ? rs1_d_bits : rs2_d_bits;
+                }
             } else {
-                result.value = (rs1 > rs2) ? rs1_bits : rs2_bits;
+                if (rs1_d == rs2_d && rs1_d == 0.0) {
+                    result.value = (rs1_d_bits & rs2_d_bits);
+                } else {
+                    result.value = (rs1_d > rs2_d) ? rs1_d_bits : rs2_d_bits;
+                }
+            }
+        } else {
+            const bool rs1_nan = isNaN32(rs1_s_bits);
+            const bool rs2_nan = isNaN32(rs2_s_bits);
+            if (isSignalingNaN32(rs1_s_bits) || isSignalingNaN32(rs2_s_bits)) {
+                result.fflags |= kFFlagsNv;
+            }
+
+            if (rs1_nan && rs2_nan) {
+                result.value = nanBoxSingle(kCanonicalNaN32);
+            } else if (rs1_nan) {
+                result.value = nanBoxSingle(rs2_s_bits);
+            } else if (rs2_nan) {
+                result.value = nanBoxSingle(rs1_s_bits);
+            } else if (inst.funct3 == static_cast<Funct3>(0b000)) {  // FMIN
+                if (rs1_s == rs2_s && rs1_s == 0.0f) {
+                    result.value = nanBoxSingle(rs1_s_bits | rs2_s_bits);
+                } else {
+                    result.value = nanBoxSingle((rs1_s < rs2_s) ? rs1_s_bits : rs2_s_bits);
+                }
+            } else {
+                if (rs1_s == rs2_s && rs1_s == 0.0f) {
+                    result.value = nanBoxSingle(rs1_s_bits & rs2_s_bits);
+                } else {
+                    result.value = nanBoxSingle((rs1_s > rs2_s) ? rs1_s_bits : rs2_s_bits);
+                }
             }
         }
         result.write_fp_reg = true;
         return result;
     }
 
-    if (funct7_raw == 0x50) {  // FEQ/FLT/FLE
-        const bool rs1_nan = isNaN32(rs1_bits);
-        const bool rs2_nan = isNaN32(rs2_bits);
+    if (funct5 == 0x14) {  // FEQ/FLT/FLE
+        const bool rs1_nan = is_double ? isNaN64(rs1_d_bits) : isNaN32(rs1_s_bits);
+        const bool rs2_nan = is_double ? isNaN64(rs2_d_bits) : isNaN32(rs2_s_bits);
         switch (inst.funct3) {
             case Funct3::FEQ:
-                if (isSignalingNaN32(rs1_bits) || isSignalingNaN32(rs2_bits)) {
+                if ((is_double && (isSignalingNaN64(rs1_d_bits) || isSignalingNaN64(rs2_d_bits))) ||
+                    (!is_double && (isSignalingNaN32(rs1_s_bits) || isSignalingNaN32(rs2_s_bits)))) {
                     result.fflags |= kFFlagsNv;
                 }
-                result.value = (!rs1_nan && !rs2_nan && rs1 == rs2) ? 1U : 0U;
+                if (is_double) {
+                    result.value = (!rs1_nan && !rs2_nan && rs1_d == rs2_d) ? 1U : 0U;
+                } else {
+                    result.value = (!rs1_nan && !rs2_nan && rs1_s == rs2_s) ? 1U : 0U;
+                }
                 result.write_int_reg = true;
                 return result;
             case Funct3::FLT:
@@ -667,9 +854,9 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
                     result.fflags |= kFFlagsNv;
                     result.value = 0;
                 } else if (inst.funct3 == Funct3::FLT) {
-                    result.value = (rs1 < rs2) ? 1U : 0U;
+                    result.value = is_double ? ((rs1_d < rs2_d) ? 1U : 0U) : ((rs1_s < rs2_s) ? 1U : 0U);
                 } else {
-                    result.value = (rs1 <= rs2) ? 1U : 0U;
+                    result.value = is_double ? ((rs1_d <= rs2_d) ? 1U : 0U) : ((rs1_s <= rs2_s) ? 1U : 0U);
                 }
                 result.write_int_reg = true;
                 return result;
@@ -678,41 +865,55 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
         }
     }
 
-    if (funct7_raw == 0x10) {  // FSGNJ.S / FSGNJN.S / FSGNJX.S
-        const uint32_t sign1 = rs1_bits & 0x80000000U;
-        const uint32_t sign2 = rs2_bits & 0x80000000U;
-        uint32_t sign = sign2;
-        if (inst.funct3 == static_cast<Funct3>(0b001)) {
-            sign = (~sign2) & 0x80000000U;
-        } else if (inst.funct3 == static_cast<Funct3>(0b010)) {
-            sign = (sign1 ^ sign2) & 0x80000000U;
+    if (funct5 == 0x04) {  // FSGNJ.*
+        if (is_double) {
+            const uint64_t sign1 = rs1_d_bits & 0x8000000000000000ULL;
+            const uint64_t sign2 = rs2_d_bits & 0x8000000000000000ULL;
+            uint64_t sign = sign2;
+            if (inst.funct3 == static_cast<Funct3>(0b001)) {
+                sign = (~sign2) & 0x8000000000000000ULL;
+            } else if (inst.funct3 == static_cast<Funct3>(0b010)) {
+                sign = (sign1 ^ sign2) & 0x8000000000000000ULL;
+            }
+            result.value = (rs1_d_bits & 0x7FFFFFFFFFFFFFFFULL) | sign;
+        } else {
+            const uint32_t sign1 = rs1_s_bits & 0x80000000U;
+            const uint32_t sign2 = rs2_s_bits & 0x80000000U;
+            uint32_t sign = sign2;
+            if (inst.funct3 == static_cast<Funct3>(0b001)) {
+                sign = (~sign2) & 0x80000000U;
+            } else if (inst.funct3 == static_cast<Funct3>(0b010)) {
+                sign = (sign1 ^ sign2) & 0x80000000U;
+            }
+            result.value = nanBoxSingle((rs1_s_bits & 0x7FFFFFFFU) | sign);
         }
-        result.value = (rs1_bits & 0x7FFFFFFFU) | sign;
         result.write_fp_reg = true;
         return result;
     }
 
-    if (funct7_raw == 0x60) {  // FCVT to integer from single-precision
+    if (funct5 == 0x18) {  // FCVT.*.{S/D} -> integer
         result.write_int_reg = true;
 
-        const bool is_nan = isNaN32(rs1_bits);
-        const bool is_inf = std::isinf(rs1);
+        const bool src_nan = is_double ? isNaN64(rs1_d_bits) : isNaN32(rs1_s_bits);
+        const bool src_inf = is_double ? std::isinf(rs1_d) : std::isinf(rs1_s);
+        const bool src_neg = is_double ? std::signbit(rs1_d) : std::signbit(rs1_s);
+        const long double src_value = is_double ? static_cast<long double>(rs1_d)
+                                                : static_cast<long double>(rs1_s);
         uint8_t flags = 0;
 
         auto convert_with_bounds = [&](long double min_v, long double max_v,
                                        uint64_t nan_value, uint64_t neg_overflow_value,
                                        uint64_t pos_overflow_value, bool signed_target) {
-            if (is_nan) {
+            if (src_nan) {
                 flags |= kFFlagsNv;
                 return nan_value;
             }
-            if (is_inf) {
+            if (src_inf) {
                 flags |= kFFlagsNv;
-                return std::signbit(rs1) ? neg_overflow_value : pos_overflow_value;
+                return src_neg ? neg_overflow_value : pos_overflow_value;
             }
 
-            float rounded = roundToMode(rs1, rm, flags);
-            long double rounded_ld = static_cast<long double>(rounded);
+            const long double rounded_ld = roundToModeLongDouble(src_value, rm, flags);
             if (rounded_ld < min_v) {
                 flags |= kFFlagsNv;
                 return neg_overflow_value;
@@ -773,50 +974,95 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
         return result;
     }
 
-    if (funct7_raw == 0x68) {  // FCVT to single-precision from integer
-        float converted = 0.0f;
-        result.fflags = withFpEnv(rm, [&]() {
-            switch (inst.rs2) {
-                case 0:  // FCVT.S.W
-                    converted = static_cast<float>(static_cast<int32_t>(rs1_int));
-                    break;
-                case 1:  // FCVT.S.WU
-                    converted = static_cast<float>(static_cast<uint32_t>(rs1_int));
-                    break;
-                case 2:  // FCVT.S.L
-                    converted = static_cast<float>(static_cast<int64_t>(rs1_int));
-                    break;
-                case 3:  // FCVT.S.LU
-                    converted = static_cast<float>(rs1_int);
-                    break;
-                default:
-                    throw IllegalInstructionException("未知的FCVT到单精度变体");
-            }
-        });
-        uint32_t bits = floatToBits(converted);
-        if (isNaN32(bits)) {
-            bits = 0x7FC00000U;
+    if (funct5 == 0x1A) {  // FCVT.{S/D}.* from integer
+        if (is_double) {
+            double converted = 0.0;
+            result.fflags = withFpEnv(rm, [&]() {
+                switch (inst.rs2) {
+                    case 0:  // FCVT.D.W
+                        converted = static_cast<double>(static_cast<int32_t>(rs1_int));
+                        break;
+                    case 1:  // FCVT.D.WU
+                        converted = static_cast<double>(static_cast<uint32_t>(rs1_int));
+                        break;
+                    case 2:  // FCVT.D.L
+                        converted = static_cast<double>(static_cast<int64_t>(rs1_int));
+                        break;
+                    case 3:  // FCVT.D.LU
+                        converted = static_cast<double>(rs1_int);
+                        break;
+                    default:
+                        throw IllegalInstructionException("未知的FCVT到双精度变体");
+                }
+            });
+            uint64_t bits = doubleToBits(converted);
+            result.value = isNaN64(bits) ? kCanonicalNaN64 : bits;
+        } else {
+            float converted = 0.0f;
+            result.fflags = withFpEnv(rm, [&]() {
+                switch (inst.rs2) {
+                    case 0:  // FCVT.S.W
+                        converted = static_cast<float>(static_cast<int32_t>(rs1_int));
+                        break;
+                    case 1:  // FCVT.S.WU
+                        converted = static_cast<float>(static_cast<uint32_t>(rs1_int));
+                        break;
+                    case 2:  // FCVT.S.L
+                        converted = static_cast<float>(static_cast<int64_t>(rs1_int));
+                        break;
+                    case 3:  // FCVT.S.LU
+                        converted = static_cast<float>(rs1_int);
+                        break;
+                    default:
+                        throw IllegalInstructionException("未知的FCVT到单精度变体");
+                }
+            });
+            uint32_t bits = floatToBits(converted);
+            result.value = nanBoxSingle(isNaN32(bits) ? kCanonicalNaN32 : bits);
         }
-        result.value = bits;
         result.write_fp_reg = true;
         return result;
     }
 
-    if (funct7_raw == 0x70 && inst.rs2 == 0) {  // FMV.X.W / FCLASS.S
+    if (funct5 == 0x08) {  // FCVT.{S/D}.{D/S}
+        if (!is_double && inst.rs2 == 1) {  // FCVT.S.D
+            float converted = 0.0f;
+            result.fflags = withFpEnv(rm, [&]() { converted = static_cast<float>(rs1_d); });
+            uint32_t bits = floatToBits(converted);
+            result.value = nanBoxSingle(isNaN32(bits) ? kCanonicalNaN32 : bits);
+            result.write_fp_reg = true;
+            return result;
+        }
+        if (is_double && inst.rs2 == 0) {  // FCVT.D.S
+            double converted = 0.0;
+            result.fflags = withFpEnv(rm, [&]() { converted = static_cast<double>(rs1_s); });
+            uint64_t bits = doubleToBits(converted);
+            result.value = isNaN64(bits) ? kCanonicalNaN64 : bits;
+            result.write_fp_reg = true;
+            return result;
+        }
+        throw IllegalInstructionException("未知的FCVT S/D互转变体");
+    }
+
+    if (funct5 == 0x1C && inst.rs2 == 0) {  // FMV.X.{W/D} / FCLASS.{S/D}
         if (inst.funct3 == static_cast<Funct3>(0b000)) {
-            result.value = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(rs1_bits)));
+            if (is_double) {
+                result.value = rs1_d_bits;  // FMV.X.D
+            } else {
+                result.value = signExtend32To64(static_cast<uint32_t>(rs1_bits_raw));  // FMV.X.W
+            }
             result.write_int_reg = true;
             return result;
         }
         if (inst.funct3 == static_cast<Funct3>(0b001)) {
-            result.value = classifyFloat32(rs1_bits);
+            result.value = is_double ? classifyFloat64(rs1_d_bits) : classifyFloat32(rs1_s_bits);
             result.write_int_reg = true;
             return result;
         }
     }
 
-    if (funct7_raw == 0x78 && inst.rs2 == 0 && inst.funct3 == static_cast<Funct3>(0b000)) {  // FMV.W.X
-        result.value = static_cast<uint32_t>(rs1_int);
+    if (funct5 == 0x1E && inst.rs2 == 0 && inst.funct3 == static_cast<Funct3>(0b000)) {  // FMV.{W/D}.X
+        result.value = is_double ? rs1_int : nanBoxSingle(static_cast<uint32_t>(rs1_int));
         result.write_fp_reg = true;
         return result;
     }
@@ -825,32 +1071,57 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
 }
 
 InstructionExecutor::FpExecuteResult InstructionExecutor::executeFusedFPOperation(
-    const DecodedInstruction& inst, uint32_t rs1_bits, uint32_t rs2_bits, uint32_t rs3_bits, uint8_t current_frm) {
+    const DecodedInstruction& inst, uint64_t rs1_bits, uint64_t rs2_bits, uint64_t rs3_bits, uint8_t current_frm) {
     FpExecuteResult result{};
-    const float rs1 = bitsToFloat(rs1_bits);
-    const float rs2 = bitsToFloat(rs2_bits);
-    const float rs3 = bitsToFloat(rs3_bits);
     const uint8_t rm = resolveRoundingMode(inst, current_frm);
+    const bool is_double = isDoubleFormat(inst);
 
-    switch (inst.opcode) {
-        case Opcode::FMADD:
-            result.fflags = withFpEnv(rm, [&]() { result.value = floatToBits(std::fmaf(rs1, rs2, rs3)); });
-            break;
-        case Opcode::FMSUB:
-            result.fflags = withFpEnv(rm, [&]() { result.value = floatToBits(std::fmaf(rs1, rs2, -rs3)); });
-            break;
-        case Opcode::FNMSUB:
-            result.fflags = withFpEnv(rm, [&]() { result.value = floatToBits(std::fmaf(-rs1, rs2, rs3)); });
-            break;
-        case Opcode::FNMADD:
-            result.fflags = withFpEnv(rm, [&]() { result.value = floatToBits(-std::fmaf(rs1, rs2, rs3)); });
-            break;
-        default:
-            throw IllegalInstructionException("未知的浮点融合乘加指令");
-    }
-
-    if (isNaN32(static_cast<uint32_t>(result.value))) {
-        result.value = 0x7FC00000U;
+    if (is_double) {
+        const double rs1 = bitsToDouble(rs1_bits);
+        const double rs2 = bitsToDouble(rs2_bits);
+        const double rs3 = bitsToDouble(rs3_bits);
+        double out = 0.0;
+        switch (inst.opcode) {
+            case Opcode::FMADD:
+                result.fflags = withFpEnv(rm, [&]() { out = std::fma(rs1, rs2, rs3); });
+                break;
+            case Opcode::FMSUB:
+                result.fflags = withFpEnv(rm, [&]() { out = std::fma(rs1, rs2, -rs3); });
+                break;
+            case Opcode::FNMSUB:
+                result.fflags = withFpEnv(rm, [&]() { out = std::fma(-rs1, rs2, rs3); });
+                break;
+            case Opcode::FNMADD:
+                result.fflags = withFpEnv(rm, [&]() { out = -std::fma(rs1, rs2, rs3); });
+                break;
+            default:
+                throw IllegalInstructionException("未知的浮点融合乘加指令");
+        }
+        uint64_t bits = doubleToBits(out);
+        result.value = isNaN64(bits) ? kCanonicalNaN64 : bits;
+    } else {
+        const float rs1 = bitsToFloat(unpackSingleOperand(rs1_bits));
+        const float rs2 = bitsToFloat(unpackSingleOperand(rs2_bits));
+        const float rs3 = bitsToFloat(unpackSingleOperand(rs3_bits));
+        float out = 0.0f;
+        switch (inst.opcode) {
+            case Opcode::FMADD:
+                result.fflags = withFpEnv(rm, [&]() { out = std::fmaf(rs1, rs2, rs3); });
+                break;
+            case Opcode::FMSUB:
+                result.fflags = withFpEnv(rm, [&]() { out = std::fmaf(rs1, rs2, -rs3); });
+                break;
+            case Opcode::FNMSUB:
+                result.fflags = withFpEnv(rm, [&]() { out = std::fmaf(-rs1, rs2, rs3); });
+                break;
+            case Opcode::FNMADD:
+                result.fflags = withFpEnv(rm, [&]() { out = -std::fmaf(rs1, rs2, rs3); });
+                break;
+            default:
+                throw IllegalInstructionException("未知的浮点融合乘加指令");
+        }
+        uint32_t bits = floatToBits(out);
+        result.value = nanBoxSingle(isNaN32(bits) ? kCanonicalNaN32 : bits);
     }
 
     result.write_fp_reg = true;
@@ -939,17 +1210,17 @@ InstructionExecutor::AtomicExecuteResult InstructionExecutor::executeAtomicOpera
 }
 
 bool InstructionExecutor::isFPIntegerDestination(const DecodedInstruction& inst) {
-    const auto funct7_raw = static_cast<uint8_t>(inst.funct7);
-    if (funct7_raw == 0x50 &&
+    const uint8_t funct5 = fpFunct5(inst);
+    if (funct5 == 0x14 &&
         (inst.funct3 == Funct3::FEQ || inst.funct3 == Funct3::FLT || inst.funct3 == Funct3::FLE)) {
         return true;  // FEQ/FLT/FLE
     }
-    if (funct7_raw == 0x60) {
+    if (funct5 == 0x18) {
         return true;  // FCVT to integer
     }
-    if (funct7_raw == 0x70 && inst.rs2 == 0 &&
+    if (funct5 == 0x1C && inst.rs2 == 0 &&
         (inst.funct3 == static_cast<Funct3>(0b000) || inst.funct3 == static_cast<Funct3>(0b001))) {
-        return true;  // FMV.X.W / FCLASS.S
+        return true;  // FMV.X.{W/D} / FCLASS.{S/D}
     }
     return false;
 }

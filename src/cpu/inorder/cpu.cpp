@@ -12,6 +12,7 @@ CPU::CPU(std::shared_ptr<Memory> memory)
     : memory_(memory), pc_(0), halted_(false), instruction_count_(0), 
       enabled_extensions_(static_cast<uint32_t>(Extension::I) | static_cast<uint32_t>(Extension::M) | 
                          static_cast<uint32_t>(Extension::A) | static_cast<uint32_t>(Extension::F) |
+                         static_cast<uint32_t>(Extension::D) |
                          static_cast<uint32_t>(Extension::C)),
       last_instruction_compressed_(false), reservation_valid_(false), reservation_addr_(0) {
     // 初始化寄存器，x0寄存器始终为0
@@ -181,16 +182,25 @@ float CPU::getFPRegisterFloat(RegNum reg) const {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }
-    // 重新解释32位整数为IEEE 754单精度浮点数
-    return *reinterpret_cast<const float*>(&fp_registers_[reg]);
+    // RV64 FLEN=64: 单精度读取时仅看低32位
+    union {
+        uint32_t u;
+        float f;
+    } conv{static_cast<uint32_t>(fp_registers_[reg])};
+    return conv.f;
 }
 
 void CPU::setFPRegisterFloat(RegNum reg, float value) {
     if (reg >= NUM_FP_REGISTERS) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }
-    // 重新解释IEEE 754单精度浮点数为32位整数
-    fp_registers_[reg] = *reinterpret_cast<const uint32_t*>(&value);
+    union {
+        uint32_t u;
+        float f;
+    } conv{};
+    conv.f = value;
+    // 单精度写入采用 NaN-boxing，上32位全1
+    fp_registers_[reg] = 0xFFFFFFFF00000000ULL | static_cast<uint64_t>(conv.u);
 }
 
 uint64_t CPU::getCSR(uint32_t addr) const {
@@ -489,15 +499,15 @@ void CPU::executeFPExtension(const DecodedInstruction& inst) {
         inst.opcode == Opcode::FNMADD) {
         fp_result = InstructionExecutor::executeFusedFPOperation(
             inst,
-            static_cast<uint32_t>(getFPRegister(inst.rs1)),
-            static_cast<uint32_t>(getFPRegister(inst.rs2)),
-            static_cast<uint32_t>(getFPRegister(inst.rs3)),
+            getFPRegister(inst.rs1),
+            getFPRegister(inst.rs2),
+            getFPRegister(inst.rs3),
             current_frm);
     } else {
         fp_result = InstructionExecutor::executeFPOperation(
             inst,
-            static_cast<uint32_t>(getFPRegister(inst.rs1)),
-            static_cast<uint32_t>(getFPRegister(inst.rs2)),
+            getFPRegister(inst.rs1),
+            getFPRegister(inst.rs2),
             getRegister(inst.rs1),
             current_frm);
     }
@@ -505,7 +515,7 @@ void CPU::executeFPExtension(const DecodedInstruction& inst) {
     if (fp_result.write_int_reg) {
         setRegister(inst.rd, fp_result.value);
     } else if (fp_result.write_fp_reg) {
-        setFPRegister(inst.rd, static_cast<uint32_t>(fp_result.value));
+        setFPRegister(inst.rd, fp_result.value);
     }
 
     if (fp_result.fflags != 0) {

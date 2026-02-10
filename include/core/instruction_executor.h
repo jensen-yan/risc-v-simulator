@@ -59,11 +59,11 @@ public:
     
     // F扩展指令（单精度浮点）
     static uint32_t executeFPExtension(const DecodedInstruction& inst, float rs1_val, float rs2_val);
-    static FpExecuteResult executeFPOperation(const DecodedInstruction& inst, uint32_t rs1_bits,
-                                              uint32_t rs2_bits, uint64_t rs1_int,
+    static FpExecuteResult executeFPOperation(const DecodedInstruction& inst, uint64_t rs1_bits,
+                                              uint64_t rs2_bits, uint64_t rs1_int,
                                               uint8_t current_frm = 0);
-    static FpExecuteResult executeFusedFPOperation(const DecodedInstruction& inst, uint32_t rs1_bits,
-                                                   uint32_t rs2_bits, uint32_t rs3_bits,
+    static FpExecuteResult executeFusedFPOperation(const DecodedInstruction& inst, uint64_t rs1_bits,
+                                                   uint64_t rs2_bits, uint64_t rs3_bits,
                                                    uint8_t current_frm = 0);
     static bool isFPIntegerDestination(const DecodedInstruction& inst);
     static bool isFloatingPointInstruction(const DecodedInstruction& inst);

@@ -48,23 +48,7 @@ jobs:
       - name: Unit Tests
         run: ctest --test-dir build --output-on-failure
 
-      - name: ISA Tests (rv32, in-order + ooo)
+      - name: ISA Tests (rv64, in-order + ooo)
         run: |
-          chmod +x riscv-tests/isa/rv32*-p-* || true
-          python3 run_tests.py -p "rv32*-p-*"
-          python3 run_tests.py -p "rv32*-p-*" --ooo
-
-      - name: ISA Tests (rv64ui, in-order + ooo)
-        run: |
-          chmod +x riscv-tests/isa/rv64ui-p-* || true
-          python3 run_tests.py -p "rv64ui-p-*"
-          python3 run_tests.py -p "rv64ui-p-*" --ooo
-
-      - name: ISA Tests (rv64 extended, ooo)
-        run: |
-          chmod +x riscv-tests/isa/rv64ua-p-* riscv-tests/isa/rv64uc-p-* riscv-tests/isa/rv64ud-p-* riscv-tests/isa/rv64uf-p-* riscv-tests/isa/rv64um-p-* || true
-          python3 run_tests.py -p "rv64ua-p-*" --ooo
-          python3 run_tests.py -p "rv64uc-p-*" --ooo
-          python3 run_tests.py -p "rv64ud-p-*" --ooo
-          python3 run_tests.py -p "rv64uf-p-*" --ooo
-          python3 run_tests.py -p "rv64um-p-*" --ooo
+          python3 run_tests.py -p "rv64*-p-*"
+          python3 run_tests.py -p "rv64*-p-*" --ooo

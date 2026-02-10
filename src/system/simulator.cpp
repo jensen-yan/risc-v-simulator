@@ -109,6 +109,8 @@ void Simulator::step() {
 
 void Simulator::run() {
     auto& debugManager = DebugManager::getInstance();
+    halted_by_instruction_limit_ = false;
+    halted_by_cycle_limit_ = false;
     while (!cpu_->isHalted() && !memory_->shouldExit()) {
         step();
 
@@ -117,6 +119,7 @@ void Simulator::run() {
             LOGW(SYSTEM, "instruction count exceeds limit (%llu), auto halt",
                     static_cast<unsigned long long>(kMaxInOrderInstructions));
             cpu_->requestHalt();
+            halted_by_instruction_limit_ = true;
             break;
         }
 
@@ -125,6 +128,7 @@ void Simulator::run() {
             LOGW(SYSTEM, "cycle count exceeds limit (%llu), auto halt",
                     static_cast<unsigned long long>(kMaxOutOfOrderCycles));
             cpu_->requestHalt();
+            halted_by_cycle_limit_ = true;
             break;
         }
     }
@@ -141,6 +145,8 @@ void Simulator::reset() {
     cpu_->reset();
     memory_->clear();
     cycle_count_ = 0;
+    halted_by_instruction_limit_ = false;
+    halted_by_cycle_limit_ = false;
     DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
 }
 
@@ -158,6 +164,18 @@ bool Simulator::hasProgramExit() const {
 
 int Simulator::getProgramExitCode() const {
     return memory_->getExitCode();
+}
+
+bool Simulator::endedOnZeroInstruction() const {
+    if (!cpu_->isHalted() || memory_->shouldExit()) {
+        return false;
+    }
+
+    try {
+        return memory_->fetchInstruction(cpu_->getPC()) == 0;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 void Simulator::dumpRegisters() const {

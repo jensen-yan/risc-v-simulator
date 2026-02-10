@@ -89,6 +89,7 @@ public:
     static bool isMachineReturn(const DecodedInstruction& inst);
     static bool isSupervisorReturn(const DecodedInstruction& inst);
     static bool isUserReturn(const DecodedInstruction& inst);
+    static bool isSfenceVma(const DecodedInstruction& inst);
     static bool isTrapLikeSystemInstruction(const DecodedInstruction& inst);
     static bool isCsrInstruction(const DecodedInstruction& inst);
     static CsrExecuteResult executeCsrInstruction(const DecodedInstruction& inst, uint64_t rs1_value,

@@ -271,6 +271,18 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                     decoded.imm = static_cast<int32_t>(imm);
                     break;
                 }
+                case 0x01: { // C.FLD (RV64C)
+                    decoded.opcode = Opcode::LOAD_FP;
+                    decoded.type = InstructionType::I_TYPE;
+                    decoded.funct3 = Funct3::LD;
+                    decoded.rd = 8 + ((instruction >> 2) & 0x07);  // f8-f15
+                    decoded.rs1 = 8 + ((instruction >> 7) & 0x07); // x8-x15
+                    uint32_t uimm_5_3 = (instruction >> 10) & 0x7;
+                    uint32_t uimm_7_6 = (instruction >> 5) & 0x3;
+                    uint32_t imm = (uimm_7_6 << 6) | (uimm_5_3 << 3);
+                    decoded.imm = static_cast<int32_t>(imm);
+                    break;
+                }
                 case 0x02: { // C.LW
                     decoded.opcode = Opcode::LOAD;
                     decoded.type = InstructionType::I_TYPE;
@@ -292,6 +304,18 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                     decoded.rd = 8 + ((instruction >> 2) & 0x07); // x8-x15
                     decoded.rs1 = 8 + ((instruction >> 7) & 0x07); // x8-x15
                     // uimm[5:3|7:6]
+                    uint32_t uimm_5_3 = (instruction >> 10) & 0x7;
+                    uint32_t uimm_7_6 = (instruction >> 5) & 0x3;
+                    uint32_t imm = (uimm_7_6 << 6) | (uimm_5_3 << 3);
+                    decoded.imm = static_cast<int32_t>(imm);
+                    break;
+                }
+                case 0x05: { // C.FSD (RV64C)
+                    decoded.opcode = Opcode::STORE_FP;
+                    decoded.type = InstructionType::S_TYPE;
+                    decoded.funct3 = Funct3::SD;
+                    decoded.rs2 = 8 + ((instruction >> 2) & 0x07); // f8-f15
+                    decoded.rs1 = 8 + ((instruction >> 7) & 0x07); // x8-x15
                     uint32_t uimm_5_3 = (instruction >> 10) & 0x7;
                     uint32_t uimm_7_6 = (instruction >> 5) & 0x3;
                     uint32_t imm = (uimm_7_6 << 6) | (uimm_5_3 << 3);
@@ -343,23 +367,17 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                     decoded.imm = (imm & 0x20) ? (imm | 0xFFFFFFC0) : imm; // 符号扩展
                     break;
                 }
-                case 0x01: { // C.JAL (仅RV32C)
-                    decoded.opcode = Opcode::JAL;
-                    decoded.type = InstructionType::J_TYPE;
-                    decoded.rd = 1; // x1 (ra)
-                    // C.JAL立即数计算：[11|4|9:8|10|6|7|3:1|5]
-                    // 从指令中提取各个位域
-                    int32_t imm = 0;
-                    imm |= ((instruction >> 12) & 0x1) << 11;  // [11]
-                    imm |= ((instruction >> 8) & 0x1) << 10;   // [10]
-                    imm |= ((instruction >> 9) & 0x3) << 8;    // [9:8]
-                    imm |= ((instruction >> 6) & 0x1) << 7;    // [7]
-                    imm |= ((instruction >> 7) & 0x1) << 6;    // [6]
-                    imm |= ((instruction >> 2) & 0x1) << 5;    // [5]
-                    imm |= ((instruction >> 11) & 0x1) << 4;   // [4]
-                    imm |= ((instruction >> 3) & 0x7) << 1;    // [3:1]
-                    // 符号扩展
-                    decoded.imm = (imm & 0x800) ? (imm | 0xFFFFF000) : imm;
+                case 0x01: { // C.ADDIW (RV64C)
+                    decoded.opcode = Opcode::OP_IMM_32;
+                    decoded.type = InstructionType::I_TYPE;
+                    decoded.funct3 = Funct3::ADD_SUB;
+                    decoded.rd = (instruction >> 7) & 0x1F;
+                    if (decoded.rd == 0) {
+                        throw IllegalInstructionException("C.ADDIW with rd=x0 is illegal");
+                    }
+                    decoded.rs1 = decoded.rd;
+                    int32_t imm = (((instruction >> 12) & 0x1) << 5) | ((instruction >> 2) & 0x1F);
+                    decoded.imm = (imm & 0x20) ? (imm | 0xFFFFFFC0) : imm;
                     break;
                 }
                 case 0x02: { // C.LI
@@ -545,6 +563,19 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                     decoded.imm = ((instruction >> 7) & 0x20) | ((instruction >> 2) & 0x1F);
                     break;
                 }
+                case 0x01: { // C.FLDSP (RV64C)
+                    decoded.opcode = Opcode::LOAD_FP;
+                    decoded.type = InstructionType::I_TYPE;
+                    decoded.funct3 = Funct3::LD;
+                    decoded.rd = (instruction >> 7) & 0x1F; // f0-f31
+                    decoded.rs1 = 2; // x2 (sp)
+                    // uimm[8:6|5|4:3], 按8字节对齐
+                    uint32_t imm = (((instruction >> 2) & 0x7) << 6) |
+                                   (((instruction >> 12) & 0x1) << 5) |
+                                   (((instruction >> 5) & 0x3) << 3);
+                    decoded.imm = static_cast<int32_t>(imm);
+                    break;
+                }
                 case 0x02: { // C.LWSP
                     decoded.opcode = Opcode::LOAD;
                     decoded.type = InstructionType::I_TYPE;
@@ -580,10 +611,22 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                         throw IllegalInstructionException("C.LDSP with rd=x0 is illegal");
                     }
                     decoded.rs1 = 2; // x2 (sp)
-                    // uimm[5|4:3|8:6]
-                    uint32_t imm = ((instruction >> 7) & 0x38) |  // uimm[8:6]
-                                   ((instruction >> 10) & 0x18) | // uimm[4:3]
-                                   ((instruction >> 2) & 0x20);   // uimm[5]
+                    // uimm[8:6|5|4:3], 按8字节对齐
+                    uint32_t imm = (((instruction >> 2) & 0x7) << 6) |
+                                   (((instruction >> 12) & 0x1) << 5) |
+                                   (((instruction >> 5) & 0x3) << 3);
+                    decoded.imm = static_cast<int32_t>(imm);
+                    break;
+                }
+                case 0x05: { // C.FSDSP (RV64C)
+                    decoded.opcode = Opcode::STORE_FP;
+                    decoded.type = InstructionType::S_TYPE;
+                    decoded.funct3 = Funct3::SD;
+                    decoded.rs2 = (instruction >> 2) & 0x1F; // f0-f31
+                    decoded.rs1 = 2; // x2 (sp)
+                    // uimm[8:6|5:3], 按8字节对齐
+                    uint32_t imm = (((instruction >> 7) & 0x7) << 6) |
+                                   (((instruction >> 10) & 0x7) << 3);
                     decoded.imm = static_cast<int32_t>(imm);
                     break;
                 }
@@ -593,9 +636,9 @@ DecodedInstruction Decoder::expandCompressedInstruction(uint16_t instruction) {
                     decoded.funct3 = Funct3::SD;
                     decoded.rs2 = (instruction >> 2) & 0x1F;
                     decoded.rs1 = 2; // x2 (sp)
-                    // uimm[5:3|8:6]
-                    uint32_t imm = ((instruction >> 10) & 0x38) | // uimm[5:3]
-                                   ((instruction >> 7) & 0x1C0);  // uimm[8:6]
+                    // uimm[8:6|5:3], 按8字节对齐
+                    uint32_t imm = (((instruction >> 7) & 0x7) << 6) |
+                                   (((instruction >> 10) & 0x7) << 3);
                     decoded.imm = static_cast<int32_t>(imm);
                     break;
                 }

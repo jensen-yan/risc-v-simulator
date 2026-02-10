@@ -101,6 +101,17 @@ void CPU::step() {
         
         instruction_count_++;
 
+        // 更新基础性能计数器，供 benchmark 的计时/统计逻辑使用。
+        constexpr uint32_t MCYCLE = 0xB00;
+        constexpr uint32_t MINSTRET = 0xB02;
+        constexpr uint32_t CYCLE = 0xC00;
+        constexpr uint32_t INSTRET = 0xC02;
+        const uint64_t retired = instruction_count_;
+        csr_registers_[MCYCLE] = retired;
+        csr_registers_[MINSTRET] = retired;
+        csr_registers_[CYCLE] = retired;
+        csr_registers_[INSTRET] = retired;
+
         const uint64_t rd_after = getRegister(decoded.rd);
         if (decoded.rd != 0 && rd_after != rd_before) {
             LOGT(INORDER,
@@ -434,6 +445,9 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
             incrementPC();
         } else if (InstructionExecutor::isUserReturn(inst)) {
             // URET - 用户模式返回（可选实现）
+            incrementPC();
+        } else if (InstructionExecutor::isSfenceVma(inst)) {
+            // SFENCE.VMA - 单核且无TLB模型，按NOP处理
             incrementPC();
         } else if (InstructionExecutor::isCsrInstruction(inst)) {
             const uint32_t csr_addr = static_cast<uint32_t>(inst.imm) & 0xFFFU;

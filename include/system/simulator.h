@@ -42,6 +42,9 @@ public:
     uint64_t getInstructionCount() const;
     bool hasProgramExit() const;
     int getProgramExitCode() const;
+    bool endedOnZeroInstruction() const;
+    bool isHaltedByInstructionLimit() const { return halted_by_instruction_limit_; }
+    bool isHaltedByCycleLimit() const { return halted_by_cycle_limit_; }
     
     // 调试功能
     void dumpRegisters() const;
@@ -70,11 +73,14 @@ private:
     
     // DiffTest组件（仅乱序CPU模式下使用）
     std::unique_ptr<DiffTest> difftest_;
+
+    bool halted_by_instruction_limit_ = false;
+    bool halted_by_cycle_limit_ = false;
     
     // 辅助方法
     std::vector<uint8_t> loadBinaryFile(const std::string& filename);
 
-    static constexpr uint64_t kMaxInOrderInstructions = 100000;
+    static constexpr uint64_t kMaxInOrderInstructions = 5000000;
     static constexpr uint64_t kMaxOutOfOrderCycles = 10000;
 };
 

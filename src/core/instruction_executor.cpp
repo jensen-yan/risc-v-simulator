@@ -1300,12 +1300,19 @@ bool InstructionExecutor::isUserReturn(const DecodedInstruction& inst) {
            inst.imm == SystemInst::URET;
 }
 
+bool InstructionExecutor::isSfenceVma(const DecodedInstruction& inst) {
+    return inst.opcode == Opcode::SYSTEM &&
+           inst.funct3 == Funct3::ECALL_EBREAK &&
+           inst.imm == 0x120;
+}
+
 bool InstructionExecutor::isTrapLikeSystemInstruction(const DecodedInstruction& inst) {
     return isSystemCall(inst) ||
            isBreakpoint(inst) ||
            isMachineReturn(inst) ||
            isSupervisorReturn(inst) ||
-           isUserReturn(inst);
+           isUserReturn(inst) ||
+           isSfenceVma(inst);
 }
 
 bool InstructionExecutor::isCsrInstruction(const DecodedInstruction& inst) {

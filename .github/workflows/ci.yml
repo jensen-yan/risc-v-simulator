@@ -59,16 +59,41 @@ jobs:
           python3 run_tests.py -p "rv64*-p-*" -w 1 --timeout 20
           python3 run_tests.py -p "rv64*-p-*" --ooo -w 1 --timeout 30
 
-      - name: Benchmarks Smoke Tests (non-blocking)
-        continue-on-error: true
+      - name: Benchmarks (supported, blocking)
         run: |
-          python3 run_tests.py --tests-subdir benchmarks -p "*.riscv" -w 1 --timeout 120
+          supported_benchmarks=(
+            dhrystone.riscv
+            median.riscv
+            memcpy.riscv
+            mm.riscv
+            mt-matmul.riscv
+            mt-memcpy.riscv
+            mt-vvadd.riscv
+            multiply.riscv
+            qsort.riscv
+            rsort.riscv
+            spmv.riscv
+            towers.riscv
+            vvadd.riscv
+          )
 
-      - name: CoreMark Smoke Test (if available, non-blocking)
+          for benchmark in "${supported_benchmarks[@]}"; do
+            echo "Running benchmark: ${benchmark}"
+            python3 run_tests.py --tests-subdir benchmarks -p "${benchmark}" -w 1 --timeout 180
+          done
+
+      - name: Benchmarks (known unsupported, non-blocking)
         continue-on-error: true
         run: |
-          if [ -x "riscv-tests/benchmarks/coremark.riscv" ]; then
-            python3 run_tests.py --tests-subdir benchmarks -p "coremark.riscv" -w 1 --timeout 180
-          else
-            echo "Skip: riscv-tests/benchmarks/coremark.riscv not found."
-          fi
+          known_unsupported=(
+            pmp.riscv
+            vec-daxpy.riscv
+            vec-memcpy.riscv
+            vec-sgemm.riscv
+            vec-strcmp.riscv
+          )
+
+          for benchmark in "${known_unsupported[@]}"; do
+            echo "Running known-unsupported benchmark: ${benchmark}"
+            python3 run_tests.py --tests-subdir benchmarks -p "${benchmark}" -w 1 --timeout 180 || true
+          done

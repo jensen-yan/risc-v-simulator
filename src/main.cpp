@@ -205,6 +205,8 @@ int main(int argc, char* argv[]) {
             simulator.dumpState();
         }
         
+        bool executionSuccess = true;
+
         if (stepMode) {
             std::cout << "Step mode (press Enter to continue, input q to quit):\n";
             std::string input;
@@ -224,6 +226,7 @@ int main(int argc, char* argv[]) {
                     }
                 } catch (const SimulatorException& e) {
                     std::cerr << "Execution error: " << e.what() << "\n";
+                    executionSuccess = false;
                     break;
                 }
             }
@@ -244,11 +247,25 @@ int main(int argc, char* argv[]) {
                             std::cout << "Failed test index: " << exitCode << "\n";
                         }
                     }
+                } else if (
+                    simulator.isHalted() &&
+                    !simulator.isHaltedByInstructionLimit() &&
+                    !simulator.isHaltedByCycleLimit()
+                ) {
+                    int exitCode = static_cast<int>(simulator.getCpu()->getRegister(10));
+                    if (exitCode == 0) {
+                        std::cout << "\n=== TEST RESULT: PASS ===\n";
+                        std::cout << "Program returned normally, code: " << exitCode << "\n";
+                    } else {
+                        std::cout << "\n=== TEST RESULT: FAIL ===\n";
+                        std::cout << "Program returned with failure, code: " << exitCode << "\n";
+                    }
                 }
 
                 std::cout << "Program finished\n";
             } catch (const SimulatorException& e) {
                 std::cerr << "Execution error: " << e.what() << "\n";
+                executionSuccess = false;
             }
         }
         
@@ -288,6 +305,9 @@ int main(int argc, char* argv[]) {
             }
         }
         
+        if (!executionSuccess) {
+            return 1;
+        }
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;

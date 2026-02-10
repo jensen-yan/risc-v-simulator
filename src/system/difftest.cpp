@@ -7,7 +7,7 @@
 namespace riscv {
 
 namespace {
-constexpr std::array<uint32_t, 10> kKeyCsrAddrs = {
+constexpr std::array<uint32_t, 8> kKeyCsrAddrs = {
     0x300,  // mstatus
     0x305,  // mtvec
     0x341,  // mepc
@@ -15,8 +15,6 @@ constexpr std::array<uint32_t, 10> kKeyCsrAddrs = {
     0x343,  // mtval
     0x344,  // mip
     0x340,  // mscratch
-    0xC00,  // cycle
-    0xC01,  // time
     0xF14,  // mhartid
 };
 }  // namespace

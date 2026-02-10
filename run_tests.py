@@ -34,9 +34,13 @@ PROGRAM_HALTED_MARKER = "Program State: halted"
 
 
 class TestRunner:
-    def __init__(self, simulator_path: str, riscv_tests_path: str, verbose: bool = False):
+    def __init__(self, simulator_path: str, riscv_tests_path: str,
+                 tests_subdir: str = "isa", allow_implicit_pass: bool = False,
+                 verbose: bool = False):
         self.simulator_path = simulator_path
         self.riscv_tests_path = riscv_tests_path
+        self.tests_subdir = tests_subdir
+        self.allow_implicit_pass = allow_implicit_pass
         self.results = {
             'passed': [],
             'failed': [],
@@ -48,8 +52,8 @@ class TestRunner:
         
     def find_test_files(self, test_pattern: str = "rv32ui-p-*") -> List[str]:
         """Find test files matching the given pattern."""
-        isa_dir = os.path.join(self.riscv_tests_path, "isa")
-        pattern = os.path.join(isa_dir, test_pattern)
+        tests_dir = os.path.join(self.riscv_tests_path, self.tests_subdir)
+        pattern = os.path.join(tests_dir, test_pattern)
         
         # Exclude .dump files and keep executable binaries only.
         files = []
@@ -98,8 +102,11 @@ class TestRunner:
             if PASS_MARKER in stdout:
                 return "passed", "", result.returncode, elapsed, test_name
             elif FAIL_MARKER in stdout:
-                return "failed", stderr, result.returncode, elapsed, test_name
+                return "failed", f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}", result.returncode, elapsed, test_name
+            elif result.returncode != 0:
+                return "error", f"Non-zero return code: {result.returncode}\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}", result.returncode, elapsed, test_name
             elif (
+                self.allow_implicit_pass and
                 result.returncode == 0 and
                 PROGRAM_FINISHED_MARKER in stdout and
                 PROGRAM_HALTED_MARKER in stdout
@@ -279,6 +286,7 @@ def main():
     # Available test patterns.
     pattern_help = """
 Available test patterns:
+  (for --tests-subdir isa)
   rv32ui-p-*     - User integer instructions (base)
   rv32um-p-*     - User multiply/divide instructions (M extension)
   rv32ua-p-*     - User atomic instructions (A extension)
@@ -292,6 +300,11 @@ Available test patterns:
   rv32uzbs-p-*   - Bit-manip single-bit ops (Zbs extension)
   rv32mi-p-*     - Machine-level integer instructions
   rv32si-p-*     - Supervisor-level instructions
+
+  (for --tests-subdir benchmarks)
+  *.riscv        - All riscv-tests benchmarks
+  dhrystone.riscv - Dhrystone benchmark
+  mm.riscv        - Matrix multiply benchmark
   
 Examples:
   --pattern "rv32ui-p-*"      # all base integer tests
@@ -310,6 +323,9 @@ Examples:
     parser.add_argument('--tests-dir', '-t',
                        default='./riscv-tests',
                        help='Path to riscv-tests directory')
+    parser.add_argument('--tests-subdir',
+                       default='isa',
+                       help='Subdirectory under tests-dir to scan (default: isa)')
     parser.add_argument('--pattern', '-p',
                        default='rv32ui-p-*',
                        help='Test file pattern (default: rv32ui-p-*)')
@@ -327,6 +343,9 @@ Examples:
     parser.add_argument('--workers', '-w',
                        type=int, default=4,
                        help='Worker count for parallel testing (default: 4, 0=auto)')
+    parser.add_argument('--allow-implicit-pass',
+                       action='store_true',
+                       help='Allow implicit pass when no PASS/FAIL marker is found')
     
     args = parser.parse_args()
     
@@ -341,16 +360,28 @@ Examples:
         log_message("error", LOG_CATEGORY_RUNNER, f"Tests directory not found: {args.tests_dir}")
         log_message("info", LOG_CATEGORY_RUNNER, "Make sure riscv-tests submodule is initialized and built")
         sys.exit(1)
+
+    tests_subdir_path = os.path.join(args.tests_dir, args.tests_subdir)
+    if not os.path.exists(tests_subdir_path):
+        log_message("error", LOG_CATEGORY_RUNNER, f"Tests subdirectory not found: {tests_subdir_path}")
+        sys.exit(1)
     
     log_message("info", LOG_CATEGORY_RUNNER, "RISC-V simulator batch test tool")
     log_message("info", LOG_CATEGORY_RUNNER, f"Simulator: {args.simulator}")
     log_message("info", LOG_CATEGORY_RUNNER, f"Tests dir: {args.tests_dir}")
+    log_message("info", LOG_CATEGORY_RUNNER, f"Tests subdir: {args.tests_subdir}")
     log_message("info", LOG_CATEGORY_RUNNER, f"Pattern: {args.pattern}")
     log_message("info", LOG_CATEGORY_RUNNER, f"Timeout: {args.timeout}s")
     log_message("info", LOG_CATEGORY_RUNNER, "-" * 50)
     
     # Run tests.
-    runner = TestRunner(args.simulator, args.tests_dir, verbose=args.verbose)
+    runner = TestRunner(
+        args.simulator,
+        args.tests_dir,
+        tests_subdir=args.tests_subdir,
+        allow_implicit_pass=args.allow_implicit_pass,
+        verbose=args.verbose
+    )
     results = runner.run_test_suite(args.pattern, args.timeout, args.ooo, args.workers)
     
     # Print summary.

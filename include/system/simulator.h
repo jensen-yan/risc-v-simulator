@@ -40,6 +40,8 @@ public:
     // 状态查询
     bool isHalted() const;
     uint64_t getInstructionCount() const;
+    bool hasProgramExit() const;
+    int getProgramExitCode() const;
     
     // 调试功能
     void dumpRegisters() const;

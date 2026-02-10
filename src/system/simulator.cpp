@@ -152,6 +152,14 @@ uint64_t Simulator::getInstructionCount() const {
     return cpu_->getInstructionCount();
 }
 
+bool Simulator::hasProgramExit() const {
+    return memory_->shouldExit();
+}
+
+int Simulator::getProgramExitCode() const {
+    return memory_->getExitCode();
+}
+
 void Simulator::dumpRegisters() const {
     cpu_->dumpRegisters();
 }

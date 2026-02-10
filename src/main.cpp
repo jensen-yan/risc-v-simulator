@@ -231,6 +231,21 @@ int main(int argc, char* argv[]) {
             std::cout << "Running program...\n";
             try {
                 simulator.run();
+
+                if (simulator.hasProgramExit()) {
+                    int exitCode = simulator.getProgramExitCode();
+                    if (exitCode == 0) {
+                        std::cout << "\n=== TEST RESULT: PASS ===\n";
+                        std::cout << "Program exited normally, code: " << exitCode << "\n";
+                    } else {
+                        std::cout << "\n=== TEST RESULT: FAIL ===\n";
+                        std::cout << "Program exited with failure, code: " << exitCode << "\n";
+                        if (exitCode > 1) {
+                            std::cout << "Failed test index: " << exitCode << "\n";
+                        }
+                    }
+                }
+
                 std::cout << "Program finished\n";
             } catch (const SimulatorException& e) {
                 std::cerr << "Execution error: " << e.what() << "\n";

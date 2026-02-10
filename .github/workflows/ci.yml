@@ -181,14 +181,14 @@ jobs:
 
             echo "=== RISCOF mode: ${mode} (config=${CONFIG_FILE}) ==="
 
+            riscof validateyaml \
+              --config "${CONFIG_FILE}" \
+              --work-dir "${WORK_DIR}"
+
             riscof testlist \
               --config "${CONFIG_FILE}" \
               --suite ../../riscv-arch-test/riscv-test-suite \
               --env ../../riscv-arch-test/riscv-test-suite/env \
-              --work-dir "${WORK_DIR}"
-
-            riscof validateyaml \
-              --config "${CONFIG_FILE}" \
               --work-dir "${WORK_DIR}"
 
             # CI 临时跳过已知不稳定集合：pmp

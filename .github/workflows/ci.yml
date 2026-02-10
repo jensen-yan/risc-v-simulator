@@ -192,29 +192,29 @@ jobs:
               --work-dir "${WORK_DIR}"
 
             # CI 临时跳过已知不稳定集合：pmp
-            python3 - <<'PY'
-            import os
-            import yaml
-            from pathlib import Path
+            python3 -c '
+          import os
+          import yaml
+          from pathlib import Path
 
-            src = Path(os.environ["RAW_TEST_LIST"])
-            dst = Path(os.environ["FILTERED_TEST_LIST"])
-            data = yaml.safe_load(src.read_text()) or {}
+          src = Path(os.environ["RAW_TEST_LIST"])
+          dst = Path(os.environ["FILTERED_TEST_LIST"])
+          data = yaml.safe_load(src.read_text()) or {}
 
-            def should_skip(test_key: str, test_entry: dict) -> bool:
-                path = str(test_key)
-                test_path = str(test_entry.get("test_path", ""))
-                target = f"{path} {test_path}"
-                if "/pmp/src/" in target:
-                    return True
-                return False
+          def should_skip(test_key: str, test_entry: dict) -> bool:
+              path = str(test_key)
+              test_path = str(test_entry.get("test_path", ""))
+              target = f"{path} {test_path}"
+              if "/pmp/src/" in target:
+                  return True
+              return False
 
-            filtered = {k: v for k, v in data.items() if not should_skip(k, v)}
-            dst.write_text(yaml.safe_dump(filtered, sort_keys=False))
-            print(f"RISCOF CI test filter: total={len(data)}, kept={len(filtered)}, skipped={len(data)-len(filtered)}")
-            if not filtered:
-                raise SystemExit("No tests left after CI filtering")
-            PY
+          filtered = {k: v for k, v in data.items() if not should_skip(k, v)}
+          dst.write_text(yaml.safe_dump(filtered, sort_keys=False))
+          print(f"RISCOF CI test filter: total={len(data)}, kept={len(filtered)}, skipped={len(data)-len(filtered)}")
+          if not filtered:
+              raise SystemExit("No tests left after CI filtering")
+          '
             ls -l "${FILTERED_TEST_LIST}"
 
             riscof run \

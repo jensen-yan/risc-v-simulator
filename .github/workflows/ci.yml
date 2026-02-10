@@ -155,20 +155,29 @@ jobs:
 
           cd tools/riscof
           export PYTHONPATH="$PWD/plugins/riscv_sim:${PYTHONPATH:-}"
+          WORK_DIR="${GITHUB_WORKSPACE}/build/riscof-work"
+          RAW_TEST_LIST="${WORK_DIR}/test_list.yaml"
+          FILTERED_TEST_LIST="${WORK_DIR}/test_list_ci.yaml"
+          export RAW_TEST_LIST FILTERED_TEST_LIST
 
           riscof testlist \
             --config ./config.ini \
             --suite ../../riscv-arch-test/riscv-test-suite \
             --env ../../riscv-arch-test/riscv-test-suite/env \
-            --work-dir ../../build/riscof-work
+            --work-dir "${WORK_DIR}"
+
+          riscof validateyaml \
+            --config ./config.ini \
+            --work-dir "${WORK_DIR}"
 
           # CI 临时跳过已知不稳定集合：pmp 与 privilege/misalign*
           python3 - <<'PY'
+          import os
           import yaml
           from pathlib import Path
 
-          src = Path("../../build/riscof-work/test_list.yaml")
-          dst = Path("../../build/riscof-work/test_list_ci.yaml")
+          src = Path(os.environ["RAW_TEST_LIST"])
+          dst = Path(os.environ["FILTERED_TEST_LIST"])
           data = yaml.safe_load(src.read_text()) or {}
 
           def should_skip(test_key: str, test_entry: dict) -> bool:
@@ -187,17 +196,14 @@ jobs:
           if not filtered:
               raise SystemExit("No tests left after CI filtering")
           PY
-
-          riscof validateyaml \
-            --config ./config.ini \
-            --work-dir ../../build/riscof-work
+          ls -l "${FILTERED_TEST_LIST}"
 
           riscof run \
             --config ./config.ini \
             --suite ../../riscv-arch-test/riscv-test-suite \
             --env ../../riscv-arch-test/riscv-test-suite/env \
-            --work-dir ../../build/riscof-work \
-            --testfile ../../build/riscof-work/test_list_ci.yaml \
+            --work-dir "${WORK_DIR}" \
+            --testfile "${FILTERED_TEST_LIST}" \
             --no-browser
 
       - name: Benchmarks (supported, blocking)

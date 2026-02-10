@@ -28,17 +28,32 @@ jobs:
             libgtest-dev \
             gcc-riscv64-unknown-elf \
             binutils-riscv64-unknown-elf \
-            picolibc-riscv64-unknown-elf
-          # RISCOF reference model dependency (spike)
-          sudo apt-get install -y spike || sudo apt-get install -y riscv-isa-sim
+            picolibc-riscv64-unknown-elf \
+            device-tree-compiler \
+            libboost-regex-dev \
+            libboost-system-dev \
+            libboost-filesystem-dev
           sudo cmake -S /usr/src/googletest -B /tmp/gtest
           sudo cmake --build /tmp/gtest
           sudo install -m 644 /tmp/gtest/lib/libgtest*.a /usr/lib
 
+      - name: Build and Install Spike (riscv-isa-sim)
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/riscv-isa-sim
+          git clone --depth 1 https://github.com/riscv-software-src/riscv-isa-sim.git /tmp/riscv-isa-sim
+          cd /tmp/riscv-isa-sim
+          mkdir -p build
+          cd build
+          ../configure --prefix=/usr/local
+          make -j"$(nproc)"
+          sudo make install
+          command -v spike
+
       - name: Install RISCOF
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install riscof
+          python3 -m pip install git+https://github.com/riscv/riscof.git
 
       - name: Init Submodules
         run: git submodule update --init --recursive

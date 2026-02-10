@@ -121,10 +121,6 @@ private:
     bool predict_branch(uint64_t pc);
     void update_branch_predictor(uint64_t pc, bool taken);
     
-    // 系统调用处理
-    void handleEcall();
-    void handleEbreak();
-    
     // 辅助方法
     uint64_t get_physical_register_value(PhysRegNum reg) const;
     void set_physical_register_value(PhysRegNum reg, uint64_t value);

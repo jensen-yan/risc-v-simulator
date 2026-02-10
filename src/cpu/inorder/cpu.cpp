@@ -1,7 +1,8 @@
 #include "cpu/inorder/cpu.h"
 #include "common/debug_types.h"
-#include "system/syscall_handler.h"
+#include "core/csr_utils.h"
 #include "core/instruction_executor.h"
+#include "system/syscall_handler.h"
 #include <iostream>
 #include <iomanip>
 #include <cinttypes>
@@ -218,42 +219,14 @@ uint64_t CPU::getCSR(uint32_t addr) const {
     if (addr >= NUM_CSR_REGISTERS) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
-    return csr_registers_[addr];
+    return csr::read(csr_registers_, addr);
 }
 
 void CPU::setCSR(uint32_t addr, uint64_t value) {
     if (addr >= NUM_CSR_REGISTERS) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
-
-    // fflags/frm/fcsr 共享同一组状态位，需要保持别名一致。
-    constexpr uint32_t FFLAGS = 0x001;
-    constexpr uint32_t FRM = 0x002;
-    constexpr uint32_t FCSR = 0x003;
-
-    if (addr == FFLAGS) {
-        const uint64_t fflags = value & 0x1FU;
-        csr_registers_[FFLAGS] = fflags;
-        csr_registers_[FCSR] = (csr_registers_[FCSR] & ~0x1FU) | fflags;
-        return;
-    }
-
-    if (addr == FRM) {
-        const uint64_t frm = value & 0x7U;
-        csr_registers_[FRM] = frm;
-        csr_registers_[FCSR] = (csr_registers_[FCSR] & ~0xE0U) | (frm << 5);
-        return;
-    }
-
-    if (addr == FCSR) {
-        const uint64_t fcsr = value & 0xFFU;
-        csr_registers_[FCSR] = fcsr;
-        csr_registers_[FFLAGS] = fcsr & 0x1FU;
-        csr_registers_[FRM] = (fcsr >> 5) & 0x7U;
-        return;
-    }
-
-    csr_registers_[addr] = value;
+    csr::write(csr_registers_, addr, value);
 }
 
 void CPU::dumpRegisters() const {
@@ -445,7 +418,6 @@ void CPU::executeJType(const DecodedInstruction& inst) {
 }
 
 void CPU::executeSystem(const DecodedInstruction& inst) {
-    constexpr uint32_t CSR_MEPC = 0x341;
     if (inst.opcode == Opcode::SYSTEM) {
         // 使用更精确的指令判断函数
         if (InstructionExecutor::isSystemCall(inst)) {
@@ -456,7 +428,7 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
             handleEbreak();
         } else if (InstructionExecutor::isMachineReturn(inst)) {
             // MRET - 从机器模式异常返回到MEPC
-            pc_ = getCSR(CSR_MEPC);
+            pc_ = getCSR(csr::kMepc);
         } else if (InstructionExecutor::isSupervisorReturn(inst)) {
             // SRET - 监管模式返回（可选实现）
             incrementPC();
@@ -483,13 +455,9 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
 
 
 void CPU::handleEcall() {
-    constexpr uint32_t CSR_MTVEC = 0x305;
-    constexpr uint64_t MACHINE_ECALL_CAUSE = 11;
-
     // arch-test 里 mtvec 会初始化为 trap 入口，此时 ECALL 需要走异常陷入语义。
-    const uint64_t mtvec = getCSR(CSR_MTVEC) & ~0x3ULL;
-    if (mtvec != 0) {
-        enterMachineTrap(MACHINE_ECALL_CAUSE, 0);
+    if (csr::machineTrapVectorBase(csr_registers_) != 0) {
+        enterMachineTrap(csr::kMachineEcallCause, 0);
         return;
     }
 
@@ -503,22 +471,11 @@ void CPU::handleEcall() {
 }
 
 void CPU::handleEbreak() {
-    constexpr uint64_t BREAKPOINT_CAUSE = 3;
-    enterMachineTrap(BREAKPOINT_CAUSE, pc_);
+    enterMachineTrap(csr::kBreakpointCause, pc_);
 }
 
 void CPU::enterMachineTrap(uint64_t cause, uint64_t tval) {
-    constexpr uint32_t CSR_MTVEC = 0x305;
-    constexpr uint32_t CSR_MEPC = 0x341;
-    constexpr uint32_t CSR_MCAUSE = 0x342;
-    constexpr uint32_t CSR_MTVAL = 0x343;
-
-    setCSR(CSR_MEPC, pc_);
-    setCSR(CSR_MCAUSE, cause);
-    setCSR(CSR_MTVAL, tval);
-
-    const uint64_t mtvec = getCSR(CSR_MTVEC);
-    pc_ = mtvec & ~0x3ULL;
+    pc_ = csr::enterMachineTrap(csr_registers_, pc_, cause, tval);
 }
 
 bool CPU::isExtensionEnabled(Extension extension) const {
@@ -534,8 +491,7 @@ bool CPU::isInstructionAddressMisaligned(uint64_t addr) const {
 }
 
 void CPU::raiseInstructionAddressMisaligned(uint64_t target_addr) {
-    constexpr uint64_t INSTRUCTION_ADDRESS_MISALIGNED_CAUSE = 0;
-    enterMachineTrap(INSTRUCTION_ADDRESS_MISALIGNED_CAUSE, target_addr);
+    enterMachineTrap(csr::kInstructionAddressMisalignedCause, target_addr);
 }
 
 int32_t CPU::signExtend(uint32_t value, int bits) const {
@@ -560,10 +516,7 @@ void CPU::executeMExtension(const DecodedInstruction& inst) {
 }
 
 void CPU::executeFPExtension(const DecodedInstruction& inst) {
-    constexpr uint32_t FFLAGS = 0x001;
-    constexpr uint32_t FRM = 0x002;
-
-    const uint8_t current_frm = static_cast<uint8_t>(getCSR(FRM) & 0x7U);
+    const uint8_t current_frm = static_cast<uint8_t>(getCSR(csr::kFrm) & 0x7U);
     InstructionExecutor::FpExecuteResult fp_result;
     if (inst.opcode == Opcode::FMADD ||
         inst.opcode == Opcode::FMSUB ||
@@ -591,7 +544,7 @@ void CPU::executeFPExtension(const DecodedInstruction& inst) {
     }
 
     if (fp_result.fflags != 0) {
-        setCSR(FFLAGS, getCSR(FFLAGS) | fp_result.fflags);
+        setCSR(csr::kFflags, getCSR(csr::kFflags) | fp_result.fflags);
     }
 
     incrementPC();

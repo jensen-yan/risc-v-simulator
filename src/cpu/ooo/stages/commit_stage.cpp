@@ -1,57 +1,13 @@
 #include "cpu/ooo/stages/commit_stage.h"
 #include "cpu/ooo/dynamic_inst.h"
+#include "core/csr_utils.h"
 #include "core/instruction_executor.h"
-#include "system/syscall_handler.h"
 #include "common/debug_types.h"
-#include <iostream>
-#include <fmt/format.h>
 
 namespace riscv {
 
 namespace {
-constexpr uint32_t kFflagsCsr = 0x001;
-constexpr uint32_t kFrmCsr = 0x002;
-constexpr uint32_t kFcsrCsr = 0x003;
-constexpr uint32_t kMtvecCsr = 0x305;
-constexpr uint32_t kMepcCsr = 0x341;
-constexpr uint32_t kMcauseCsr = 0x342;
-constexpr uint32_t kMtvalCsr = 0x343;
-constexpr uint64_t kBreakpointCause = 3;
-constexpr uint64_t kMachineEcallCause = 11;
 constexpr uint8_t kFenceIFunct3 = 0b001;
-
-uint64_t readCsrWithAlias(const std::array<uint64_t, 4096>& csr, uint32_t addr) {
-    if (addr == kFflagsCsr) {
-        return csr[kFcsrCsr] & 0x1FU;
-    }
-    if (addr == kFrmCsr) {
-        return (csr[kFcsrCsr] >> 5) & 0x7U;
-    }
-    return csr[addr];
-}
-
-void writeCsrWithAlias(std::array<uint64_t, 4096>& csr, uint32_t addr, uint64_t value) {
-    if (addr == kFflagsCsr) {
-        const uint64_t fflags = value & 0x1FU;
-        csr[kFflagsCsr] = fflags;
-        csr[kFcsrCsr] = (csr[kFcsrCsr] & ~0x1FU) | fflags;
-        return;
-    }
-    if (addr == kFrmCsr) {
-        const uint64_t frm = value & 0x7U;
-        csr[kFrmCsr] = frm;
-        csr[kFcsrCsr] = (csr[kFcsrCsr] & ~0xE0U) | (frm << 5);
-        return;
-    }
-    if (addr == kFcsrCsr) {
-        const uint64_t fcsr = value & 0xFFU;
-        csr[kFcsrCsr] = fcsr;
-        csr[kFflagsCsr] = fcsr & 0x1FU;
-        csr[kFrmCsr] = (fcsr >> 5) & 0x7U;
-        return;
-    }
-    csr[addr] = value;
-}
 }  // namespace
 
 CommitStage::CommitStage() {
@@ -142,8 +98,8 @@ void CommitStage::execute(CPUState& state) {
 
         bool wrote_integer_reg = false;
         if (InstructionExecutor::isFloatingPointInstruction(decoded_info)) {
-            constexpr uint32_t kFrmCsr = 0x002;
-            const uint8_t current_frm = static_cast<uint8_t>(readCsrWithAlias(state.csr_registers, kFrmCsr) & 0x7U);
+            const uint8_t current_frm =
+                static_cast<uint8_t>(csr::read(state.csr_registers, csr::kFrm) & 0x7U);
             InstructionExecutor::FpExecuteResult fp_result{};
 
             if (decoded_info.opcode == Opcode::LOAD_FP) {
@@ -171,8 +127,9 @@ void CommitStage::execute(CPUState& state) {
             }
 
             if (fp_result.fflags != 0) {
-                writeCsrWithAlias(state.csr_registers, kFflagsCsr,
-                                  readCsrWithAlias(state.csr_registers, kFflagsCsr) | fp_result.fflags);
+                csr::write(state.csr_registers,
+                           csr::kFflags,
+                           csr::read(state.csr_registers, csr::kFflags) | fp_result.fflags);
             }
 
             if (fp_result.write_int_reg && decoded_info.rd != 0) {
@@ -244,8 +201,8 @@ void CommitStage::execute(CPUState& state) {
             if (InstructionExecutor::isCsrInstruction(sys_inst)) {
                 const uint32_t csr_addr = static_cast<uint32_t>(sys_inst.imm) & 0xFFFU;
                 const auto csr_result = InstructionExecutor::executeCsrInstruction(
-                    sys_inst, committed_inst->get_src1_value(), readCsrWithAlias(state.csr_registers, csr_addr));
-                writeCsrWithAlias(state.csr_registers, csr_addr, csr_result.write_value);
+                    sys_inst, committed_inst->get_src1_value(), csr::read(state.csr_registers, csr_addr));
+                csr::write(state.csr_registers, csr_addr, csr_result.write_value);
                 LOGT(COMMIT, "inst=%" PRId64 " commit csr[0x%03x]: old=0x%" PRIx64 ", new=0x%" PRIx64,
                      committed_inst->get_instruction_id(), csr_addr,
                      csr_result.read_value, csr_result.write_value);
@@ -303,9 +260,8 @@ bool CommitStage::handle_ecall(CPUState& state, uint64_t instruction_pc) {
              state.arch_registers[17], state.arch_registers[10], 
              state.arch_registers[11], instruction_pc);
     
-    const uint64_t mtvec = readCsrWithAlias(state.csr_registers, kMtvecCsr) & ~0x3ULL;
-    if (mtvec != 0) {
-        enter_machine_trap(state, instruction_pc, kMachineEcallCause, 0);
+    if (csr::machineTrapVectorBase(state.csr_registers) != 0) {
+        enter_machine_trap(state, instruction_pc, csr::kMachineEcallCause, 0);
         return true;
     }
 
@@ -330,12 +286,12 @@ bool CommitStage::handle_ecall(CPUState& state, uint64_t instruction_pc) {
 }
 
 bool CommitStage::handle_ebreak(CPUState& state, uint64_t instruction_pc) {
-    enter_machine_trap(state, instruction_pc, kBreakpointCause, instruction_pc);
+    enter_machine_trap(state, instruction_pc, csr::kBreakpointCause, instruction_pc);
     return true;
 }
 
 bool CommitStage::handle_mret(CPUState& state) {
-    state.pc = readCsrWithAlias(state.csr_registers, kMepcCsr);
+    state.pc = csr::read(state.csr_registers, csr::kMepc);
     flush_pipeline_after_commit(state);
     return true;
 }
@@ -352,12 +308,7 @@ void CommitStage::enter_machine_trap(CPUState& state,
                                      uint64_t instruction_pc,
                                      uint64_t cause,
                                      uint64_t tval) {
-    writeCsrWithAlias(state.csr_registers, kMepcCsr, instruction_pc);
-    writeCsrWithAlias(state.csr_registers, kMcauseCsr, cause);
-    writeCsrWithAlias(state.csr_registers, kMtvalCsr, tval);
-
-    const uint64_t mtvec = readCsrWithAlias(state.csr_registers, kMtvecCsr);
-    state.pc = mtvec & ~0x3ULL;
+    state.pc = csr::enterMachineTrap(state.csr_registers, instruction_pc, cause, tval);
     flush_pipeline_after_commit(state);
 }
 

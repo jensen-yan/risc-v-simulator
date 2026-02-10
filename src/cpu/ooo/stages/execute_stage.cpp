@@ -2,24 +2,12 @@
 #include "cpu/ooo/dynamic_inst.h"
 #include "common/debug_types.h"
 #include "common/types.h"
+#include "core/csr_utils.h"
 #include "core/instruction_executor.h"
 
 namespace riscv {
 
 namespace {
-uint64_t readCsrWithAlias(const std::array<uint64_t, 4096>& csr, uint32_t addr) {
-    constexpr uint32_t kFflagsCsr = 0x001;
-    constexpr uint32_t kFrmCsr = 0x002;
-    constexpr uint32_t kFcsrCsr = 0x003;
-    if (addr == kFflagsCsr) {
-        return csr[kFcsrCsr] & 0x1FU;
-    }
-    if (addr == kFrmCsr) {
-        return (csr[kFcsrCsr] >> 5) & 0x7U;
-    }
-    return csr[addr];
-}
-
 uint64_t readAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 width) {
     switch (width) {
         case Funct3::LW:
@@ -129,9 +117,8 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                 if (inst.opcode == Opcode::AMO) {
                     execute_atomic_operation(unit, instruction, state);
                 } else if (InstructionExecutor::isFloatingPointInstruction(inst)) {
-                    constexpr uint32_t kFrmCsr = 0x002;
                     const uint8_t current_frm =
-                        static_cast<uint8_t>(readCsrWithAlias(state.csr_registers, kFrmCsr) & 0x7U);
+                        static_cast<uint8_t>(csr::read(state.csr_registers, csr::kFrm) & 0x7U);
                     if (inst.opcode == Opcode::FMADD ||
                         inst.opcode == Opcode::FMSUB ||
                         inst.opcode == Opcode::FNMSUB ||
@@ -247,7 +234,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                 {
                     const uint32_t csr_addr = static_cast<uint32_t>(inst.imm) & 0xFFFU;
                     const auto csr_result = InstructionExecutor::executeCsrInstruction(
-                        inst, instruction->get_src1_value(), readCsrWithAlias(state.csr_registers, csr_addr));
+                        inst, instruction->get_src1_value(), csr::read(state.csr_registers, csr_addr));
                     unit.result = csr_result.read_value;
                     LOGT(EXECUTE, "inst=%" PRId64 " csr[0x%03x]: old=0x%" PRIx64 ", pending_new=0x%" PRIx64,
                          instruction->get_instruction_id(), csr_addr,

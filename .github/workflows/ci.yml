@@ -34,10 +34,40 @@ jobs:
           sudo install -m 644 /tmp/gtest/lib/libgtest*.a /usr/lib
 
       - name: Setup RISC-V libc include/lib paths
+        shell: bash
         run: |
-          echo "CPATH=/usr/lib/picolibc/riscv64-unknown-elf/include" >> "${GITHUB_ENV}"
-          echo "C_INCLUDE_PATH=/usr/lib/picolibc/riscv64-unknown-elf/include" >> "${GITHUB_ENV}"
-          echo "LIBRARY_PATH=/usr/lib/picolibc/riscv64-unknown-elf/lib/rv64imafdc/lp64d" >> "${GITHUB_ENV}"
+          set -euo pipefail
+
+          include_dir="/usr/lib/picolibc/riscv64-unknown-elf/include"
+          if [[ ! -d "${include_dir}" ]]; then
+            include_dir="$(dpkg -L picolibc-riscv64-unknown-elf | grep '/include$' | head -n1)"
+          fi
+
+          libm_path="$(find /usr/lib/picolibc/riscv64-unknown-elf/lib -path '*rv64*lp64d*/libm.a' -print | head -n1 || true)"
+          if [[ -z "${libm_path}" ]]; then
+            libm_path="$(dpkg -L picolibc-riscv64-unknown-elf | grep '/libm\.a$' | grep 'rv64' | grep 'lp64d' | head -n1 || true)"
+          fi
+          if [[ -z "${libm_path}" ]]; then
+            echo "ERROR: 未找到 rv64/lp64d 的 picolibc libm.a，请检查 runner 上的 picolibc 包内容" >&2
+            exit 1
+          fi
+          lib_dir="$(dirname "${libm_path}")"
+
+          echo "CPATH=${include_dir}" >> "${GITHUB_ENV}"
+          echo "C_INCLUDE_PATH=${include_dir}" >> "${GITHUB_ENV}"
+          echo "LIBRARY_PATH=${lib_dir}" >> "${GITHUB_ENV}"
+
+          specs_file="$(riscv64-unknown-elf-gcc -print-file-name=picolibc.specs)"
+          if [[ "${specs_file}" != "picolibc.specs" && -f "${specs_file}" ]]; then
+            echo "RISCV_GCC_BENCHMARK=riscv64-unknown-elf-gcc -specs=${specs_file}" >> "${GITHUB_ENV}"
+            echo "Detected picolibc specs: ${specs_file}"
+          else
+            echo "RISCV_GCC_BENCHMARK=riscv64-unknown-elf-gcc" >> "${GITHUB_ENV}"
+            echo "picolibc.specs not found in GCC search path, fallback to default gcc + LIBRARY_PATH"
+          fi
+
+          echo "Detected include dir: ${include_dir}"
+          echo "Detected lib dir: ${lib_dir}"
 
       - name: Init Submodules
         run: git submodule update --init --recursive
@@ -53,7 +83,8 @@ jobs:
         run: |
           make -C riscv-tests/benchmarks -f Makefile \
             src_dir="${GITHUB_WORKSPACE}/riscv-tests/benchmarks" \
-            XLEN=64
+            XLEN=64 \
+            RISCV_GCC="${RISCV_GCC_BENCHMARK}"
 
       - name: Configure
         run: cmake -S . -B build

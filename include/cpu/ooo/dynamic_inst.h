@@ -104,6 +104,9 @@ private:
     bool result_ready_;                       // 结果是否准备好
     bool has_exception_;                      // 是否有异常
     std::string exception_msg_;               // 异常信息
+    bool has_trap_;                           // 是否触发可恢复陷入
+    uint64_t trap_cause_;                     // 陷入原因（mcause）
+    uint64_t trap_tval_;                      // 陷入附加值（mtval）
 
     // ========== ROB 关联信息 ==========
     ROBEntry rob_entry_;                      // 关联的ROB表项编号
@@ -189,11 +192,27 @@ public:
     const std::string& get_exception_message() const { return exception_msg_; }
     void set_exception(const std::string& msg) { 
         has_exception_ = true; 
-        exception_msg_ = msg; 
+        exception_msg_ = msg;
+        clear_trap();
     }
     void clear_exception() { 
         has_exception_ = false; 
         exception_msg_.clear(); 
+    }
+
+    bool has_trap() const { return has_trap_; }
+    uint64_t get_trap_cause() const { return trap_cause_; }
+    uint64_t get_trap_tval() const { return trap_tval_; }
+    void set_trap(uint64_t cause, uint64_t tval) {
+        clear_exception();
+        has_trap_ = true;
+        trap_cause_ = cause;
+        trap_tval_ = tval;
+    }
+    void clear_trap() {
+        has_trap_ = false;
+        trap_cause_ = 0;
+        trap_tval_ = 0;
     }
 
     // ========== ROB/RS 关联接口 ==========

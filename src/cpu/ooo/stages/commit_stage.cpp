@@ -12,6 +12,13 @@ namespace {
 constexpr uint32_t kFflagsCsr = 0x001;
 constexpr uint32_t kFrmCsr = 0x002;
 constexpr uint32_t kFcsrCsr = 0x003;
+constexpr uint32_t kMtvecCsr = 0x305;
+constexpr uint32_t kMepcCsr = 0x341;
+constexpr uint32_t kMcauseCsr = 0x342;
+constexpr uint32_t kMtvalCsr = 0x343;
+constexpr uint64_t kBreakpointCause = 3;
+constexpr uint64_t kMachineEcallCause = 11;
+constexpr uint8_t kFenceIFunct3 = 0b001;
 
 uint64_t readCsrWithAlias(const std::array<uint64_t, 4096>& csr, uint32_t addr) {
     if (addr == kFflagsCsr) {
@@ -117,6 +124,22 @@ void CommitStage::execute(CPUState& state) {
             break;
         }
 
+        if (committed_inst->has_trap()) {
+            state.instruction_count++;
+            enter_machine_trap(state,
+                               committed_inst->get_pc(),
+                               committed_inst->get_trap_cause(),
+                               committed_inst->get_trap_tval());
+
+            if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
+                LOGT(DIFFTEST, "inst=%" PRId64 " [COMMIT_TRACK] commit count=%" PRId64,
+                     committed_inst->get_instruction_id(), state.instruction_count);
+                state.cpu_interface->performDiffTestWithCommittedPC(committed_inst->get_pc());
+                LOGT(COMMIT, "run difftest comparison");
+            }
+            break;
+        }
+
         bool wrote_integer_reg = false;
         if (InstructionExecutor::isFloatingPointInstruction(decoded_info)) {
             constexpr uint32_t kFrmCsr = 0x002;
@@ -213,7 +236,8 @@ void CommitStage::execute(CPUState& state) {
             flush_pipeline_after_commit(state);
         }
         
-        // 处理系统调用
+        bool should_stop_commit = false;
+        // 处理系统/特权指令
         if (decoded_info.opcode == Opcode::SYSTEM) {
             const auto& sys_inst = decoded_info;
 
@@ -227,11 +251,17 @@ void CommitStage::execute(CPUState& state) {
                      csr_result.read_value, csr_result.write_value);
             } else if (InstructionExecutor::isSystemCall(sys_inst)) {
                 // ECALL
-                handle_ecall(state, committed_inst->get_pc());
+                should_stop_commit = handle_ecall(state, committed_inst->get_pc());
             } else if (InstructionExecutor::isBreakpoint(sys_inst)) {
                 // EBREAK
-                handle_ebreak(state);
+                should_stop_commit = handle_ebreak(state, committed_inst->get_pc());
+            } else if (InstructionExecutor::isMachineReturn(sys_inst)) {
+                // MRET
+                should_stop_commit = handle_mret(state);
             }
+        } else if (decoded_info.opcode == Opcode::MISC_MEM &&
+                   static_cast<uint8_t>(decoded_info.funct3) == kFenceIFunct3) {
+            should_stop_commit = handle_fencei(state, committed_inst->get_pc(), decoded_info.is_compressed);
         }
 
         // DiffTest: 在提交阶段所有体系结构状态更新完成后再做比较
@@ -240,6 +270,10 @@ void CommitStage::execute(CPUState& state) {
                 committed_inst->get_instruction_id(), state.instruction_count);
             state.cpu_interface->performDiffTestWithCommittedPC(committed_inst->get_pc());
             LOGT(COMMIT, "run difftest comparison");
+        }
+
+        if (should_stop_commit || state.halted) {
+            break;
         }
         
         // 如果没有更多指令可提交，跳出循环
@@ -260,7 +294,7 @@ void CommitStage::reset() {
     LOGT(COMMIT, "commit stage reset");
 }
 
-void CommitStage::handle_ecall(CPUState& state, uint64_t instruction_pc) {
+bool CommitStage::handle_ecall(CPUState& state, uint64_t instruction_pc) {
     // 处理系统调用
     LOGT(COMMIT, "detected ECALL at pc=0x%" PRIx64, instruction_pc);
     
@@ -269,26 +303,62 @@ void CommitStage::handle_ecall(CPUState& state, uint64_t instruction_pc) {
              state.arch_registers[17], state.arch_registers[10], 
              state.arch_registers[11], instruction_pc);
     
-    // 调用系统调用处理器
+    const uint64_t mtvec = readCsrWithAlias(state.csr_registers, kMtvecCsr) & ~0x3ULL;
+    if (mtvec != 0) {
+        enter_machine_trap(state, instruction_pc, kMachineEcallCause, 0);
+        return true;
+    }
+
+    // 未设置 trap 向量时，兼容用户态程序的宿主 syscall 行为
     if (state.syscall_handler && state.cpu_interface) {
         LOGT(COMMIT, "invoke syscall handler");
         bool should_halt = state.syscall_handler->handleSyscall(state.cpu_interface);
         if (should_halt) {
             state.halted = true;
             LOGT(COMMIT, "syscall handling finished, halt program");
+            return true;
         } else {
             LOGT(COMMIT, "syscall handling finished, continue execution");
+            return false;
         }
     } else {
         // 降级处理：如果没有系统调用处理器，直接停机
         LOGW(COMMIT, "missing syscall handler, halt directly");
         state.halted = true;
+        return true;
     }
 }
 
-void CommitStage::handle_ebreak(CPUState& state) {
-    LOGT(COMMIT, "encountered EBREAK, halt execution");
-    state.halted = true;
+bool CommitStage::handle_ebreak(CPUState& state, uint64_t instruction_pc) {
+    enter_machine_trap(state, instruction_pc, kBreakpointCause, instruction_pc);
+    return true;
+}
+
+bool CommitStage::handle_mret(CPUState& state) {
+    state.pc = readCsrWithAlias(state.csr_registers, kMepcCsr);
+    flush_pipeline_after_commit(state);
+    return true;
+}
+
+bool CommitStage::handle_fencei(CPUState& state, uint64_t instruction_pc, bool is_compressed) {
+    const uint64_t next_pc = instruction_pc + (is_compressed ? 2ULL : 4ULL);
+    LOGT(COMMIT, "detected FENCE.I at pc=0x%" PRIx64 ", refetch from 0x%" PRIx64, instruction_pc, next_pc);
+    state.pc = next_pc;
+    flush_pipeline_after_commit(state);
+    return true;
+}
+
+void CommitStage::enter_machine_trap(CPUState& state,
+                                     uint64_t instruction_pc,
+                                     uint64_t cause,
+                                     uint64_t tval) {
+    writeCsrWithAlias(state.csr_registers, kMepcCsr, instruction_pc);
+    writeCsrWithAlias(state.csr_registers, kMcauseCsr, cause);
+    writeCsrWithAlias(state.csr_registers, kMtvalCsr, tval);
+
+    const uint64_t mtvec = readCsrWithAlias(state.csr_registers, kMtvecCsr);
+    state.pc = mtvec & ~0x3ULL;
+    flush_pipeline_after_commit(state);
 }
 
 void CommitStage::handle_exception(CPUState& state, const std::string& exception_msg, uint64_t pc) {
@@ -298,7 +368,7 @@ void CommitStage::handle_exception(CPUState& state, const std::string& exception
 }
 
 void CommitStage::flush_pipeline_after_commit(CPUState& state) {
-    LOGT(COMMIT, "jump committed, start pipeline flush");
+    LOGT(COMMIT, "serializing event committed, start pipeline flush");
     
     // 1. 清空取指缓冲区（错误推测的指令）
     while (!state.fetch_buffer.empty()) {

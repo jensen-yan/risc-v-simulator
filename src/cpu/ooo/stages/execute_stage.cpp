@@ -43,6 +43,18 @@ void writeAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Funct
             throw IllegalInstructionException("A扩展仅支持W/D宽度");
     }
 }
+
+bool isExtensionEnabled(const CPUState& state, Extension extension) {
+    return (state.enabled_extensions & static_cast<uint32_t>(extension)) != 0;
+}
+
+bool isInstructionAddressMisaligned(const CPUState& state, uint64_t addr) {
+    // C 扩展开启时 IALIGN=16，否则 IALIGN=32。
+    if (isExtensionEnabled(state, Extension::C)) {
+        return (addr & 0x1ULL) != 0;
+    }
+    return (addr & 0x3ULL) != 0;
+}
 }  // namespace
 
 ExecuteStage::ExecuteStage() {
@@ -182,10 +194,20 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     
                 } else if (inst.opcode == Opcode::JALR) {
                     // JALR 指令 - I-type 跳转指令
-                    unit.result = instruction->get_pc() + (inst.is_compressed ? 2 : 4);
-                    
                     // JALR 指令：跳转目标地址 = rs1 + imm，并清除最低位
-                    unit.jump_target = InstructionExecutor::calculateJumpAndLinkTarget(inst, instruction->get_pc(), instruction->get_src1_value());
+                    const uint64_t target = InstructionExecutor::calculateJumpAndLinkTarget(
+                        inst, instruction->get_pc(), instruction->get_src1_value());
+                    if (isInstructionAddressMisaligned(state, target)) {
+                        instruction->set_trap(0, target);
+                        unit.is_jump = false;
+                        unit.jump_target = 0;
+                        LOGT(EXECUTE, "JALR misaligned trap: pc=0x%" PRIx64 " target=0x%" PRIx64,
+                             instruction->get_pc(), target);
+                        break;
+                    }
+
+                    unit.result = instruction->get_pc() + (inst.is_compressed ? 2 : 4);
+                    unit.jump_target = target;
                     unit.is_jump = true;  // 标记为跳转指令
                     instruction->set_jump_info(true, unit.jump_target);
                 } else if (inst.opcode == Opcode::MISC_MEM) {
@@ -246,7 +268,18 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     
                     if (should_branch) {
                         // 分支taken：条件成立，需要跳转
-                        unit.jump_target = instruction->get_pc() + inst.imm;
+                        const uint64_t target =
+                            instruction->get_pc() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+                        if (isInstructionAddressMisaligned(state, target)) {
+                            instruction->set_trap(0, target);
+                            unit.is_jump = false;
+                            unit.jump_target = 0;
+                            LOGT(EXECUTE, "BRANCH misaligned trap: pc=0x%" PRIx64 " target=0x%" PRIx64,
+                                 instruction->get_pc(), target);
+                            break;
+                        }
+
+                        unit.jump_target = target;
                         unit.is_jump = true;  // 标记需要改变PC
                         instruction->set_jump_info(true, unit.jump_target);
                         
@@ -312,8 +345,18 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
             case InstructionType::J_TYPE:
                 {
                     // JAL 指令 - J-type 无条件跳转
+                    const uint64_t target = InstructionExecutor::calculateJumpTarget(inst, instruction->get_pc());
+                    if (isInstructionAddressMisaligned(state, target)) {
+                        instruction->set_trap(0, target);
+                        unit.is_jump = false;
+                        unit.jump_target = 0;
+                        LOGT(EXECUTE, "JAL misaligned trap: pc=0x%" PRIx64 " target=0x%" PRIx64,
+                             instruction->get_pc(), target);
+                        break;
+                    }
+
                     unit.result = instruction->get_pc() + (inst.is_compressed ? 2 : 4);
-                    unit.jump_target = InstructionExecutor::calculateJumpTarget(inst, instruction->get_pc());
+                    unit.jump_target = target;
                     unit.is_jump = true;  // 无条件跳转总是需要改变PC
                     instruction->set_jump_info(true, unit.jump_target);
                     
@@ -565,6 +608,12 @@ void ExecuteStage::reset_unit_container(UnitContainer& units) {
 }
 
 void ExecuteStage::complete_execution_unit(ExecutionUnit& unit, ExecutionUnitType unit_type, size_t unit_index, CPUState& state) {
+    if (unit.has_exception) {
+        unit.instruction->set_exception(unit.exception_msg);
+    } else {
+        unit.instruction->clear_exception();
+    }
+
     // 设置执行结果和跳转信息到DynamicInst
     unit.instruction->set_result(unit.result);
     unit.instruction->set_jump_info(unit.is_jump, unit.jump_target);

@@ -38,8 +38,12 @@ void WritebackStage::execute(CPUState& state) {
         auto rob_instruction = state.reorder_buffer->get_entry(rob_entry);
         if (rob_instruction && rob_instruction == instruction) {
             // 指令指针匹配，安全更新
-            state.reorder_buffer->update_entry(instruction, result, false, "",
-                                         instruction->is_jump(), instruction->get_jump_target());
+            state.reorder_buffer->update_entry(instruction,
+                                               result,
+                                               instruction->has_exception(),
+                                               instruction->get_exception_message(),
+                                               instruction->is_jump(),
+                                               instruction->get_jump_target());
         } else {
             LOGT(WRITEBACK, "stale cdb entry, skip update: rob[%d] current=%p cdb=%p",
                    rob_entry,

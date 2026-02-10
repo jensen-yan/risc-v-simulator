@@ -11,7 +11,8 @@ DynamicInst::DynamicInst()
       logical_dest_(0), physical_dest_(0), logical_src1_(0), logical_src2_(0),
       physical_src1_(0), physical_src2_(0),
       src1_ready_(false), src2_ready_(false), src1_value_(0), src2_value_(0),
-      result_(0), result_ready_(false), has_exception_(false),
+      result_(0), result_ready_(false), has_exception_(false), has_trap_(false),
+      trap_cause_(0), trap_tval_(0),
       rob_entry_(0), rs_entry_(0), is_jump_(false), jump_target_(0),
       fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
@@ -23,7 +24,8 @@ DynamicInst::DynamicInst(const DecodedInstruction& decoded_info, uint64_t pc, ui
       logical_dest_(0), physical_dest_(0), logical_src1_(0), logical_src2_(0),
       physical_src1_(0), physical_src2_(0),
       src1_ready_(false), src2_ready_(false), src1_value_(0), src2_value_(0),
-      result_(0), result_ready_(false), has_exception_(false),
+      result_(0), result_ready_(false), has_exception_(false), has_trap_(false),
+      trap_cause_(0), trap_tval_(0),
       rob_entry_(0), rs_entry_(0), is_jump_(false), jump_target_(0),
       fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
@@ -125,6 +127,11 @@ std::string DynamicInst::to_string() const {
     if (has_exception_) {
         ss << ", Exception=\"" << exception_msg_ << "\"";
     }
+
+    if (has_trap_) {
+        ss << ", Trap(cause=" << std::dec << trap_cause_
+           << ", tval=0x" << std::hex << trap_tval_ << ")";
+    }
     
     if (is_jump_) {
         ss << ", Jump->0x" << std::hex << std::setw(8) << jump_target_;
@@ -174,6 +181,11 @@ void DynamicInst::dump_state() const {
     if (has_exception_) {
         std::cout << "Exception: " << exception_msg_ << std::endl;
     }
+
+    if (has_trap_) {
+        std::cout << "Trap: cause=" << trap_cause_
+                  << " tval=0x" << std::hex << trap_tval_ << std::dec << std::endl;
+    }
     
     if (is_jump_) {
         std::cout << "Jump Info:" << std::endl;
@@ -201,6 +213,9 @@ void DynamicInst::reset_to_allocated() {
     result_ready_ = false;
     has_exception_ = false;
     exception_msg_.clear();
+    has_trap_ = false;
+    trap_cause_ = 0;
+    trap_tval_ = 0;
     is_jump_ = false;
     jump_target_ = 0;
     rs_entry_ = 0;

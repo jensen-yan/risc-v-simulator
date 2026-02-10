@@ -21,6 +21,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Init Submodules
+        run: git submodule update --init --recursive
+
       - name: Install Test Dependencies
         run: |
           sudo apt-get update
@@ -37,26 +40,51 @@ jobs:
           sudo cmake --build /tmp/gtest
           sudo install -m 644 /tmp/gtest/lib/libgtest*.a /usr/lib
 
+      - name: Resolve Spike Commit
+        id: spike_ref
+        run: |
+          set -euo pipefail
+          SPIKE_COMMIT="$(git ls-remote https://github.com/riscv-software-src/riscv-isa-sim.git HEAD | awk '{print $1}')"
+          echo "commit=${SPIKE_COMMIT}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Spike Install
+        id: cache_spike
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/riscv-isa-sim/install
+          key: spike-${{ runner.os }}-${{ steps.spike_ref.outputs.commit }}
+
       - name: Build and Install Spike (riscv-isa-sim)
         run: |
           set -euo pipefail
-          rm -rf /tmp/riscv-isa-sim
-          git clone --depth 1 https://github.com/riscv-software-src/riscv-isa-sim.git /tmp/riscv-isa-sim
-          cd /tmp/riscv-isa-sim
-          mkdir -p build
-          cd build
-          ../configure --prefix=/usr/local
-          make -j"$(nproc)"
-          sudo make install
+          SPIKE_PREFIX="${HOME}/.cache/riscv-isa-sim/install"
+          if [[ ! -x "${SPIKE_PREFIX}/bin/spike" ]]; then
+            rm -rf /tmp/riscv-isa-sim
+            git clone --depth 1 https://github.com/riscv-software-src/riscv-isa-sim.git /tmp/riscv-isa-sim
+            cd /tmp/riscv-isa-sim
+            mkdir -p build
+            cd build
+            ../configure --prefix="${SPIKE_PREFIX}"
+            make -j"$(nproc)"
+            make install
+          fi
+          echo "${SPIKE_PREFIX}/bin" >> "$GITHUB_PATH"
+          export PATH="${SPIKE_PREFIX}/bin:${PATH}"
           command -v spike
 
       - name: Install RISCOF
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install git+https://github.com/riscv/riscof.git
-
-      - name: Init Submodules
-        run: git submodule update --init --recursive
+          # Pin to repository-local versions to avoid riscof/riscv-isac API mismatch.
+          python3 -m pip install -e ./riscv-arch-test/riscv-isac
+          python3 -m pip install -e ./riscv-arch-test/riscv-ctg
+          python3 - <<'PY'
+          from riscv_isac import isac
+          assert hasattr(isac, "preprocessing"), "riscv-isac missing preprocessing()"
+          print("riscv-isac API check: preprocessing() available")
+          PY
 
       - name: Build ISA Tests (p-only)
         run: |

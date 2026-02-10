@@ -19,6 +19,30 @@ uint64_t readCsrWithAlias(const std::array<uint64_t, 4096>& csr, uint32_t addr) 
     }
     return csr[addr];
 }
+
+uint64_t readAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 width) {
+    switch (width) {
+        case Funct3::LW:
+            return memory->readWord(addr);
+        case Funct3::LD:
+            return memory->read64(addr);
+        default:
+            throw IllegalInstructionException("A扩展仅支持W/D宽度");
+    }
+}
+
+void writeAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 width, uint64_t value) {
+    switch (width) {
+        case Funct3::LW:
+            memory->writeWord(addr, static_cast<uint32_t>(value));
+            return;
+        case Funct3::LD:
+            memory->write64(addr, value);
+            return;
+        default:
+            throw IllegalInstructionException("A扩展仅支持W/D宽度");
+    }
+}
 }  // namespace
 
 ExecuteStage::ExecuteStage() {
@@ -90,7 +114,9 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
         
         switch (inst.type) {
             case InstructionType::R_TYPE:
-                if (InstructionExecutor::isFloatingPointInstruction(inst)) {
+                if (inst.opcode == Opcode::AMO) {
+                    execute_atomic_operation(unit, instruction, state);
+                } else if (InstructionExecutor::isFloatingPointInstruction(inst)) {
                     constexpr uint32_t kFrmCsr = 0x002;
                     const uint8_t current_frm =
                         static_cast<uint8_t>(readCsrWithAlias(state.csr_registers, kFrmCsr) & 0x7U);
@@ -272,6 +298,9 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                     if (inst.opcode == Opcode::STORE) {
                         state.store_buffer->add_store(instruction, addr, instruction->get_src2_value(), inst.memory_access_size);
                     }
+
+                    // 与顺序核保持一致：任意普通Store都会使LR预留失效。
+                    state.reservation_valid = false;
                 }
                 break;
                 
@@ -321,6 +350,16 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
+                const auto& inst = unit.instruction->get_decoded_info();
+                if (inst.opcode == Opcode::AMO &&
+                    state.reorder_buffer->has_earlier_store_pending(unit.instruction->get_instruction_id())) {
+                    // AMO需在更老Store完成后再结束，避免破坏单线程程序顺序可见性。
+                    unit.remaining_cycles = 1;
+                    LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier STORE, delay completion",
+                        unit.instruction->get_instruction_id());
+                    continue;
+                }
+
                 LOGT(EXECUTE, "inst=%" PRId64 " ALU%zu done, result=0x%" PRIx64 " -> CDB",
                     unit.instruction->get_instruction_id(), i, unit.result);
                 
@@ -445,6 +484,29 @@ bool ExecuteStage::execute_branch_operation(const DecodedInstruction& inst, uint
 void ExecuteStage::execute_store_operation(const DecodedInstruction& inst, uint64_t src1, uint64_t src2, CPUState& state) {
     uint64_t addr = src1 + inst.imm;
     InstructionExecutor::storeToMemory(state.memory, addr, src2, inst.funct3);
+}
+
+void ExecuteStage::execute_atomic_operation(ExecutionUnit& unit, DynamicInstPtr instruction, CPUState& state) {
+    const auto& inst = instruction->get_decoded_info();
+    const uint64_t addr = instruction->get_src1_value();
+    const uint64_t memory_value = readAtomicMemoryValue(state.memory, addr, inst.funct3);
+    const bool reservation_hit = state.reservation_valid && (state.reservation_addr == addr);
+
+    const auto amo_result = InstructionExecutor::executeAtomicOperation(
+        inst, memory_value, instruction->get_src2_value(), reservation_hit);
+
+    if (amo_result.acquire_reservation) {
+        state.reservation_valid = true;
+        state.reservation_addr = addr;
+    }
+    if (amo_result.release_reservation) {
+        state.reservation_valid = false;
+    }
+    if (amo_result.do_store) {
+        writeAtomicMemoryValue(state.memory, addr, inst.funct3, amo_result.store_value);
+    }
+
+    unit.result = amo_result.rd_value;
 }
 
 bool ExecuteStage::predict_branch(uint64_t pc) {

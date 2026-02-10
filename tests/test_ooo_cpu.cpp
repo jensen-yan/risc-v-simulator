@@ -48,6 +48,11 @@ protected:
     uint32_t createRTypeInstruction(uint8_t funct7, uint8_t rs2, uint8_t rs1, uint8_t funct3, uint8_t rd, uint8_t opcode) {
         return (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode;
     }
+
+    // 辅助函数：创建AMO指令
+    uint32_t createAMOTypeInstruction(uint8_t funct5, uint8_t rs2, uint8_t rs1, uint8_t funct3, uint8_t rd) {
+        return (funct5 << 27) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | 0x2F;
+    }
     
     // 辅助函数：创建I型指令
     uint32_t createITypeInstruction(int16_t imm, uint8_t rs1, uint8_t funct3, uint8_t rd, uint8_t opcode) {
@@ -188,6 +193,49 @@ TEST_F(OutOfOrderCPUTest, MExtensionMulInstruction) {
 
     EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
     EXPECT_EQ(cpu->getRegister(3), 42) << "MUL结果应为42";
+}
+
+TEST_F(OutOfOrderCPUTest, AtomicAddWordInstruction) {
+    memory->writeWord(0x200, 10);
+
+    // ADDI x1, x0, 0x200
+    writeInstruction(0x0, createITypeInstruction(0x200, 0, 0x0, 1, 0x13));
+    // ADDI x2, x0, 5
+    writeInstruction(0x4, createITypeInstruction(5, 0, 0x0, 2, 0x13));
+    // AMOADD.W x3, x2, (x1)
+    writeInstruction(0x8, createAMOTypeInstruction(/*funct5=*/0x00, /*rs2=*/2, /*rs1=*/1, /*funct3=*/0x2, /*rd=*/3));
+    writeInstruction(0xC, createECallInstruction());
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 80 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    EXPECT_EQ(cpu->getRegister(3), 10) << "AMOADD.W应返回更新前内存值";
+    EXPECT_EQ(memory->readWord(0x200), 15u) << "AMOADD.W应把rs2加到内存";
+}
+
+TEST_F(OutOfOrderCPUTest, LrScWordInstruction) {
+    memory->writeWord(0x204, 0x11);
+
+    // ADDI x1, x0, 0x204
+    writeInstruction(0x0, createITypeInstruction(0x204, 0, 0x0, 1, 0x13));
+    // ADDI x2, x0, 0x22
+    writeInstruction(0x4, createITypeInstruction(0x22, 0, 0x0, 2, 0x13));
+    // LR.W x5, (x1)
+    writeInstruction(0x8, createAMOTypeInstruction(/*funct5=*/0x02, /*rs2=*/0, /*rs1=*/1, /*funct3=*/0x2, /*rd=*/5));
+    // SC.W x6, x2, (x1)
+    writeInstruction(0xC, createAMOTypeInstruction(/*funct5=*/0x03, /*rs2=*/2, /*rs1=*/1, /*funct3=*/0x2, /*rd=*/6));
+    writeInstruction(0x10, createECallInstruction());
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 120 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    EXPECT_EQ(cpu->getRegister(5), 0x11) << "LR.W应读取旧内存值";
+    EXPECT_EQ(cpu->getRegister(6), 0) << "SC.W在预留命中时应返回0";
+    EXPECT_EQ(memory->readWord(0x204), 0x22u) << "SC.W成功时应写入新值";
 }
 
 TEST_F(OutOfOrderCPUTest, FenceInstructionAsNop) {

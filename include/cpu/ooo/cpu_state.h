@@ -93,6 +93,10 @@ struct CPUState {
     // 性能统计
     uint64_t branch_mispredicts;   // 分支预测错误次数
     uint64_t pipeline_stalls;      // 流水线停顿次数
+
+    // A扩展 LR/SC 预留状态
+    bool reservation_valid;        // LR 预留是否有效
+    uint64_t reservation_addr;     // LR 预留地址
     
     // 调试支持
     uint64_t global_instruction_id;  // 全局指令序号
@@ -107,7 +111,9 @@ struct CPUState {
                           static_cast<uint32_t>(Extension::D) |
                           static_cast<uint32_t>(Extension::C)),
         cpu_interface(nullptr),
-        branch_mispredicts(0), pipeline_stalls(0), global_instruction_id(0) {
+        branch_mispredicts(0), pipeline_stalls(0),
+        reservation_valid(false), reservation_addr(0),
+        global_instruction_id(0) {
         
         // 批量初始化所有寄存器为0
         arch_registers.fill(0);

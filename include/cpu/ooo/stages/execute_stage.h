@@ -28,6 +28,7 @@ private:
     ExecutionUnit* get_available_unit(ExecutionUnitType type, CPUState& state);
     bool execute_branch_operation(const DecodedInstruction& inst, uint64_t src1, uint64_t src2, CPUState& state);
     void execute_store_operation(const DecodedInstruction& inst, uint64_t src1, uint64_t src2, CPUState& state);
+    void execute_atomic_operation(ExecutionUnit& unit, DynamicInstPtr instruction, CPUState& state);
     bool perform_load_execution(ExecutionUnit& unit, CPUState& state);
     
     // 分支预测相关

@@ -100,6 +100,19 @@ void DecodedInstruction::initialize_execution_properties() {
 
         is_signed_load = false; // 存储指令不涉及符号扩展
         execution_cycles = 1;   // 存储指令需要1个周期
+    } else if (opcode == Opcode::AMO) {
+        // A扩展仅支持W/D宽度
+        if (funct3 == Funct3::LW) {
+            memory_access_size = 4;
+        } else if (funct3 == Funct3::LD) {
+            memory_access_size = 8;
+        } else {
+            memory_access_size = 0;
+            has_decode_exception = true;
+            decode_exception_msg = "非法的AMO指令funct3值: " + std::to_string(static_cast<int>(funct3));
+        }
+        is_signed_load = false;
+        execution_cycles = 2;
     } else {
         // 非内存指令
         memory_access_size = 0;

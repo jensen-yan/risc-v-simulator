@@ -123,3 +123,47 @@ sudo apt install lcov
 ```
 
 提示：运行 riscv-tests 时常用 `-m 2164260864`（2GB）确保地址范围充足；默认内存为 1MB，可按需调整。
+
+## RISCOF 架构测试（DUT vs Spike）
+
+仓库已提供最小可用配置，目录：`tools/riscof/`。
+
+```bash
+# 1) 激活环境（如遇网络问题先 proxyon）
+source ~/.zshrc
+proxyon
+source .venv-riscof/bin/activate
+
+# 2) 生成测试列表
+cd tools/riscof
+riscof testlist \
+  --config ./config.ini \
+  --suite ../../riscv-arch-test/riscv-test-suite \
+  --env ../../riscv-arch-test/riscv-test-suite/env \
+  --work-dir ../../build/riscof-work
+
+# 2.5) 生成 smoke testfile（add/and/sub）
+python - <<'PY'
+import yaml
+from pathlib import Path
+src = Path("../../build/riscof-work/test_list.yaml")
+dst = Path("../../build/riscof-work/test_list_smoke.yaml")
+data = yaml.safe_load(src.read_text())
+want = ("rv64i_m/I/src/add-01.S", "rv64i_m/I/src/and-01.S", "rv64i_m/I/src/sub-01.S")
+out = {k: v for k, v in data.items() if any(w in k for w in want)}
+dst.write_text(yaml.safe_dump(out, sort_keys=False))
+print(f"wrote {len(out)} tests -> {dst}")
+PY
+
+# 3) 运行对比（先 smoke）
+riscof validateyaml --config ./config.ini --work-dir ../../build/riscof-work-smoke
+riscof run \
+  --config ./config.ini \
+  --suite ../../riscv-arch-test/riscv-test-suite \
+  --env ../../riscv-arch-test/riscv-test-suite/env \
+  --work-dir ../../build/riscof-work-smoke \
+  --testfile ../../build/riscof-work/test_list_smoke.yaml \
+  --no-browser
+```
+
+详细说明见：`tools/riscof/README.md`

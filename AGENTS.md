@@ -56,3 +56,4 @@ commit message 尽量详细点，用中文
 ## 安全与配置提示
 - 不提交二进制或 `build/` 输出。使用 `setup_riscv_env.sh` 导出工具链路径。
 - 涉及 ELF/加载路径时，用 `-e` 且在顺序/乱序模式下验证。
+- 若遇到网络问题（如 `Could not resolve host`、`git clone`/`git push` 超时），先执行 `source ~/.zshrc && proxyon`，确保已设置 `http_proxy`/`https_proxy` 后再重试相关命令（含 `git clone`、`git push`、`git submodule update`）。

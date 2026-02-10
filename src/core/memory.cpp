@@ -60,6 +60,11 @@ uint32_t Memory::readWord(Address addr) const {
 }
 
 void Memory::writeWord(Address addr, uint32_t value) {
+    if (addr == tohost_addr_) {
+        handleTohost(static_cast<uint64_t>(value));
+        return;
+    }
+
     checkAddress(addr, 4);
     
     // 小端序存储
@@ -86,7 +91,7 @@ uint64_t Memory::read64(Address addr) const {
 
 void Memory::write64(Address addr, uint64_t value) {
     // 检查是否为 tohost 地址
-    if (addr == TOHOST_ADDR) {
+    if (addr == tohost_addr_) {
         handleTohost(value);
         return;
     }
@@ -237,13 +242,18 @@ void Memory::processSyscall(Address magic_mem_addr) {
         }
         
         // 写入 fromhost 表示处理完成，解除程序等待
-        write64(FROMHOST_ADDR, 1);
+        write64(fromhost_addr_, 1);
         
     } catch (const MemoryException& e) {
         LOGE(SYSTEM, "[tohost] syscall handling error: %s", e.what());
         // 写入 fromhost 表示处理完成（即使出错）
-        write64(FROMHOST_ADDR, 1);
+        write64(fromhost_addr_, 1);
     }
+}
+
+void Memory::setHostCommAddresses(Address tohostAddr, Address fromhostAddr) {
+    tohost_addr_ = tohostAddr;
+    fromhost_addr_ = fromhostAddr;
 }
 
 } // namespace riscv

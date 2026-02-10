@@ -31,6 +31,7 @@ public:
     bool loadProgramFromBytes(const std::vector<uint8_t>& program, Address startAddr = 0);
     bool loadRiscvProgram(const std::string& filename, Address loadAddr = 0x1000);
     bool loadElfProgram(const std::string& filename);
+    void setHostCommAddresses(Address tohostAddr, Address fromhostAddr);
     
     // 执行控制
     void step();                    // 单步执行
@@ -50,6 +51,10 @@ public:
     void dumpRegisters() const;
     void dumpMemory(Address startAddr, size_t length) const;
     void dumpState() const;
+    bool dumpSignature(const std::string& outputPath,
+                       Address startAddr,
+                       Address endAddr,
+                       size_t granularity) const;
     
     // 统计信息
     void printStatistics() const;

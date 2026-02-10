@@ -17,6 +17,14 @@ void printUsage(const char* programName) {
     std::cout << "  -e, --elf                    Load ELF file (auto detect)\n";
     std::cout << "  --ooo                        Use out-of-order CPU (default)\n";
     std::cout << "  --in-order                   Use in-order CPU\n";
+    std::cout << "  --signature-file=FILE        Dump signature to FILE\n";
+    std::cout << "  --signature-start=ADDR       Signature start address (hex/dec)\n";
+    std::cout << "  --signature-end=ADDR         Signature end address (hex/dec)\n";
+    std::cout << "  --signature-granularity=N    Signature bytes per line (default: 8)\n";
+    std::cout << "  --tohost-addr=ADDR           Override tohost address (hex/dec)\n";
+    std::cout << "  --fromhost-addr=ADDR         Override fromhost address (hex/dec)\n";
+    std::cout << "  +signature=FILE              Spike-compatible signature file option\n";
+    std::cout << "  +signature-granularity=N     Spike-compatible granularity option\n";
     std::cout << "\n";
     std::cout << "Extended debug options:\n";
     std::cout << "  --debug-flags=<flags>        Set debug categories (comma separated)\n";
@@ -70,6 +78,16 @@ int main(int argc, char* argv[]) {
     std::string debugCycles;
     std::string debugPreset;
     bool debugNoConsole = false;
+    std::string signatureFile;
+    Address signatureStart = 0;
+    Address signatureEnd = 0;
+    bool signatureStartSet = false;
+    bool signatureEndSet = false;
+    size_t signatureGranularity = 8;
+    Address tohostAddr = 0;
+    Address fromhostAddr = 0;
+    bool tohostAddrSet = false;
+    bool fromhostAddrSet = false;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -111,6 +129,26 @@ int main(int argc, char* argv[]) {
             DebugManager::getInstance().setOutputToConsole(false);
             debugMode = true; // 自动启用调试模式
             debugNoConsole = true;
+        } else if (arg.find("--signature-file=") == 0) {
+            signatureFile = arg.substr(17);  // 去掉 "--signature-file=" 前缀
+        } else if (arg.find("--signature-start=") == 0) {
+            signatureStart = static_cast<Address>(std::stoull(arg.substr(18), nullptr, 0));
+            signatureStartSet = true;
+        } else if (arg.find("--signature-end=") == 0) {
+            signatureEnd = static_cast<Address>(std::stoull(arg.substr(16), nullptr, 0));
+            signatureEndSet = true;
+        } else if (arg.find("--signature-granularity=") == 0) {
+            signatureGranularity = static_cast<size_t>(std::stoull(arg.substr(24), nullptr, 0));
+        } else if (arg.find("+signature=") == 0) {
+            signatureFile = arg.substr(11);  // 去掉 "+signature=" 前缀
+        } else if (arg.find("+signature-granularity=") == 0) {
+            signatureGranularity = static_cast<size_t>(std::stoull(arg.substr(23), nullptr, 0));
+        } else if (arg.find("--tohost-addr=") == 0) {
+            tohostAddr = static_cast<Address>(std::stoull(arg.substr(14), nullptr, 0));
+            tohostAddrSet = true;
+        } else if (arg.find("--fromhost-addr=") == 0) {
+            fromhostAddr = static_cast<Address>(std::stoull(arg.substr(16), nullptr, 0));
+            fromhostAddrSet = true;
         } else if (filename.empty()) {
             filename = arg;
         }
@@ -127,6 +165,13 @@ int main(int argc, char* argv[]) {
 
         // 创建模拟器
         Simulator simulator(memorySize, cpuType);
+        if (tohostAddrSet || fromhostAddrSet) {
+            if (!tohostAddrSet || !fromhostAddrSet) {
+                std::cerr << "Error: --tohost-addr and --fromhost-addr must be provided together\n";
+                return 1;
+            }
+            simulator.setHostCommAddresses(tohostAddr, fromhostAddr);
+        }
         
         // 配置调试系统
         if (debugMode) {
@@ -302,6 +347,17 @@ int main(int argc, char* argv[]) {
                 }
             } else {
                 std::cout << "Warning: failed to get OOO CPU stats\n";
+            }
+        }
+
+        if (!signatureFile.empty()) {
+            if (!signatureStartSet || !signatureEndSet) {
+                std::cerr << "Error: signature dump requires both --signature-start and --signature-end\n";
+                return 1;
+            }
+            if (!simulator.dumpSignature(signatureFile, signatureStart, signatureEnd, signatureGranularity)) {
+                std::cerr << "Error: failed to dump signature\n";
+                return 1;
             }
         }
         

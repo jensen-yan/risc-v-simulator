@@ -5,6 +5,7 @@
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+#include <sstream>
 
 namespace riscv {
 
@@ -90,6 +91,13 @@ bool Simulator::loadRiscvProgram(const std::string& filename, Address loadAddr) 
     } catch (const std::exception& e) {
         LOGE(SYSTEM, "failed to load riscv program: %s", e.what());
         return false;
+    }
+}
+
+void Simulator::setHostCommAddresses(Address tohostAddr, Address fromhostAddr) {
+    memory_->setHostCommAddresses(tohostAddr, fromhostAddr);
+    if (reference_memory_) {
+        reference_memory_->setHostCommAddresses(tohostAddr, fromhostAddr);
     }
 }
 
@@ -188,6 +196,55 @@ void Simulator::dumpMemory(Address startAddr, size_t length) const {
 
 void Simulator::dumpState() const {
     cpu_->dumpState();
+}
+
+bool Simulator::dumpSignature(const std::string& outputPath,
+                              Address startAddr,
+                              Address endAddr,
+                              size_t granularity) const {
+    if (startAddr >= endAddr) {
+        LOGE(SYSTEM, "invalid signature range: [0x%" PRIx64 ", 0x%" PRIx64 ")",
+             startAddr, endAddr);
+        return false;
+    }
+    if (granularity == 0) {
+        LOGE(SYSTEM, "signature granularity must be greater than 0");
+        return false;
+    }
+    if (startAddr % granularity != 0 || endAddr % granularity != 0) {
+        LOGE(SYSTEM, "signature range must align with granularity=%zu", granularity);
+        return false;
+    }
+
+    std::ofstream out(outputPath);
+    if (!out.is_open()) {
+        LOGE(SYSTEM, "failed to open signature file: %s", outputPath.c_str());
+        return false;
+    }
+
+    out << std::hex << std::setfill('0');
+    const int hexWidth = static_cast<int>(granularity * 2);
+
+    try {
+        for (Address addr = startAddr; addr < endAddr; addr += granularity) {
+            uint64_t value = 0;
+            for (size_t i = 0; i < granularity; ++i) {
+                value |= static_cast<uint64_t>(memory_->readByte(addr + i)) << (8 * i);
+            }
+            out << std::setw(hexWidth) << value << "\n";
+        }
+    } catch (const std::exception& e) {
+        LOGE(SYSTEM, "failed to dump signature: %s", e.what());
+        return false;
+    }
+
+    LOGI(SYSTEM,
+         "signature dumped: path=%s, range=[0x%" PRIx64 ", 0x%" PRIx64 "), granularity=%zu",
+         outputPath.c_str(),
+         startAddr,
+         endAddr,
+         granularity);
+    return true;
 }
 
 void Simulator::printStatistics() const {

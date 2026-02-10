@@ -55,14 +55,17 @@ public:
     bool shouldExit() const { return should_exit_; }
     int getExitCode() const { return exit_code_; }
     void resetExitStatus() { should_exit_ = false; exit_code_ = 0; }
+    void setHostCommAddresses(Address tohostAddr, Address fromhostAddr);
     
 private:
     std::unique_ptr<uint8_t, decltype(&std::free)> memory_;
     size_t memory_size_;
     
-    // tohost/fromhost 特殊地址
-    static constexpr Address TOHOST_ADDR = 0x80001000;
-    static constexpr Address FROMHOST_ADDR = 0x80001040;
+    // tohost/fromhost 特殊地址（默认值可被ELF环境覆盖）
+    static constexpr Address DEFAULT_TOHOST_ADDR = 0x80001000;
+    static constexpr Address DEFAULT_FROMHOST_ADDR = 0x80001040;
+    Address tohost_addr_ = DEFAULT_TOHOST_ADDR;
+    Address fromhost_addr_ = DEFAULT_FROMHOST_ADDR;
     
     // 程序退出状态
     bool should_exit_ = false;

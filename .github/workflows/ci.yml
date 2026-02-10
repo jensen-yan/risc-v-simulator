@@ -50,5 +50,5 @@ jobs:
 
       - name: ISA Tests (rv64, in-order + ooo)
         run: |
-          python3 run_tests.py -p "rv64*-p-*"
-          python3 run_tests.py -p "rv64*-p-*" --ooo
+          python3 run_tests.py -p "rv64*-p-*" -w 1 --timeout 20
+          python3 run_tests.py -p "rv64*-p-*" --ooo -w 1 --timeout 30

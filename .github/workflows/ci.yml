@@ -52,3 +52,52 @@ jobs:
         run: |
           python3 run_tests.py -p "rv64*-p-*" -w 1 --timeout 20
           python3 run_tests.py -p "rv64*-p-*" --ooo -w 1 --timeout 30
+
+      - name: ISA Failure Diagnostics
+        if: ${{ failure() }}
+        run: |
+          set +e
+          mkdir -p ci-diagnostics
+
+          {
+            echo "=== uname ==="
+            uname -a
+            echo
+            echo "=== free -h ==="
+            free -h
+            echo
+            echo "=== /proc/meminfo (head) ==="
+            head -n 40 /proc/meminfo
+            echo
+            echo "=== ulimit -a ==="
+            ulimit -a
+          } > ci-diagnostics/system_info.log
+
+          for test_name in rv64um-p-div rv64um-p-rem; do
+            for mode in in-order ooo; do
+              if [ "$mode" = "ooo" ]; then
+                mode_flag="--ooo"
+              else
+                mode_flag="--in-order"
+              fi
+
+              stdout_file="ci-diagnostics/${test_name}.${mode}.stdout.log"
+              stderr_file="ci-diagnostics/${test_name}.${mode}.stderr.log"
+              meta_file="ci-diagnostics/${test_name}.${mode}.meta.log"
+
+              ./build/risc-v-sim -e -m 2164260864 "./riscv-tests/isa/${test_name}" ${mode_flag} >"${stdout_file}" 2>"${stderr_file}"
+              rc=$?
+              {
+                echo "test=${test_name}"
+                echo "mode=${mode}"
+                echo "return_code=${rc}"
+              } > "${meta_file}"
+            done
+          done
+
+      - name: Upload ISA Diagnostic Logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: isa-diagnostics
+          path: ci-diagnostics

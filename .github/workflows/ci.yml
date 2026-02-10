@@ -39,6 +39,12 @@ jobs:
             XLEN=64 \
             tests='$(rv32ui_p_tests) $(rv32uc_p_tests) $(rv32um_p_tests) $(rv32ua_p_tests) $(rv32uf_p_tests) $(rv32ud_p_tests) $(rv32uzfh_p_tests) $(rv32uzba_p_tests) $(rv32uzbb_p_tests) $(rv32uzbc_p_tests) $(rv32uzbs_p_tests) $(rv32si_p_tests) $(rv32mi_p_tests) $(rv64ui_p_tests) $(rv64ua_p_tests) $(rv64uc_p_tests) $(rv64ud_p_tests) $(rv64uf_p_tests) $(rv64um_p_tests)'
 
+      - name: Build riscv-tests Benchmarks
+        run: |
+          make -C riscv-tests/benchmarks -f Makefile \
+            src_dir="${GITHUB_WORKSPACE}/riscv-tests/benchmarks" \
+            XLEN=64
+
       - name: Configure
         run: cmake -S . -B build
 
@@ -53,51 +59,16 @@ jobs:
           python3 run_tests.py -p "rv64*-p-*" -w 1 --timeout 20
           python3 run_tests.py -p "rv64*-p-*" --ooo -w 1 --timeout 30
 
-      - name: ISA Failure Diagnostics
-        if: ${{ failure() }}
+      - name: Benchmarks Smoke Tests (non-blocking)
+        continue-on-error: true
         run: |
-          set +e
-          mkdir -p ci-diagnostics
+          python3 run_tests.py --tests-subdir benchmarks -p "*.riscv" -w 1 --timeout 120
 
-          {
-            echo "=== uname ==="
-            uname -a
-            echo
-            echo "=== free -h ==="
-            free -h
-            echo
-            echo "=== /proc/meminfo (head) ==="
-            head -n 40 /proc/meminfo
-            echo
-            echo "=== ulimit -a ==="
-            ulimit -a
-          } > ci-diagnostics/system_info.log
-
-          for test_name in rv64um-p-div rv64um-p-rem; do
-            for mode in in-order ooo; do
-              if [ "$mode" = "ooo" ]; then
-                mode_flag="--ooo"
-              else
-                mode_flag="--in-order"
-              fi
-
-              stdout_file="ci-diagnostics/${test_name}.${mode}.stdout.log"
-              stderr_file="ci-diagnostics/${test_name}.${mode}.stderr.log"
-              meta_file="ci-diagnostics/${test_name}.${mode}.meta.log"
-
-              ./build/risc-v-sim -e -m 2164260864 "./riscv-tests/isa/${test_name}" ${mode_flag} >"${stdout_file}" 2>"${stderr_file}"
-              rc=$?
-              {
-                echo "test=${test_name}"
-                echo "mode=${mode}"
-                echo "return_code=${rc}"
-              } > "${meta_file}"
-            done
-          done
-
-      - name: Upload ISA Diagnostic Logs
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: isa-diagnostics
-          path: ci-diagnostics
+      - name: CoreMark Smoke Test (if available, non-blocking)
+        continue-on-error: true
+        run: |
+          if [ -x "riscv-tests/benchmarks/coremark.riscv" ]; then
+            python3 run_tests.py --tests-subdir benchmarks -p "coremark.riscv" -w 1 --timeout 180
+          else
+            echo "Skip: riscv-tests/benchmarks/coremark.riscv not found."
+          fi

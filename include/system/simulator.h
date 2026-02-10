@@ -86,7 +86,7 @@ private:
     std::vector<uint8_t> loadBinaryFile(const std::string& filename);
 
     static constexpr uint64_t kMaxInOrderInstructions = 5000000;
-    static constexpr uint64_t kMaxOutOfOrderCycles = 10000;
+    static constexpr uint64_t kMaxOutOfOrderCycles = 50000;
 };
 
 } // namespace riscv

@@ -29,6 +29,10 @@ public:
     struct ElfInfo {
         Address entryPoint;     // 程序入口点
         std::vector<ProgramSegment> segments;  // 程序段
+        Address tohostAddr;     // tohost 符号地址（若存在）
+        Address fromhostAddr;   // fromhost 符号地址（若存在）
+        bool hasTohostSymbol;   // 是否找到 tohost 符号
+        bool hasFromhostSymbol; // 是否找到 fromhost 符号
         bool isValid;           // 是否有效的ELF文件
     };
 
@@ -96,6 +100,20 @@ private:
         uint64_t p_align;       // 对齐
     };
 
+    // 统一的节头结构（字段使用64位表示）
+    struct SectionHeader {
+        uint32_t sh_name;       // 节名称（字符串表偏移）
+        uint32_t sh_type;       // 节类型
+        uint64_t sh_flags;      // 节标志
+        uint64_t sh_addr;       // 虚拟地址
+        uint64_t sh_offset;     // 文件偏移
+        uint64_t sh_size;       // 节大小
+        uint32_t sh_link;       // 关联节索引
+        uint32_t sh_info;       // 附加信息
+        uint64_t sh_addralign;  // 地址对齐
+        uint64_t sh_entsize;    // 表项大小
+    };
+
     // ELF常量
     static constexpr uint32_t ELF_MAGIC = 0x464C457F;  // 0x7F + "ELF"
     static constexpr uint8_t ELFCLASS32 = 1;           // 32位
@@ -104,6 +122,8 @@ private:
     static constexpr uint16_t EM_RISCV = 243;          // RISC-V架构
     static constexpr uint16_t ET_EXEC = 2;             // 可执行文件
     static constexpr uint32_t PT_LOAD = 1;             // 可加载段
+    static constexpr uint32_t SHT_SYMTAB = 2;          // 符号表
+    static constexpr uint32_t SHT_DYNSYM = 11;         // 动态符号表
     static constexpr uint32_t PF_X = 1;                // 可执行
     static constexpr uint32_t PF_W = 2;                // 可写
     static constexpr uint32_t PF_R = 4;                // 可读
@@ -112,6 +132,10 @@ private:
     static std::vector<uint8_t> loadFile(const std::string& filename);
     static ElfHeader parseElfHeader(const std::vector<uint8_t>& data);
     static ProgramHeader parseProgramHeader(const std::vector<uint8_t>& data, size_t offset);
+    static SectionHeader parseSectionHeader(const std::vector<uint8_t>& data, size_t offset);
+    static void parseHostCommSymbols(const std::vector<uint8_t>& data,
+                                     const ElfHeader& header,
+                                     ElfInfo& info);
     static uint64_t read64(const std::vector<uint8_t>& data, size_t offset);
     static uint32_t read32(const std::vector<uint8_t>& data, size_t offset);
     static uint16_t read16(const std::vector<uint8_t>& data, size_t offset);

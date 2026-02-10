@@ -10,6 +10,10 @@ namespace riscv {
 ElfLoader::ElfInfo ElfLoader::loadElfFile(const std::string& filename, std::shared_ptr<Memory> memory) {
     ElfInfo info;
     info.isValid = false;
+    info.tohostAddr = 0;
+    info.fromhostAddr = 0;
+    info.hasTohostSymbol = false;
+    info.hasFromhostSymbol = false;
 
     try {
         // 加载文件
@@ -28,8 +32,13 @@ ElfLoader::ElfInfo ElfLoader::loadElfFile(const std::string& filename, std::shar
         // 解析ELF文件头
         ElfHeader header = parseElfHeader(data);
         info.entryPoint = header.e_entry;
+        parseHostCommSymbols(data, header, info);
 
         LOGI(SYSTEM, "elf info: entry=0x%" PRIx64 ", phnum=%u", info.entryPoint, header.e_phnum);
+        if (info.hasTohostSymbol && info.hasFromhostSymbol) {
+            LOGI(SYSTEM, "elf symbols: tohost=0x%" PRIx64 ", fromhost=0x%" PRIx64,
+                 info.tohostAddr, info.fromhostAddr);
+        }
 
         // 解析程序头表
         for (int i = 0; i < header.e_phnum; i++) {
@@ -256,6 +265,112 @@ ElfLoader::ProgramHeader ElfLoader::parseProgramHeader(const std::vector<uint8_t
     }
 
     return ph;
+}
+
+ElfLoader::SectionHeader ElfLoader::parseSectionHeader(const std::vector<uint8_t>& data, size_t offset) {
+    SectionHeader sh;
+
+    if (data[4] == ELFCLASS32) {
+        sh.sh_name = read32(data, offset + 0);
+        sh.sh_type = read32(data, offset + 4);
+        sh.sh_flags = read32(data, offset + 8);
+        sh.sh_addr = read32(data, offset + 12);
+        sh.sh_offset = read32(data, offset + 16);
+        sh.sh_size = read32(data, offset + 20);
+        sh.sh_link = read32(data, offset + 24);
+        sh.sh_info = read32(data, offset + 28);
+        sh.sh_addralign = read32(data, offset + 32);
+        sh.sh_entsize = read32(data, offset + 36);
+    } else {
+        sh.sh_name = read32(data, offset + 0);
+        sh.sh_type = read32(data, offset + 4);
+        sh.sh_flags = read64(data, offset + 8);
+        sh.sh_addr = read64(data, offset + 16);
+        sh.sh_offset = read64(data, offset + 24);
+        sh.sh_size = read64(data, offset + 32);
+        sh.sh_link = read32(data, offset + 40);
+        sh.sh_info = read32(data, offset + 44);
+        sh.sh_addralign = read64(data, offset + 48);
+        sh.sh_entsize = read64(data, offset + 56);
+    }
+
+    return sh;
+}
+
+void ElfLoader::parseHostCommSymbols(const std::vector<uint8_t>& data,
+                                     const ElfHeader& header,
+                                     ElfInfo& info) {
+    if (header.e_shoff == 0 || header.e_shnum == 0 || header.e_shentsize == 0) {
+        return;
+    }
+
+    const bool isElf32 = data[4] == ELFCLASS32;
+    const size_t symEntrySize = isElf32 ? 16 : 24;
+    const uint64_t sectionTableEnd = header.e_shoff +
+                                     static_cast<uint64_t>(header.e_shnum) * header.e_shentsize;
+    if (sectionTableEnd > data.size()) {
+        return;
+    }
+
+    for (uint16_t sectionIndex = 0; sectionIndex < header.e_shnum; ++sectionIndex) {
+        const size_t sectionOffset =
+            static_cast<size_t>(header.e_shoff + static_cast<uint64_t>(sectionIndex) * header.e_shentsize);
+        SectionHeader symtabSection = parseSectionHeader(data, sectionOffset);
+
+        if (symtabSection.sh_type != SHT_SYMTAB && symtabSection.sh_type != SHT_DYNSYM) {
+            continue;
+        }
+        if (symtabSection.sh_entsize == 0 || symtabSection.sh_entsize < symEntrySize) {
+            continue;
+        }
+        if (symtabSection.sh_link >= header.e_shnum) {
+            continue;
+        }
+        if (symtabSection.sh_offset + symtabSection.sh_size > data.size()) {
+            continue;
+        }
+
+        const size_t strtabSectionOffset =
+            static_cast<size_t>(header.e_shoff + static_cast<uint64_t>(symtabSection.sh_link) * header.e_shentsize);
+        SectionHeader strtabSection = parseSectionHeader(data, strtabSectionOffset);
+        if (strtabSection.sh_offset + strtabSection.sh_size > data.size()) {
+            continue;
+        }
+
+        const size_t symbolCount = static_cast<size_t>(symtabSection.sh_size / symtabSection.sh_entsize);
+        for (size_t i = 0; i < symbolCount; ++i) {
+            const size_t symOffset = static_cast<size_t>(symtabSection.sh_offset + i * symtabSection.sh_entsize);
+
+            const uint32_t nameOffset = read32(data, symOffset);
+            if (nameOffset >= strtabSection.sh_size) {
+                continue;
+            }
+
+            const size_t strOffset = static_cast<size_t>(strtabSection.sh_offset + nameOffset);
+            const size_t strMaxLen = static_cast<size_t>(strtabSection.sh_size - nameOffset);
+            const void* end = std::memchr(data.data() + strOffset, '\0', strMaxLen);
+            if (!end) {
+                continue;
+            }
+
+            const char* symbolName = reinterpret_cast<const char*>(data.data() + strOffset);
+            Address symbolValue = isElf32
+                                      ? static_cast<Address>(read32(data, symOffset + 4))
+                                      : static_cast<Address>(read64(data, symOffset + 8));
+
+            if (!info.hasTohostSymbol && std::strcmp(symbolName, "tohost") == 0) {
+                info.tohostAddr = symbolValue;
+                info.hasTohostSymbol = true;
+            } else if (!info.hasFromhostSymbol && std::strcmp(symbolName, "fromhost") == 0) {
+                info.fromhostAddr = symbolValue;
+                info.hasFromhostSymbol = true;
+            }
+
+            if (info.hasTohostSymbol && info.hasFromhostSymbol) {
+                return;
+            }
+        }
+    }
 }
 
 uint64_t ElfLoader::read64(const std::vector<uint8_t>& data, size_t offset) {

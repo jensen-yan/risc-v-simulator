@@ -304,6 +304,16 @@ bool Simulator::loadElfProgram(const std::string& filename) {
             return false;
         }
 
+        if (elfInfo.hasTohostSymbol && elfInfo.hasFromhostSymbol) {
+            setHostCommAddresses(elfInfo.tohostAddr, elfInfo.fromhostAddr);
+            LOGI(SYSTEM, "use ELF host symbols: tohost=0x%" PRIx64 ", fromhost=0x%" PRIx64,
+                 elfInfo.tohostAddr, elfInfo.fromhostAddr);
+        } else if (elfInfo.hasTohostSymbol || elfInfo.hasFromhostSymbol) {
+            LOGW(SYSTEM, "incomplete ELF host symbols (tohost=%s, fromhost=%s), keep existing defaults",
+                 elfInfo.hasTohostSymbol ? "found" : "missing",
+                 elfInfo.hasFromhostSymbol ? "found" : "missing");
+        }
+
         // 重置主CPU状态
         cpu_->reset();
         cycle_count_ = 0;

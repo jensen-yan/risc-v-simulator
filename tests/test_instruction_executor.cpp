@@ -117,6 +117,14 @@ TEST_F(InstructionExecutorTest, ImmediateShiftOperations) {
     auto sra_inst = createDecodedInst(Opcode::OP_IMM, Funct3::SRL_SRA, Funct7::SUB_SRA, 1, 0, 0, 2);
     uint64_t sra_result = InstructionExecutor::executeImmediateOperation(sra_inst, 0xFFFFFFFFFFFFFFFC);
     EXPECT_EQ(sra_result, 0xFFFFFFFFFFFFFFFF) << "SRAI: 负数算术右移应该保持符号位";
+
+    // RV64I: SRAI 当 shamt[5]=1 时，funct7 会是 0b0100001，依然应执行算术右移
+    auto sra_shamt5_inst = createDecodedInst(
+        Opcode::OP_IMM, Funct3::SRL_SRA, static_cast<Funct7>(0x21), 1, 0, 0, 63);
+    uint64_t sra_shamt5_result = InstructionExecutor::executeImmediateOperation(
+        sra_shamt5_inst, 0x8000000000000000ULL);
+    EXPECT_EQ(sra_shamt5_result, 0xFFFFFFFFFFFFFFFFULL)
+        << "SRAI(shamt[5]=1): 应保持算术右移语义";
 }
 
 // ========== 寄存器运算测试 ==========

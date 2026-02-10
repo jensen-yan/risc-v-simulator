@@ -166,6 +166,11 @@ bool isSignalingNaN64(uint64_t bits) {
     return (bits & (1ULL << 51)) == 0;
 }
 
+bool isSraiImmediate(Funct7 funct7) {
+    // RV64I 的 SRAI 使用 funct6=010000，bit25 是 shamt[5]，所以 funct7 可能为 0x20 或 0x21。
+    return (static_cast<uint8_t>(funct7) & 0x7EU) == static_cast<uint8_t>(Funct7::SUB_SRA);
+}
+
 uint8_t mapFEnvToFFlags(int excepts) {
     uint8_t flags = 0;
     if (excepts & FE_INVALID) flags |= kFFlagsNv;
@@ -307,7 +312,7 @@ uint64_t InstructionExecutor::executeImmediateOperation(const DecodedInstruction
             return rs1_val << (inst.imm & 0x3F);
             
         case Funct3::SRL_SRA:
-            if (inst.funct7 == Funct7::SUB_SRA) {
+            if (isSraiImmediate(inst.funct7)) {
                 // 算术右移
                 return static_cast<uint64_t>(static_cast<int64_t>(rs1_val) >> (inst.imm & 0x3F));
             } else {

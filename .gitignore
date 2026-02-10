@@ -46,3 +46,7 @@ test_results/
 *.out
 
 .cache/
+
+# Python 缓存
+__pycache__/
+*.py[cod]

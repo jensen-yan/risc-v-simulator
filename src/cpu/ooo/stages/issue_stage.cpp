@@ -38,7 +38,7 @@ void IssueStage::execute(CPUState& state) {
     if (head_entry != ReorderBuffer::MAX_ROB_ENTRIES) {
         auto head_inst = state.reorder_buffer->get_entry(head_entry);
         if (head_inst &&
-            head_inst->get_decoded_info().opcode == Opcode::OP_FP &&
+            InstructionExecutor::isFloatingPointInstruction(head_inst->get_decoded_info()) &&
             head_entry != dispatchable_entry->get_rob_entry()) {
             LOGT(ISSUE, "fp instruction at ROB head, block younger issue");
             state.pipeline_stalls++;
@@ -64,20 +64,53 @@ void IssueStage::execute(CPUState& state) {
         return;
     }
 
-    // OP_FP 保持顺序执行；写浮点寄存器的指令不参与整数寄存器重命名。
-    if (decoded_info.opcode == Opcode::OP_FP) {
+    // 浮点相关指令保持顺序执行，直接使用架构寄存器值，避免与整数重命名状态耦合。
+    if (InstructionExecutor::isFloatingPointInstruction(decoded_info)) {
         if (head_entry != dispatchable_entry->get_rob_entry()) {
             LOGT(ISSUE, "fp instruction waits for ROB head commit");
             state.pipeline_stalls++;
             return;
         }
+        const bool fp_write_int = InstructionExecutor::isFPIntegerDestination(decoded_info);
+        if (fp_write_int) {
+            // 写整数寄存器的浮点指令需要走整数重命名链路，保证后继整数指令读取到最新值。
+            auto rename_result = state.register_rename->rename_instruction(dispatchable_entry->get_decoded_info());
+            if (!rename_result.success) {
+                LOGT(ISSUE, "rename failed for fp-int instruction");
+                state.pipeline_stalls++;
+                return;
+            }
 
-        if (!InstructionExecutor::isFPIntegerDestination(decoded_info)) {
+            dispatchable_entry->set_physical_src1(0);
+            dispatchable_entry->set_physical_src2(0);
+            dispatchable_entry->set_physical_dest(rename_result.dest_reg);
+            dispatchable_entry->set_src1_ready(true, state.arch_registers[decoded_info.rs1]);
+            dispatchable_entry->set_src2_ready(true, state.arch_registers[decoded_info.rs2]);
+
+            auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
+            if (!issue_result.success) {
+                LOGT(ISSUE, "rs issue failed for fp-int instruction");
+                state.register_rename->release_physical_register(rename_result.dest_reg);
+                state.pipeline_stalls++;
+                return;
+            }
+
+            LOGT(ISSUE, "issued fp-int inst=%" PRId64 " to rs[%d]",
+                 dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
+            dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
+            return;
+        } else {
             dispatchable_entry->set_physical_src1(0);
             dispatchable_entry->set_physical_src2(0);
             dispatchable_entry->set_physical_dest(0);
-            dispatchable_entry->set_src1_ready(true, 0);
-            dispatchable_entry->set_src2_ready(true, 0);
+
+            uint64_t src1_value = state.arch_registers[decoded_info.rs1];
+            uint64_t src2_value = state.arch_registers[decoded_info.rs2];
+            if (decoded_info.opcode == Opcode::STORE_FP) {
+                src2_value = state.arch_fp_registers[decoded_info.rs2];
+            }
+            dispatchable_entry->set_src1_ready(true, src1_value);
+            dispatchable_entry->set_src2_ready(true, src2_value);
 
             auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
             if (!issue_result.success) {

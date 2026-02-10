@@ -90,13 +90,30 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
         
         switch (inst.type) {
             case InstructionType::R_TYPE:
-                if (inst.opcode == Opcode::OP_FP) {
-                    const auto fp_result = InstructionExecutor::executeFPOperation(
-                        inst,
-                        state.arch_fp_registers[inst.rs1],
-                        state.arch_fp_registers[inst.rs2],
-                        state.arch_registers[inst.rs1]);
-                    unit.result = fp_result.value;
+                if (InstructionExecutor::isFloatingPointInstruction(inst)) {
+                    constexpr uint32_t kFrmCsr = 0x002;
+                    const uint8_t current_frm =
+                        static_cast<uint8_t>(readCsrWithAlias(state.csr_registers, kFrmCsr) & 0x7U);
+                    if (inst.opcode == Opcode::FMADD ||
+                        inst.opcode == Opcode::FMSUB ||
+                        inst.opcode == Opcode::FNMSUB ||
+                        inst.opcode == Opcode::FNMADD) {
+                        const auto fp_result = InstructionExecutor::executeFusedFPOperation(
+                            inst,
+                            state.arch_fp_registers[inst.rs1],
+                            state.arch_fp_registers[inst.rs2],
+                            state.arch_fp_registers[inst.rs3],
+                            current_frm);
+                        unit.result = fp_result.value;
+                    } else {
+                        const auto fp_result = InstructionExecutor::executeFPOperation(
+                            inst,
+                            state.arch_fp_registers[inst.rs1],
+                            state.arch_fp_registers[inst.rs2],
+                            state.arch_registers[inst.rs1],
+                            current_frm);
+                        unit.result = fp_result.value;
+                    }
                 } else if (inst.opcode == Opcode::OP) {
                     // OP指令包含基础整数和M扩展，按funct7分流
                     if (inst.funct7 == Funct7::M_EXT) {
@@ -128,7 +145,7 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                 } else if (inst.opcode == Opcode::OP_IMM_32) {
                     // RV64I: 32位立即数运算（W后缀）
                     unit.result = InstructionExecutor::executeImmediateOperation32(inst, instruction->get_src1_value());
-                } else if (inst.opcode == Opcode::LOAD) {
+                } else if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::LOAD_FP) {
                     // 加载指令 - 使用预解析的静态信息
                     uint64_t addr = instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
                     
@@ -245,10 +262,16 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                             addr, instruction->get_src2_value(), inst.memory_access_size);
                     
                     // 执行Store到内存
-                    InstructionExecutor::storeToMemory(state.memory, addr, instruction->get_src2_value(), inst.funct3);
+                    if (inst.opcode == Opcode::STORE_FP) {
+                        InstructionExecutor::storeFPToMemory(state.memory, addr, instruction->get_src2_value(), inst.funct3);
+                    } else {
+                        InstructionExecutor::storeToMemory(state.memory, addr, instruction->get_src2_value(), inst.funct3);
+                    }
                     
                     // 同时添加到Store Buffer用于Store-to-Load Forwarding
-                    state.store_buffer->add_store(instruction, addr, instruction->get_src2_value(), inst.memory_access_size);
+                    if (inst.opcode == Opcode::STORE) {
+                        state.store_buffer->add_store(instruction, addr, instruction->get_src2_value(), inst.memory_access_size);
+                    }
                 }
                 break;
                 
@@ -519,6 +542,12 @@ bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) 
     const auto& inst = unit.instruction->get_decoded_info();
     uint64_t addr = unit.load_address;
     uint8_t access_size = unit.load_size;
+
+    if (inst.opcode == Opcode::LOAD_FP) {
+        unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);
+        LOGT(EXECUTE, "fp memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+        return false;
+    }
     
     // 尝试Store-to-Load Forwarding
     uint64_t forwarded_value;

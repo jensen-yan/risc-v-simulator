@@ -118,32 +118,55 @@ void CommitStage::execute(CPUState& state) {
         }
 
         bool wrote_integer_reg = false;
-        if (decoded_info.opcode == Opcode::OP_FP) {
-            const auto fp_result = InstructionExecutor::executeFPOperation(
-                decoded_info,
-                state.arch_fp_registers[decoded_info.rs1],
-                state.arch_fp_registers[decoded_info.rs2],
-                state.arch_registers[decoded_info.rs1]);
+        if (InstructionExecutor::isFloatingPointInstruction(decoded_info)) {
+            constexpr uint32_t kFrmCsr = 0x002;
+            const uint8_t current_frm = static_cast<uint8_t>(readCsrWithAlias(state.csr_registers, kFrmCsr) & 0x7U);
+            InstructionExecutor::FpExecuteResult fp_result{};
+
+            if (decoded_info.opcode == Opcode::LOAD_FP) {
+                fp_result.value = committed_inst->get_result();
+                fp_result.write_fp_reg = true;
+            } else if (decoded_info.opcode == Opcode::STORE_FP) {
+                // 无寄存器写回
+            } else if (decoded_info.opcode == Opcode::FMADD ||
+                       decoded_info.opcode == Opcode::FMSUB ||
+                       decoded_info.opcode == Opcode::FNMSUB ||
+                       decoded_info.opcode == Opcode::FNMADD) {
+                fp_result = InstructionExecutor::executeFusedFPOperation(
+                    decoded_info,
+                    state.arch_fp_registers[decoded_info.rs1],
+                    state.arch_fp_registers[decoded_info.rs2],
+                    state.arch_fp_registers[decoded_info.rs3],
+                    current_frm);
+            } else {
+                fp_result = InstructionExecutor::executeFPOperation(
+                    decoded_info,
+                    state.arch_fp_registers[decoded_info.rs1],
+                    state.arch_fp_registers[decoded_info.rs2],
+                    state.arch_registers[decoded_info.rs1],
+                    current_frm);
+            }
+
+            if (fp_result.fflags != 0) {
+                writeCsrWithAlias(state.csr_registers, kFflagsCsr,
+                                  readCsrWithAlias(state.csr_registers, kFflagsCsr) | fp_result.fflags);
+            }
 
             if (fp_result.write_int_reg && decoded_info.rd != 0) {
-                const uint64_t int_result = committed_inst->get_result();
+                const uint64_t int_result = fp_result.value;
                 state.arch_registers[decoded_info.rd] = int_result;
+                if (committed_inst->get_physical_dest() != 0) {
+                    state.register_rename->commit_instruction(committed_inst->get_logical_dest(),
+                                                             committed_inst->get_physical_dest());
+                }
+                state.register_rename->update_architecture_register(decoded_info.rd, int_result);
                 wrote_integer_reg = true;
                 LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
-                    committed_inst->get_instruction_id(),
-                    decoded_info.rd,
-                    int_result);
-
-                // 写整数寄存器的OP_FP指令仍使用整数重命名链路。
-                state.register_rename->commit_instruction(committed_inst->get_logical_dest(),
-                                                         committed_inst->get_physical_dest());
-                state.register_rename->update_architecture_register(decoded_info.rd, int_result);
+                    committed_inst->get_instruction_id(), decoded_info.rd, int_result);
             } else if (fp_result.write_fp_reg) {
                 state.arch_fp_registers[decoded_info.rd] = static_cast<uint32_t>(fp_result.value);
                 LOGT(COMMIT, "inst=%" PRId64 " f%d = 0x%08" PRIx32,
-                    committed_inst->get_instruction_id(),
-                    decoded_info.rd,
-                    static_cast<uint32_t>(fp_result.value));
+                    committed_inst->get_instruction_id(), decoded_info.rd, static_cast<uint32_t>(fp_result.value));
             } else {
                 LOGT(COMMIT, "inst=%" PRId64 " (no destination register)",
                     committed_inst->get_instruction_id());

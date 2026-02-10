@@ -102,6 +102,7 @@ struct CPUState {
         pc(0), halted(false), instruction_count(0), cycle_count(0),
         enabled_extensions(static_cast<uint32_t>(Extension::I) | 
                           static_cast<uint32_t>(Extension::M) | 
+                          static_cast<uint32_t>(Extension::A) |
                           static_cast<uint32_t>(Extension::F) | 
                           static_cast<uint32_t>(Extension::C)),
         cpu_interface(nullptr),

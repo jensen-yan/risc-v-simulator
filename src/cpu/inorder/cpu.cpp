@@ -478,6 +478,10 @@ void CPU::executeMExtension(const DecodedInstruction& inst) {
 }
 
 void CPU::executeFPExtension(const DecodedInstruction& inst) {
+    constexpr uint32_t FFLAGS = 0x001;
+    constexpr uint32_t FRM = 0x002;
+
+    const uint8_t current_frm = static_cast<uint8_t>(getCSR(FRM) & 0x7U);
     InstructionExecutor::FpExecuteResult fp_result;
     if (inst.opcode == Opcode::FMADD ||
         inst.opcode == Opcode::FMSUB ||
@@ -487,19 +491,25 @@ void CPU::executeFPExtension(const DecodedInstruction& inst) {
             inst,
             static_cast<uint32_t>(getFPRegister(inst.rs1)),
             static_cast<uint32_t>(getFPRegister(inst.rs2)),
-            static_cast<uint32_t>(getFPRegister(inst.rs3)));
+            static_cast<uint32_t>(getFPRegister(inst.rs3)),
+            current_frm);
     } else {
         fp_result = InstructionExecutor::executeFPOperation(
             inst,
             static_cast<uint32_t>(getFPRegister(inst.rs1)),
             static_cast<uint32_t>(getFPRegister(inst.rs2)),
-            getRegister(inst.rs1));
+            getRegister(inst.rs1),
+            current_frm);
     }
 
     if (fp_result.write_int_reg) {
         setRegister(inst.rd, fp_result.value);
     } else if (fp_result.write_fp_reg) {
         setFPRegister(inst.rd, static_cast<uint32_t>(fp_result.value));
+    }
+
+    if (fp_result.fflags != 0) {
+        setCSR(FFLAGS, getCSR(FFLAGS) | fp_result.fflags);
     }
 
     incrementPC();

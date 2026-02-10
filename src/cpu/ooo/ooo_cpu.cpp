@@ -82,6 +82,7 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
     cpu_state_.cpu_interface = this;  // 设置CPU接口引用，让Stage可以调用CPU方法
     cpu_state_.enabled_extensions = static_cast<uint32_t>(Extension::I) | 
                                    static_cast<uint32_t>(Extension::M) | 
+                                   static_cast<uint32_t>(Extension::A) |
                                    static_cast<uint32_t>(Extension::F) | 
                                    static_cast<uint32_t>(Extension::C);
     

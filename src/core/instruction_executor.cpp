@@ -1,9 +1,12 @@
 #include "core/instruction_executor.h"
 #include "common/types.h"
 #include <cmath>
+#include <cfenv>
 #include <limits>
 
 namespace riscv {
+
+#pragma STDC FENV_ACCESS ON
 
 namespace {
 float bitsToFloat(uint32_t bits) {
@@ -24,7 +27,6 @@ uint32_t floatToBits(float value) {
 }
 
 uint32_t classifyFloat32(uint32_t bits) {
-    const float value = bitsToFloat(bits);
     const bool sign = (bits >> 31) != 0;
     const uint32_t exp = (bits >> 23) & 0xFFU;
     const uint32_t frac = bits & 0x7FFFFFU;
@@ -53,6 +55,104 @@ uint64_t signExtend32To64(uint32_t value) {
 
 uint32_t atomicFunct5(const DecodedInstruction& inst) {
     return (static_cast<uint32_t>(inst.funct7) >> 2U) & 0x1FU;
+}
+
+constexpr uint8_t kFFlagsNx = 0x01;
+constexpr uint8_t kFFlagsUf = 0x02;
+constexpr uint8_t kFFlagsOf = 0x04;
+constexpr uint8_t kFFlagsDz = 0x08;
+constexpr uint8_t kFFlagsNv = 0x10;
+
+bool isNaN32(uint32_t bits) {
+    const uint32_t exp = (bits >> 23) & 0xFFU;
+    const uint32_t frac = bits & 0x7FFFFFU;
+    return exp == 0xFFU && frac != 0;
+}
+
+bool isSignalingNaN32(uint32_t bits) {
+    if (!isNaN32(bits)) {
+        return false;
+    }
+    return (bits & 0x00400000U) == 0;
+}
+
+uint8_t mapFEnvToFFlags(int excepts) {
+    uint8_t flags = 0;
+    if (excepts & FE_INVALID) flags |= kFFlagsNv;
+    if (excepts & FE_DIVBYZERO) flags |= kFFlagsDz;
+    if (excepts & FE_OVERFLOW) flags |= kFFlagsOf;
+    if (excepts & FE_UNDERFLOW) flags |= kFFlagsUf;
+    if (excepts & FE_INEXACT) flags |= kFFlagsNx;
+    return flags;
+}
+
+int toFEnvRound(uint8_t rm) {
+    switch (rm) {
+        case 0b000: return FE_TONEAREST;   // RNE
+        case 0b001: return FE_TOWARDZERO;  // RTZ
+        case 0b010: return FE_DOWNWARD;    // RDN
+        case 0b011: return FE_UPWARD;      // RUP
+        case 0b100: return FE_TONEAREST;   // RMM 近似到最近值
+        default: throw IllegalInstructionException("非法舍入模式");
+    }
+}
+
+uint8_t resolveRoundingMode(const DecodedInstruction& inst, uint8_t current_frm) {
+    uint8_t rm = static_cast<uint8_t>(inst.rm) & 0x7U;
+    if (rm == 0b111) {
+        rm = current_frm & 0x7U;
+    }
+    if (rm > 0b100) {
+        throw IllegalInstructionException("保留的舍入模式");
+    }
+    return rm;
+}
+
+template <typename Fn>
+uint8_t withFpEnv(uint8_t rm, Fn&& fn) {
+    const int old_round = std::fegetround();
+    std::fesetround(toFEnvRound(rm));
+    std::feclearexcept(FE_ALL_EXCEPT);
+    fn();
+    const int excepts = std::fetestexcept(FE_ALL_EXCEPT);
+    std::fesetround(old_round);
+    return mapFEnvToFFlags(excepts);
+}
+
+float roundToMode(float value, uint8_t rm, uint8_t& out_flags) {
+    float rounded = value;
+    switch (rm) {
+        case 0b000:  // RNE
+            rounded = std::nearbyintf(value);
+            break;
+        case 0b001:  // RTZ
+            rounded = std::truncf(value);
+            break;
+        case 0b010:  // RDN
+            rounded = std::floorf(value);
+            break;
+        case 0b011:  // RUP
+            rounded = std::ceilf(value);
+            break;
+        case 0b100: {  // RMM: ties to max magnitude
+            const float abs_v = std::fabs(value);
+            const float floor_v = std::floor(abs_v);
+            const float frac = abs_v - floor_v;
+            float mag = floor_v;
+            if (frac > 0.5f || frac == 0.5f) {
+                mag = floor_v + 1.0f;
+            }
+            rounded = std::copysign(mag, value);
+            break;
+        }
+        default:
+            throw IllegalInstructionException("非法舍入模式");
+    }
+
+    if (rounded != value) {
+        out_flags |= kFFlagsNx;
+    }
+    return rounded;
 }
 }  // namespace
 
@@ -449,52 +549,114 @@ uint32_t InstructionExecutor::executeFPExtension(const DecodedInstruction& inst,
 }
 
 InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
-    const DecodedInstruction& inst, uint32_t rs1_bits, uint32_t rs2_bits, uint64_t rs1_int) {
+    const DecodedInstruction& inst, uint32_t rs1_bits, uint32_t rs2_bits, uint64_t rs1_int, uint8_t current_frm) {
     FpExecuteResult result{};
     const float rs1 = bitsToFloat(rs1_bits);
     const float rs2 = bitsToFloat(rs2_bits);
+    const uint8_t rm = resolveRoundingMode(inst, current_frm);
 
     switch (inst.funct7) {
-        case Funct7::FADD_S:
-            result.value = floatToBits(rs1 + rs2);
+        case Funct7::FADD_S: {
+            float out = 0.0f;
+            result.fflags = withFpEnv(rm, [&]() { out = rs1 + rs2; });
+            uint32_t bits = floatToBits(out);
+            if (isNaN32(bits)) {
+                bits = 0x7FC00000U;
+            }
+            result.value = bits;
             result.write_fp_reg = true;
             return result;
-        case Funct7::FSUB_S:
-            result.value = floatToBits(rs1 - rs2);
+        }
+        case Funct7::FSUB_S: {
+            float out = 0.0f;
+            result.fflags = withFpEnv(rm, [&]() { out = rs1 - rs2; });
+            uint32_t bits = floatToBits(out);
+            if (isNaN32(bits)) {
+                bits = 0x7FC00000U;
+            }
+            result.value = bits;
             result.write_fp_reg = true;
             return result;
-        case Funct7::FMUL_S:
-            result.value = floatToBits(rs1 * rs2);
+        }
+        case Funct7::FMUL_S: {
+            float out = 0.0f;
+            result.fflags = withFpEnv(rm, [&]() { out = rs1 * rs2; });
+            uint32_t bits = floatToBits(out);
+            if (isNaN32(bits)) {
+                bits = 0x7FC00000U;
+            }
+            result.value = bits;
             result.write_fp_reg = true;
             return result;
-        case Funct7::FDIV_S:
-            if (rs2 == 0.0f) {
-                result.value = floatToBits(rs1 > 0.0f ? INFINITY : -INFINITY);
+        }
+        case Funct7::FDIV_S: {
+            float out = 0.0f;
+            result.fflags = withFpEnv(rm, [&]() { out = rs1 / rs2; });
+            uint32_t bits = floatToBits(out);
+            if (isNaN32(bits)) {
+                bits = 0x7FC00000U;
+            }
+            result.value = bits;
+            result.write_fp_reg = true;
+            return result;
+        }
+        case Funct7::FMIN_S:
+        case Funct7::FMAX_S: {
+            const bool rs1_nan = isNaN32(rs1_bits);
+            const bool rs2_nan = isNaN32(rs2_bits);
+            if (isSignalingNaN32(rs1_bits) || isSignalingNaN32(rs2_bits)) {
+                result.fflags |= kFFlagsNv;
+            }
+
+            if (rs1_nan && rs2_nan) {
+                result.value = 0x7FC00000U;
+            } else if (rs1_nan) {
+                result.value = rs2_bits;
+            } else if (rs2_nan) {
+                result.value = rs1_bits;
+            } else if (inst.funct7 == Funct7::FMIN_S) {
+                // 处理 +0/-0：fmin(-0,+0) = -0
+                if (rs1 == rs2 && rs1 == 0.0f) {
+                    result.value = (rs1_bits | rs2_bits);
+                } else {
+                    result.value = (rs1 < rs2) ? rs1_bits : rs2_bits;
+                }
             } else {
-                result.value = floatToBits(rs1 / rs2);
+                // 处理 +0/-0：fmax(-0,+0) = +0
+                if (rs1 == rs2 && rs1 == 0.0f) {
+                    result.value = (rs1_bits & rs2_bits);
+                } else {
+                    result.value = (rs1 > rs2) ? rs1_bits : rs2_bits;
+                }
             }
             result.write_fp_reg = true;
             return result;
-        case Funct7::FMIN_S:
-            result.value = floatToBits(std::fmin(rs1, rs2));
-            result.write_fp_reg = true;
-            return result;
-        case Funct7::FMAX_S:
-            result.value = floatToBits(std::fmax(rs1, rs2));
-            result.write_fp_reg = true;
-            return result;
-        case Funct7::FEQ_S:
-            result.value = (rs1 == rs2) ? 1U : 0U;
+        }
+        case Funct7::FEQ_S: {
+            const bool rs1_nan = isNaN32(rs1_bits);
+            const bool rs2_nan = isNaN32(rs2_bits);
+            if (isSignalingNaN32(rs1_bits) || isSignalingNaN32(rs2_bits)) {
+                result.fflags |= kFFlagsNv;
+            }
+            result.value = (!rs1_nan && !rs2_nan && rs1 == rs2) ? 1U : 0U;
             result.write_int_reg = true;
             return result;
+        }
         case Funct7::FLT_S:
-            result.value = (rs1 < rs2) ? 1U : 0U;
+        case Funct7::FLE_S: {
+            const bool rs1_nan = isNaN32(rs1_bits);
+            const bool rs2_nan = isNaN32(rs2_bits);
+            if (rs1_nan || rs2_nan) {
+                result.fflags |= kFFlagsNv;
+                result.value = 0;
+            } else if (inst.funct7 == Funct7::FLT_S) {
+                result.value = (rs1 < rs2) ? 1U : 0U;
+            } else {
+                result.value = (rs1 <= rs2) ? 1U : 0U;
+            }
             result.write_int_reg = true;
             return result;
-        case Funct7::FLE_S:
-            result.value = (rs1 <= rs2) ? 1U : 0U;
-            result.write_int_reg = true;
-            return result;
+        }
         default:
             break;
     }
@@ -515,45 +677,111 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
     }
 
     if (funct7_raw == 0x60) {  // FCVT to integer from single-precision
+        result.write_int_reg = true;
+
+        const bool is_nan = isNaN32(rs1_bits);
+        const bool is_inf = std::isinf(rs1);
+        uint8_t flags = 0;
+
+        auto convert_with_bounds = [&](long double min_v, long double max_v,
+                                       uint64_t nan_value, uint64_t neg_overflow_value,
+                                       uint64_t pos_overflow_value, bool signed_target) {
+            if (is_nan) {
+                flags |= kFFlagsNv;
+                return nan_value;
+            }
+            if (is_inf) {
+                flags |= kFFlagsNv;
+                return std::signbit(rs1) ? neg_overflow_value : pos_overflow_value;
+            }
+
+            float rounded = roundToMode(rs1, rm, flags);
+            long double rounded_ld = static_cast<long double>(rounded);
+            if (rounded_ld < min_v) {
+                flags |= kFFlagsNv;
+                return neg_overflow_value;
+            }
+            if (rounded_ld > max_v) {
+                flags |= kFFlagsNv;
+                return pos_overflow_value;
+            }
+
+            if (signed_target) {
+                return static_cast<uint64_t>(static_cast<int64_t>(rounded_ld));
+            }
+            return static_cast<uint64_t>(rounded_ld);
+        };
+
         switch (inst.rs2) {
             case 0:  // FCVT.W.S
-                result.value = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(rs1)));
+                result.value = convert_with_bounds(
+                    static_cast<long double>(std::numeric_limits<int32_t>::min()),
+                    static_cast<long double>(std::numeric_limits<int32_t>::max()),
+                    static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
+                    static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int32_t>::min())),
+                    static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
+                    true);
                 break;
             case 1:  // FCVT.WU.S
-                result.value = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rs1))));
+                result.value = convert_with_bounds(
+                    0.0L,
+                    static_cast<long double>(std::numeric_limits<uint32_t>::max()),
+                    std::numeric_limits<uint64_t>::max(),
+                    0,
+                    std::numeric_limits<uint64_t>::max(),
+                    false);
                 break;
             case 2:  // FCVT.L.S
-                result.value = static_cast<uint64_t>(static_cast<int64_t>(rs1));
+                result.value = convert_with_bounds(
+                    static_cast<long double>(std::numeric_limits<int64_t>::min()),
+                    static_cast<long double>(std::numeric_limits<int64_t>::max()),
+                    static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                    static_cast<uint64_t>(std::numeric_limits<int64_t>::min()),
+                    static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                    true);
                 break;
             case 3:  // FCVT.LU.S
-                result.value = static_cast<uint64_t>(rs1);
+                result.value = convert_with_bounds(
+                    0.0L,
+                    static_cast<long double>(std::numeric_limits<uint64_t>::max()),
+                    std::numeric_limits<uint64_t>::max(),
+                    0,
+                    std::numeric_limits<uint64_t>::max(),
+                    false);
                 break;
             default:
                 throw IllegalInstructionException("未知的FCVT到整数变体");
         }
-        result.write_int_reg = true;
+
+        result.fflags = flags;
         return result;
     }
 
     if (funct7_raw == 0x68) {  // FCVT to single-precision from integer
         float converted = 0.0f;
-        switch (inst.rs2) {
-            case 0:  // FCVT.S.W
-                converted = static_cast<float>(static_cast<int32_t>(rs1_int));
-                break;
-            case 1:  // FCVT.S.WU
-                converted = static_cast<float>(static_cast<uint32_t>(rs1_int));
-                break;
-            case 2:  // FCVT.S.L
-                converted = static_cast<float>(static_cast<int64_t>(rs1_int));
-                break;
-            case 3:  // FCVT.S.LU
-                converted = static_cast<float>(rs1_int);
-                break;
-            default:
-                throw IllegalInstructionException("未知的FCVT到单精度变体");
+        result.fflags = withFpEnv(rm, [&]() {
+            switch (inst.rs2) {
+                case 0:  // FCVT.S.W
+                    converted = static_cast<float>(static_cast<int32_t>(rs1_int));
+                    break;
+                case 1:  // FCVT.S.WU
+                    converted = static_cast<float>(static_cast<uint32_t>(rs1_int));
+                    break;
+                case 2:  // FCVT.S.L
+                    converted = static_cast<float>(static_cast<int64_t>(rs1_int));
+                    break;
+                case 3:  // FCVT.S.LU
+                    converted = static_cast<float>(rs1_int);
+                    break;
+                default:
+                    throw IllegalInstructionException("未知的FCVT到单精度变体");
+            }
+        });
+        uint32_t bits = floatToBits(converted);
+        if (isNaN32(bits)) {
+            bits = 0x7FC00000U;
         }
-        result.value = floatToBits(converted);
+        result.value = bits;
         result.write_fp_reg = true;
         return result;
     }
@@ -581,27 +809,32 @@ InstructionExecutor::FpExecuteResult InstructionExecutor::executeFPOperation(
 }
 
 InstructionExecutor::FpExecuteResult InstructionExecutor::executeFusedFPOperation(
-    const DecodedInstruction& inst, uint32_t rs1_bits, uint32_t rs2_bits, uint32_t rs3_bits) {
+    const DecodedInstruction& inst, uint32_t rs1_bits, uint32_t rs2_bits, uint32_t rs3_bits, uint8_t current_frm) {
     FpExecuteResult result{};
     const float rs1 = bitsToFloat(rs1_bits);
     const float rs2 = bitsToFloat(rs2_bits);
     const float rs3 = bitsToFloat(rs3_bits);
+    const uint8_t rm = resolveRoundingMode(inst, current_frm);
 
     switch (inst.opcode) {
         case Opcode::FMADD:
-            result.value = floatToBits((rs1 * rs2) + rs3);
+            result.fflags = withFpEnv(rm, [&]() { result.value = floatToBits(std::fmaf(rs1, rs2, rs3)); });
             break;
         case Opcode::FMSUB:
-            result.value = floatToBits((rs1 * rs2) - rs3);
+            result.fflags = withFpEnv(rm, [&]() { result.value = floatToBits(std::fmaf(rs1, rs2, -rs3)); });
             break;
         case Opcode::FNMSUB:
-            result.value = floatToBits((-(rs1 * rs2)) + rs3);
+            result.fflags = withFpEnv(rm, [&]() { result.value = floatToBits(std::fmaf(-rs1, rs2, rs3)); });
             break;
         case Opcode::FNMADD:
-            result.value = floatToBits((-(rs1 * rs2)) - rs3);
+            result.fflags = withFpEnv(rm, [&]() { result.value = floatToBits(-std::fmaf(rs1, rs2, rs3)); });
             break;
         default:
             throw IllegalInstructionException("未知的浮点融合乘加指令");
+    }
+
+    if (isNaN32(static_cast<uint32_t>(result.value))) {
+        result.value = 0x7FC00000U;
     }
 
     result.write_fp_reg = true;

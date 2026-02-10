@@ -24,6 +24,7 @@ public:
         uint64_t value = 0;
         bool write_int_reg = false;
         bool write_fp_reg = false;
+        uint8_t fflags = 0;
     };
 
     struct AtomicExecuteResult {
@@ -59,9 +60,11 @@ public:
     // F扩展指令（单精度浮点）
     static uint32_t executeFPExtension(const DecodedInstruction& inst, float rs1_val, float rs2_val);
     static FpExecuteResult executeFPOperation(const DecodedInstruction& inst, uint32_t rs1_bits,
-                                              uint32_t rs2_bits, uint64_t rs1_int);
+                                              uint32_t rs2_bits, uint64_t rs1_int,
+                                              uint8_t current_frm = 0);
     static FpExecuteResult executeFusedFPOperation(const DecodedInstruction& inst, uint32_t rs1_bits,
-                                                   uint32_t rs2_bits, uint32_t rs3_bits);
+                                                   uint32_t rs2_bits, uint32_t rs3_bits,
+                                                   uint8_t current_frm = 0);
     static bool isFPIntegerDestination(const DecodedInstruction& inst);
     static bool isFloatingPointInstruction(const DecodedInstruction& inst);
 

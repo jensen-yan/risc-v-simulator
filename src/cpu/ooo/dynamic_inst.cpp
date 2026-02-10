@@ -33,11 +33,13 @@ DynamicInst::DynamicInst(const DecodedInstruction& decoded_info, uint64_t pc, ui
 
 // ========== 指令类型判断实现 ==========
 bool DynamicInst::is_load_instruction() const {
-    return decoded_info_.opcode == Opcode::LOAD;
+    return decoded_info_.opcode == Opcode::LOAD ||
+           decoded_info_.opcode == Opcode::LOAD_FP;
 }
 
 bool DynamicInst::is_store_instruction() const {
-    return decoded_info_.opcode == Opcode::STORE;
+    return decoded_info_.opcode == Opcode::STORE ||
+           decoded_info_.opcode == Opcode::STORE_FP;
 }
 
 bool DynamicInst::is_branch_instruction() const {

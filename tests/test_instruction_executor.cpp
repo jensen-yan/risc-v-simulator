@@ -385,6 +385,11 @@ TEST_F(InstructionExecutorTest, MExtensionDivision) {
     auto divu_inst = createDecodedInst(Opcode::OP, Funct3::DIVU, Funct7::M_EXT, 1, 2, 3);
     uint64_t divu_result = InstructionExecutor::executeMExtension(divu_inst, 100, 3);
     EXPECT_EQ(divu_result, 100 / 3) << "DIVU: 100 / 3 计算错误";
+
+    // 有符号溢出边界：INT64_MIN / -1
+    uint64_t div_overflow = InstructionExecutor::executeMExtension(
+        div_inst, 0x8000000000000000ULL, 0xFFFFFFFFFFFFFFFFULL);
+    EXPECT_EQ(div_overflow, 0x8000000000000000ULL) << "DIV溢出应返回被除数(INT64_MIN)";
     
     // REM (有符号求余)
     auto rem_inst = createDecodedInst(Opcode::OP, Funct3::REM, Funct7::M_EXT, 1, 2, 3);
@@ -399,6 +404,11 @@ TEST_F(InstructionExecutorTest, MExtensionDivision) {
     auto remu_inst = createDecodedInst(Opcode::OP, Funct3::REMU, Funct7::M_EXT, 1, 2, 3);
     uint64_t remu_result = InstructionExecutor::executeMExtension(remu_inst, 100, 3);
     EXPECT_EQ(remu_result, 100 % 3) << "REMU: 100 % 3 计算错误";
+
+    // 有符号溢出边界：INT64_MIN % -1
+    uint64_t rem_overflow = InstructionExecutor::executeMExtension(
+        rem_inst, 0x8000000000000000ULL, 0xFFFFFFFFFFFFFFFFULL);
+    EXPECT_EQ(rem_overflow, 0ULL) << "REM溢出应返回0";
 }
 
 // ========== 浮点运算测试 ==========

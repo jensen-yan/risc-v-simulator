@@ -556,7 +556,14 @@ uint64_t InstructionExecutor::executeMExtension(const DecodedInstruction& inst, 
             if (rs2_val == 0) {
                 return 0xFFFFFFFFFFFFFFFF;  // 除零结果
             }
-            return static_cast<uint64_t>(static_cast<int64_t>(rs1_val) / static_cast<int64_t>(rs2_val));
+            {
+                const int64_t lhs = static_cast<int64_t>(rs1_val);
+                const int64_t rhs = static_cast<int64_t>(rs2_val);
+                if (lhs == std::numeric_limits<int64_t>::min() && rhs == -1) {
+                    return static_cast<uint64_t>(lhs);  // 溢出场景按RISC-V规范返回被除数
+                }
+                return static_cast<uint64_t>(lhs / rhs);
+            }
             
         case Funct3::DIVU:
             if (rs2_val == 0) {
@@ -568,7 +575,14 @@ uint64_t InstructionExecutor::executeMExtension(const DecodedInstruction& inst, 
             if (rs2_val == 0) {
                 return rs1_val;  // 除零情况下返回被除数
             }
-            return static_cast<uint64_t>(static_cast<int64_t>(rs1_val) % static_cast<int64_t>(rs2_val));
+            {
+                const int64_t lhs = static_cast<int64_t>(rs1_val);
+                const int64_t rhs = static_cast<int64_t>(rs2_val);
+                if (lhs == std::numeric_limits<int64_t>::min() && rhs == -1) {
+                    return 0;  // 溢出场景按RISC-V规范返回0
+                }
+                return static_cast<uint64_t>(lhs % rhs);
+            }
             
         case Funct3::REMU:
             if (rs2_val == 0) {

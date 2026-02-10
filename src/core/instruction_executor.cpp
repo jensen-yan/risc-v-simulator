@@ -123,16 +123,16 @@ float roundToMode(float value, uint8_t rm, uint8_t& out_flags) {
     float rounded = value;
     switch (rm) {
         case 0b000:  // RNE
-            rounded = std::nearbyintf(value);
+            rounded = std::nearbyint(value);
             break;
         case 0b001:  // RTZ
-            rounded = std::truncf(value);
+            rounded = std::trunc(value);
             break;
         case 0b010:  // RDN
-            rounded = std::floorf(value);
+            rounded = std::floor(value);
             break;
         case 0b011:  // RUP
-            rounded = std::ceilf(value);
+            rounded = std::ceil(value);
             break;
         case 0b100: {  // RMM: ties to max magnitude
             const float abs_v = std::fabs(value);

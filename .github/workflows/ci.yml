@@ -33,7 +33,17 @@ jobs:
           sudo cmake --build /tmp/gtest
           sudo install -m 644 /tmp/gtest/lib/libgtest*.a /usr/lib
 
-      - name: Setup RISC-V libc include/lib paths
+      - name: Init Submodules
+        run: git submodule update --init --recursive
+
+      - name: Build ISA Tests (p-only)
+        run: |
+          make -C riscv-tests/isa -f Makefile \
+            src_dir="${GITHUB_WORKSPACE}/riscv-tests/isa" \
+            XLEN=64 \
+            tests='$(rv32ui_p_tests) $(rv32uc_p_tests) $(rv32um_p_tests) $(rv32ua_p_tests) $(rv32uf_p_tests) $(rv32ud_p_tests) $(rv32uzfh_p_tests) $(rv32uzba_p_tests) $(rv32uzbb_p_tests) $(rv32uzbc_p_tests) $(rv32uzbs_p_tests) $(rv32si_p_tests) $(rv32mi_p_tests) $(rv64ui_p_tests) $(rv64ua_p_tests) $(rv64uc_p_tests) $(rv64ud_p_tests) $(rv64uf_p_tests) $(rv64um_p_tests)'
+
+      - name: Build riscv-tests Benchmarks
         shell: bash
         run: |
           set -euo pipefail
@@ -53,38 +63,25 @@ jobs:
           fi
           lib_dir="$(dirname "${libm_path}")"
 
-          echo "CPATH=${include_dir}" >> "${GITHUB_ENV}"
-          echo "C_INCLUDE_PATH=${include_dir}" >> "${GITHUB_ENV}"
-          echo "LIBRARY_PATH=${lib_dir}" >> "${GITHUB_ENV}"
-
+          riscv_gcc_benchmark="riscv64-unknown-elf-gcc"
           specs_file="$(riscv64-unknown-elf-gcc -print-file-name=picolibc.specs)"
           if [[ "${specs_file}" != "picolibc.specs" && -f "${specs_file}" ]]; then
-            echo "RISCV_GCC_BENCHMARK=riscv64-unknown-elf-gcc -specs=${specs_file}" >> "${GITHUB_ENV}"
+            riscv_gcc_benchmark="riscv64-unknown-elf-gcc -specs=${specs_file}"
             echo "Detected picolibc specs: ${specs_file}"
           else
-            echo "RISCV_GCC_BENCHMARK=riscv64-unknown-elf-gcc" >> "${GITHUB_ENV}"
             echo "picolibc.specs not found in GCC search path, fallback to default gcc + LIBRARY_PATH"
           fi
 
           echo "Detected include dir: ${include_dir}"
           echo "Detected lib dir: ${lib_dir}"
 
-      - name: Init Submodules
-        run: git submodule update --init --recursive
-
-      - name: Build ISA Tests (p-only)
-        run: |
-          make -C riscv-tests/isa -f Makefile \
-            src_dir="${GITHUB_WORKSPACE}/riscv-tests/isa" \
-            XLEN=64 \
-            tests='$(rv32ui_p_tests) $(rv32uc_p_tests) $(rv32um_p_tests) $(rv32ua_p_tests) $(rv32uf_p_tests) $(rv32ud_p_tests) $(rv32uzfh_p_tests) $(rv32uzba_p_tests) $(rv32uzbb_p_tests) $(rv32uzbc_p_tests) $(rv32uzbs_p_tests) $(rv32si_p_tests) $(rv32mi_p_tests) $(rv64ui_p_tests) $(rv64ua_p_tests) $(rv64uc_p_tests) $(rv64ud_p_tests) $(rv64uf_p_tests) $(rv64um_p_tests)'
-
-      - name: Build riscv-tests Benchmarks
-        run: |
           make -C riscv-tests/benchmarks -f Makefile \
             src_dir="${GITHUB_WORKSPACE}/riscv-tests/benchmarks" \
             XLEN=64 \
-            RISCV_GCC="${RISCV_GCC_BENCHMARK}"
+            CPATH="${include_dir}" \
+            C_INCLUDE_PATH="${include_dir}" \
+            LIBRARY_PATH="${lib_dir}" \
+            RISCV_GCC="${riscv_gcc_benchmark}"
 
       - name: Configure
         run: cmake -S . -B build

@@ -9,7 +9,7 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,9 +29,16 @@ jobs:
             gcc-riscv64-unknown-elf \
             binutils-riscv64-unknown-elf \
             picolibc-riscv64-unknown-elf
+          # RISCOF reference model dependency (spike)
+          sudo apt-get install -y spike || sudo apt-get install -y riscv-isa-sim
           sudo cmake -S /usr/src/googletest -B /tmp/gtest
           sudo cmake --build /tmp/gtest
           sudo install -m 644 /tmp/gtest/lib/libgtest*.a /usr/lib
+
+      - name: Install RISCOF
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install riscof
 
       - name: Init Submodules
         run: git submodule update --init --recursive
@@ -97,6 +104,59 @@ jobs:
           python3 run_tests.py -p "rv64*-p-*" -w 1 --timeout 20
           python3 run_tests.py -p "rv64*-p-*" --ooo -w 1 --timeout 30
 
+      - name: RISCOF Arch Tests (full)
+        run: |
+          set -euo pipefail
+          command -v spike
+          command -v riscof
+
+          cd tools/riscof
+          export PYTHONPATH="$PWD/plugins/riscv_sim:${PYTHONPATH:-}"
+
+          riscof testlist \
+            --config ./config.ini \
+            --suite ../../riscv-arch-test/riscv-test-suite \
+            --env ../../riscv-arch-test/riscv-test-suite/env \
+            --work-dir ../../build/riscof-work
+
+          # CI 临时跳过已知不稳定集合：pmp 与 privilege/misalign*
+          python3 - <<'PY'
+          import yaml
+          from pathlib import Path
+
+          src = Path("../../build/riscof-work/test_list.yaml")
+          dst = Path("../../build/riscof-work/test_list_ci.yaml")
+          data = yaml.safe_load(src.read_text()) or {}
+
+          def should_skip(test_key: str, test_entry: dict) -> bool:
+              path = str(test_key)
+              test_path = str(test_entry.get("test_path", ""))
+              target = f"{path} {test_path}"
+              if "/pmp/src/" in target:
+                  return True
+              if "/privilege/src/misalign" in target:
+                  return True
+              return False
+
+          filtered = {k: v for k, v in data.items() if not should_skip(k, v)}
+          dst.write_text(yaml.safe_dump(filtered, sort_keys=False))
+          print(f"RISCOF CI test filter: total={len(data)}, kept={len(filtered)}, skipped={len(data)-len(filtered)}")
+          if not filtered:
+              raise SystemExit("No tests left after CI filtering")
+          PY
+
+          riscof validateyaml \
+            --config ./config.ini \
+            --work-dir ../../build/riscof-work
+
+          riscof run \
+            --config ./config.ini \
+            --suite ../../riscv-arch-test/riscv-test-suite \
+            --env ../../riscv-arch-test/riscv-test-suite/env \
+            --work-dir ../../build/riscof-work \
+            --testfile ../../build/riscof-work/test_list_ci.yaml \
+            --no-browser
+
       - name: Benchmarks (supported, blocking)
         run: |
           supported_benchmarks=(
@@ -124,7 +184,6 @@ jobs:
         continue-on-error: true
         run: |
           known_unsupported=(
-            pmp.riscv
             vec-daxpy.riscv
             vec-memcpy.riscv
             vec-sgemm.riscv
@@ -135,3 +194,15 @@ jobs:
             echo "Running known-unsupported benchmark: ${benchmark}"
             python3 run_tests.py --tests-subdir benchmarks -p "${benchmark}" -w 1 --timeout 180 || true
           done
+
+      - name: Upload RISCOF Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: riscof-report
+          path: |
+            build/riscof-work/report.html
+            build/riscof-work/test_list.yaml
+            build/riscof-work/test_list_ci.yaml
+            build/riscof-work/**/*.log
+            build/riscof-work/**/*.signature

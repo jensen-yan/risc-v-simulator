@@ -177,6 +177,7 @@ class riscv_sim(pluginTemplate):
                 str(self.mem_size),
                 cpu_flag,
                 elf_name,
+                f"--isa={testentry['isa']}",
                 f"--tohost-addr=0x{tohost:x}",
                 f"--fromhost-addr=0x{fromhost:x}",
                 f"--signature-file={sig_path}",

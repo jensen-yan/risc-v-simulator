@@ -1,11 +1,70 @@
 #include "system/simulator.h"
 #include "system/elf_loader.h"
 #include "common/debug_types.h"
+#include <cctype>
 #include <iostream>
 #include <iomanip>
 #include <string>
 
 using namespace riscv;
+
+namespace {
+
+uint32_t parseEnabledExtensions(const std::string& isa_string) {
+    std::string isa_upper;
+    isa_upper.reserve(isa_string.size());
+    for (const char ch : isa_string) {
+        isa_upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(ch))));
+    }
+
+    size_t pos = 0;
+    if (isa_upper.rfind("RV32", 0) == 0 || isa_upper.rfind("RV64", 0) == 0) {
+        pos = 4;
+    }
+
+    uint32_t extensions = 0;
+    const auto add_extension = [&extensions](Extension extension) {
+        extensions |= static_cast<uint32_t>(extension);
+    };
+
+    for (size_t i = pos; i < isa_upper.size(); ++i) {
+        const char ext = isa_upper[i];
+        if (ext == '_' || ext == 'Z' || ext == 'X') {
+            break;
+        }
+
+        switch (ext) {
+            case 'I':
+            case 'E':
+                add_extension(Extension::I);
+                break;
+            case 'M':
+                add_extension(Extension::M);
+                break;
+            case 'A':
+                add_extension(Extension::A);
+                break;
+            case 'F':
+                add_extension(Extension::F);
+                break;
+            case 'D':
+                add_extension(Extension::D);
+                break;
+            case 'C':
+                add_extension(Extension::C);
+                break;
+            default:
+                break;
+        }
+    }
+
+    if ((extensions & static_cast<uint32_t>(Extension::I)) == 0) {
+        add_extension(Extension::I);
+    }
+    return extensions;
+}
+
+} // namespace
 
 void printUsage(const char* programName) {
     std::cout << "Usage: " << programName << " [options] [program]\n";
@@ -23,6 +82,7 @@ void printUsage(const char* programName) {
     std::cout << "  --signature-granularity=N    Signature bytes per line (default: 8)\n";
     std::cout << "  --tohost-addr=ADDR           Override tohost address (hex/dec)\n";
     std::cout << "  --fromhost-addr=ADDR         Override fromhost address (hex/dec)\n";
+    std::cout << "  --isa=ISA                    Override enabled ISA extensions (e.g. RV64I_Zicsr)\n";
     std::cout << "  +signature=FILE              Spike-compatible signature file option\n";
     std::cout << "  +signature-granularity=N     Spike-compatible granularity option\n";
     std::cout << "\n";
@@ -88,6 +148,7 @@ int main(int argc, char* argv[]) {
     Address fromhostAddr = 0;
     bool tohostAddrSet = false;
     bool fromhostAddrSet = false;
+    std::string isaString;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -149,6 +210,8 @@ int main(int argc, char* argv[]) {
         } else if (arg.find("--fromhost-addr=") == 0) {
             fromhostAddr = static_cast<Address>(std::stoull(arg.substr(16), nullptr, 0));
             fromhostAddrSet = true;
+        } else if (arg.find("--isa=") == 0) {
+            isaString = arg.substr(6);
         } else if (filename.empty()) {
             filename = arg;
         }
@@ -171,6 +234,10 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             simulator.setHostCommAddresses(tohostAddr, fromhostAddr);
+        }
+
+        if (!isaString.empty()) {
+            simulator.setEnabledExtensions(parseEnabledExtensions(isaString));
         }
         
         // 配置调试系统

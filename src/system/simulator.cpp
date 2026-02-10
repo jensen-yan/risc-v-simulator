@@ -101,6 +101,15 @@ void Simulator::setHostCommAddresses(Address tohostAddr, Address fromhostAddr) {
     }
 }
 
+void Simulator::setEnabledExtensions(uint32_t extensions) {
+    if (cpu_) {
+        cpu_->setEnabledExtensions(extensions);
+    }
+    if (reference_cpu_) {
+        reference_cpu_->setEnabledExtensions(extensions);
+    }
+}
+
 void Simulator::step() {
     auto& debugManager = DebugManager::getInstance();
     debugManager.setGlobalContext(cycle_count_, cpu_->getPC());

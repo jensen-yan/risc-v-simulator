@@ -32,6 +32,7 @@ public:
     bool loadRiscvProgram(const std::string& filename, Address loadAddr = 0x1000);
     bool loadElfProgram(const std::string& filename);
     void setHostCommAddresses(Address tohostAddr, Address fromhostAddr);
+    void setEnabledExtensions(uint32_t extensions);
     
     // 执行控制
     void step();                    // 单步执行

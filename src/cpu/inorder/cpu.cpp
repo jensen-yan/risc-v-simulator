@@ -297,6 +297,11 @@ void CPU::executeLoadOperations(const DecodedInstruction& inst) {
 
 void CPU::executeJALR(const DecodedInstruction& inst) {
     uint64_t target = InstructionExecutor::calculateJumpAndLinkTarget(inst, pc_, getRegister(inst.rs1));
+    if (isInstructionAddressMisaligned(target)) {
+        raiseInstructionAddressMisaligned(target);
+        return;
+    }
+
     uint64_t return_addr = pc_ + (inst.is_compressed ? 2 : 4); // 根据指令长度确定返回地址
     setRegister(inst.rd, return_addr);
     pc_ = target;
@@ -398,7 +403,12 @@ void CPU::executeBType(const DecodedInstruction& inst) {
         
         if (branch_taken) {
             // 跳转到 PC + 符号扩展的立即数
-            pc_ = pc_ + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+            const uint64_t target = pc_ + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+            if (isInstructionAddressMisaligned(target)) {
+                raiseInstructionAddressMisaligned(target);
+                return;
+            }
+            pc_ = target;
         } else {
             // 不跳转，正常递增PC
             incrementPC();
@@ -416,13 +426,19 @@ void CPU::executeUType(const DecodedInstruction& inst) {
 
 void CPU::executeJType(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::JAL) {
+        const uint64_t target = InstructionExecutor::calculateJumpTarget(inst, pc_);
+        if (isInstructionAddressMisaligned(target)) {
+            raiseInstructionAddressMisaligned(target);
+            return;
+        }
+
         // JAL: Jump and Link
         // 1. 保存返回地址（根据指令长度确定增量）
         uint32_t return_addr = pc_ + (inst.is_compressed ? 2 : 4);
         setRegister(inst.rd, return_addr);
         
         // 2. 跳转到 PC + 符号扩展的立即数
-        pc_ = InstructionExecutor::calculateJumpTarget(inst, pc_);
+        pc_ = target;
     } else {
         throw IllegalInstructionException("不支持的J-type指令");
     }
@@ -467,30 +483,59 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
 
 
 void CPU::handleEcall() {
-    // 处理系统调用
-    bool shouldHalt = syscall_handler_->handleSyscall(this);
-    if (shouldHalt) {
+    constexpr uint32_t CSR_MTVEC = 0x305;
+    constexpr uint64_t MACHINE_ECALL_CAUSE = 11;
+
+    // arch-test 里 mtvec 会初始化为 trap 入口，此时 ECALL 需要走异常陷入语义。
+    const uint64_t mtvec = getCSR(CSR_MTVEC) & ~0x3ULL;
+    if (mtvec != 0) {
+        enterMachineTrap(MACHINE_ECALL_CAUSE, 0);
+        return;
+    }
+
+    // 兼容原有运行时：未配置 trap 向量时，保留宿主 syscall 行为。
+    bool should_halt = syscall_handler_->handleSyscall(this);
+    if (should_halt) {
         halted_ = true;
     } else {
-        incrementPC();  // 系统调用完成后继续执行
+        incrementPC();
     }
 }
 
 void CPU::handleEbreak() {
-    // 对齐 RISC-V 异常语义：记录异常上下文并跳转到 mtvec。
+    constexpr uint64_t BREAKPOINT_CAUSE = 3;
+    enterMachineTrap(BREAKPOINT_CAUSE, pc_);
+}
+
+void CPU::enterMachineTrap(uint64_t cause, uint64_t tval) {
     constexpr uint32_t CSR_MTVEC = 0x305;
     constexpr uint32_t CSR_MEPC = 0x341;
     constexpr uint32_t CSR_MCAUSE = 0x342;
     constexpr uint32_t CSR_MTVAL = 0x343;
-    constexpr uint64_t BREAKPOINT_CAUSE = 3;
 
     setCSR(CSR_MEPC, pc_);
-    setCSR(CSR_MCAUSE, BREAKPOINT_CAUSE);
-    // riscv-arch-test 的 trap 例程会把 mtval 当作故障地址进行重定位校验。
-    setCSR(CSR_MTVAL, pc_);
+    setCSR(CSR_MCAUSE, cause);
+    setCSR(CSR_MTVAL, tval);
 
     const uint64_t mtvec = getCSR(CSR_MTVEC);
     pc_ = mtvec & ~0x3ULL;
+}
+
+bool CPU::isExtensionEnabled(Extension extension) const {
+    return (enabled_extensions_ & static_cast<uint32_t>(extension)) != 0;
+}
+
+bool CPU::isInstructionAddressMisaligned(uint64_t addr) const {
+    // C 扩展开启时 IALIGN=16，否则 IALIGN=32。
+    if (isExtensionEnabled(Extension::C)) {
+        return (addr & 0x1ULL) != 0;
+    }
+    return (addr & 0x3ULL) != 0;
+}
+
+void CPU::raiseInstructionAddressMisaligned(uint64_t target_addr) {
+    constexpr uint64_t INSTRUCTION_ADDRESS_MISALIGNED_CAUSE = 0;
+    enterMachineTrap(INSTRUCTION_ADDRESS_MISALIGNED_CAUSE, target_addr);
 }
 
 int32_t CPU::signExtend(uint32_t value, int bits) const {

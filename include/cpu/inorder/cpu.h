@@ -104,6 +104,10 @@ private:
     // 系统调用处理
     void handleEcall();
     void handleEbreak();
+    void enterMachineTrap(uint64_t cause, uint64_t tval);
+    bool isExtensionEnabled(Extension extension) const;
+    bool isInstructionAddressMisaligned(uint64_t addr) const;
+    void raiseInstructionAddressMisaligned(uint64_t target_addr);
     
     // 辅助方法
     void incrementPC() { 

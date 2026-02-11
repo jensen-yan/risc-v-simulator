@@ -202,13 +202,6 @@ TEST_F(ReorderBufferTest, PipelineFlush) {
     EXPECT_FALSE(rob.has_pending_exception()) << "刷新后不应该有异常";
 }
 
-// 测试7：部分刷新
-TEST_F(ReorderBufferTest, PartialFlush) {
-    // 暂时跳过这个测试，因为需要检查flush_after_entry接口
-    // TODO: 适配新的DynamicInst接口
-    GTEST_SKIP() << "部分刷新测试暂时跳过，需要适配新接口";
-}
-
 // 测试8：ROB状态查询
 TEST_F(ReorderBufferTest, StateQuery) {
     // 分配一个表项

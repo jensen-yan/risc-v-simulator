@@ -182,11 +182,11 @@ def run_one(
 
         stats = parse_stats(merged_output)
 
+        has_pass_marker = "=== TEST RESULT: PASS ===" in merged_output
         has_fail_marker = "=== TEST RESULT: FAIL ===" in merged_output
-        has_stats = stats["instructions"] is not None and stats["cycles"] is not None
-        program_finished = "Program finished" in merged_output
 
-        if proc.returncode == 0 and not has_fail_marker and (has_stats or program_finished):
+        # 仅以明确 PASS 标记作为成功条件，避免“到达指令/周期上限后依然返回 0”被误判为通过。
+        if proc.returncode == 0 and has_pass_marker and not has_fail_marker:
             status = "passed"
         else:
             status = "failed"

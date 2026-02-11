@@ -1229,6 +1229,12 @@ InstructionExecutor::AtomicExecuteResult InstructionExecutor::executeAtomicOpera
 }
 
 bool InstructionExecutor::isFPIntegerDestination(const DecodedInstruction& inst) {
+    // 仅 OP-FP 编码包含写整数寄存器的浮点指令（如 FEQ/FCVT/FM V.X）。
+    // FMA/FLOAD/FSTORE 等其它浮点 opcode 的 rd 始终是浮点寄存器号。
+    if (inst.opcode != Opcode::OP_FP) {
+        return false;
+    }
+
     const uint8_t funct5 = fpFunct5(inst);
     if (funct5 == 0x14 &&
         (inst.funct3 == Funct3::FEQ || inst.funct3 == Funct3::FLT || inst.funct3 == Funct3::FLE)) {

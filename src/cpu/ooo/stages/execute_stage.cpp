@@ -128,10 +128,14 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 bool should_wait = state.reorder_buffer->has_earlier_store_pending(unit.instruction->get_instruction_id());
                 
                 if (should_wait) {
-                    // 仍然有未完成的Store依赖，延迟完成
-                    unit.remaining_cycles = 1; // 延迟一个周期
-                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waits on earlier STORE, delay completion",
-                        unit.instruction->get_instruction_id(), i);
+                    // 关键修复：不要长期占用唯一LOAD单元，否则会阻塞更老的LOAD并形成死锁。
+                    // 将该指令回退到ISSUED状态，释放执行单元，等待下个周期重调度。
+                    auto blocked_inst = unit.instruction;
+                    blocked_inst->set_status(DynamicInst::Status::ISSUED);
+                    state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, static_cast<int>(i));
+                    reset_single_unit(unit);
+                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waits on earlier STORE, replay and release load unit",
+                        blocked_inst->get_instruction_id(), i);
                     continue; // 跳过完成处理
                 }
                 
@@ -139,9 +143,12 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 // 尝试Store-to-Load Forwarding/内存读取
                 LoadExecutionResult load_result = perform_load_execution(unit, state);
                 if (load_result == LoadExecutionResult::BlockedByStore) {
-                    unit.remaining_cycles = 1; // 等待更老Store提交后再重试
-                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, retry next cycle",
-                        unit.instruction->get_instruction_id(), i);
+                    auto blocked_inst = unit.instruction;
+                    blocked_inst->set_status(DynamicInst::Status::ISSUED);
+                    state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, static_cast<int>(i));
+                    reset_single_unit(unit);
+                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, replay and release load unit",
+                        blocked_inst->get_instruction_id(), i);
                     continue;
                 }
                 if (load_result == LoadExecutionResult::Exception) {

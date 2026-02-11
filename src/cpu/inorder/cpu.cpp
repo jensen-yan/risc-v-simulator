@@ -262,15 +262,10 @@ void CPU::executeImmediateOperations32(const DecodedInstruction& inst) {
     setRegister(inst.rd, result);
 }
 
-bool CPU::executeLoadOperations(const DecodedInstruction& inst) {
+void CPU::executeLoadOperations(const DecodedInstruction& inst) {
     uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
-    if (isDataAddressMisaligned(addr, inst.memory_access_size)) {
-        raiseLoadAddressMisaligned(addr);
-        return false;
-    }
     uint64_t value = InstructionExecutor::loadFromMemory(memory_, addr, inst.funct3);
     setRegister(inst.rd, value);
-    return true;
 }
 
 void CPU::executeJALR(const DecodedInstruction& inst) {
@@ -333,16 +328,11 @@ void CPU::executeIType(const DecodedInstruction& inst) {
             incrementPC();
             break;
         case Opcode::LOAD:
-            if (executeLoadOperations(inst)) {
-                incrementPC();
-            }
+            executeLoadOperations(inst);
+            incrementPC();
             break;
         case Opcode::LOAD_FP: {
             uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
-            if (isDataAddressMisaligned(addr, inst.memory_access_size)) {
-                raiseLoadAddressMisaligned(addr);
-                break;
-            }
             uint64_t value = InstructionExecutor::loadFPFromMemory(memory_, addr, inst.funct3);
             setFPRegister(inst.rd, value);
             incrementPC();
@@ -363,20 +353,12 @@ void CPU::executeIType(const DecodedInstruction& inst) {
 void CPU::executeSType(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::STORE) {
         uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
-        if (isDataAddressMisaligned(addr, inst.memory_access_size)) {
-            raiseStoreAddressMisaligned(addr);
-            return;
-        }
         uint64_t value = getRegister(inst.rs2);
         InstructionExecutor::storeToMemory(memory_, addr, value, inst.funct3);
         reservation_valid_ = false;
         incrementPC();
     } else if (inst.opcode == Opcode::STORE_FP) {
         uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
-        if (isDataAddressMisaligned(addr, inst.memory_access_size)) {
-            raiseStoreAddressMisaligned(addr);
-            return;
-        }
         uint64_t value = getFPRegister(inst.rs2);
         InstructionExecutor::storeFPToMemory(memory_, addr, value, inst.funct3);
         reservation_valid_ = false;
@@ -508,23 +490,8 @@ bool CPU::isInstructionAddressMisaligned(uint64_t addr) const {
     return (addr & 0x3ULL) != 0;
 }
 
-bool CPU::isDataAddressMisaligned(uint64_t addr, uint8_t access_size) const {
-    if (access_size <= 1) {
-        return false;
-    }
-    return (addr & static_cast<uint64_t>(access_size - 1)) != 0;
-}
-
 void CPU::raiseInstructionAddressMisaligned(uint64_t target_addr) {
     enterMachineTrap(csr::kInstructionAddressMisalignedCause, target_addr);
-}
-
-void CPU::raiseLoadAddressMisaligned(uint64_t target_addr) {
-    enterMachineTrap(csr::kLoadAddressMisalignedCause, target_addr);
-}
-
-void CPU::raiseStoreAddressMisaligned(uint64_t target_addr) {
-    enterMachineTrap(csr::kStoreAddressMisalignedCause, target_addr);
 }
 
 int32_t CPU::signExtend(uint32_t value, int bits) const {
@@ -585,10 +552,6 @@ void CPU::executeFPExtension(const DecodedInstruction& inst) {
 
 void CPU::executeAtomicExtension(const DecodedInstruction& inst) {
     const uint64_t addr = getRegister(inst.rs1);
-    if (isDataAddressMisaligned(addr, inst.memory_access_size)) {
-        raiseStoreAddressMisaligned(addr);
-        return;
-    }
     uint64_t memory_value = 0;
     switch (inst.funct3) {
         case Funct3::LW:

@@ -43,13 +43,6 @@ bool isInstructionAddressMisaligned(const CPUState& state, uint64_t addr) {
     }
     return (addr & 0x3ULL) != 0;
 }
-
-bool isDataAddressMisaligned(uint64_t addr, uint8_t access_size) {
-    if (access_size <= 1) {
-        return false;
-    }
-    return (addr & static_cast<uint64_t>(access_size - 1)) != 0;
-}
 }  // namespace
 
 ExecuteStage::ExecuteStage() {
@@ -180,13 +173,6 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                 } else if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::LOAD_FP) {
                     // 加载指令 - 使用预解析的静态信息
                     uint64_t addr = instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
-
-                    if (isDataAddressMisaligned(addr, inst.memory_access_size)) {
-                        instruction->set_trap(csr::kLoadAddressMisalignedCause, addr);
-                        LOGT(EXECUTE, "LOAD misaligned trap: pc=0x%" PRIx64 " addr=0x%" PRIx64 " size=%u",
-                             instruction->get_pc(), addr, static_cast<unsigned>(inst.memory_access_size));
-                        break;
-                    }
                     
                     // 异常已在解码时检测，这里直接使用预解析的信息
                     unit.load_address = addr;
@@ -316,13 +302,6 @@ void ExecuteStage::execute_instruction(ExecutionUnit& unit, DynamicInstPtr instr
                 // 存储指令 - 使用预解析的静态信息
                 {
                     uint64_t addr = instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
-
-                    if (isDataAddressMisaligned(addr, inst.memory_access_size)) {
-                        instruction->set_trap(csr::kStoreAddressMisalignedCause, addr);
-                        LOGT(EXECUTE, "STORE misaligned trap: pc=0x%" PRIx64 " addr=0x%" PRIx64 " size=%u",
-                             instruction->get_pc(), addr, static_cast<unsigned>(inst.memory_access_size));
-                        break;
-                    }
                     
                     // 异常已在解码时检测，这里直接使用预解析的信息
                     LOGT(EXECUTE, "execute STORE: addr=0x%" PRIx64 " value=0x%" PRIx64 " size=%d",
@@ -456,13 +435,6 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 }
                 
                 // 没有Store依赖，可以完成
-                if (unit.instruction->has_trap()) {
-                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu trap ready -> CDB",
-                        unit.instruction->get_instruction_id(), i);
-                    complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
-                    continue;
-                }
-
                 // 尝试Store-to-Load Forwarding
                 bool used_forwarding = perform_load_execution(unit, state);
                 
@@ -547,13 +519,6 @@ void ExecuteStage::execute_store_operation(const DecodedInstruction& inst, uint6
 void ExecuteStage::execute_atomic_operation(ExecutionUnit& unit, DynamicInstPtr instruction, CPUState& state) {
     const auto& inst = instruction->get_decoded_info();
     const uint64_t addr = instruction->get_src1_value();
-    if (isDataAddressMisaligned(addr, inst.memory_access_size)) {
-        instruction->set_trap(csr::kStoreAddressMisalignedCause, addr);
-        unit.result = 0;
-        LOGT(EXECUTE, "AMO misaligned trap: pc=0x%" PRIx64 " addr=0x%" PRIx64 " size=%u",
-             instruction->get_pc(), addr, static_cast<unsigned>(inst.memory_access_size));
-        return;
-    }
     const uint64_t memory_value = readAtomicMemoryValue(state.memory, addr, inst.funct3);
     const bool reservation_hit = state.reservation_valid && (state.reservation_addr == addr);
 
@@ -675,14 +640,6 @@ bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) 
     const auto& inst = unit.instruction->get_decoded_info();
     uint64_t addr = unit.load_address;
     uint8_t access_size = unit.load_size;
-
-    if (isDataAddressMisaligned(addr, access_size)) {
-        unit.instruction->set_trap(csr::kLoadAddressMisalignedCause, addr);
-        unit.result = 0;
-        LOGT(EXECUTE, "LOAD misaligned trap late-check: pc=0x%" PRIx64 " addr=0x%" PRIx64 " size=%u",
-             unit.instruction->get_pc(), addr, static_cast<unsigned>(access_size));
-        return false;
-    }
 
     if (inst.opcode == Opcode::LOAD_FP) {
         unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);

@@ -32,6 +32,7 @@ class spike_ref(pluginTemplate):
         path_prefix = config.get("PATH", "")
         self.spike = os.path.join(path_prefix, "spike") if path_prefix else "spike"
         self.signature_granularity = int(config.get("signature_granularity", 8))
+        self.support_misaligned_flag = False
 
         env_dir = config.get("env_dir")
         if env_dir:
@@ -67,6 +68,20 @@ class spike_ref(pluginTemplate):
         if not os.path.exists(os.path.join(self.env_dir, "link.ld")):
             logger.error("link.ld not found in env_dir: %s", self.env_dir)
             raise SystemExit(1)
+        self.support_misaligned_flag = self._probe_misaligned_flag()
+
+    def _probe_misaligned_flag(self):
+        try:
+            result = subprocess.run(
+                [self.spike, "--help"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            help_text = (result.stdout or "") + "\n" + (result.stderr or "")
+            return "--misaligned" in help_text
+        except OSError:
+            return False
 
     def runTests(self, testList):
         gcc = f"riscv{self.xlen}-unknown-elf-gcc"
@@ -118,6 +133,8 @@ class spike_ref(pluginTemplate):
                 f"+signature-granularity={self.signature_granularity}",
                 elf_name,
             ]
+            if self.support_misaligned_flag:
+                run_cmd.insert(1, "--misaligned")
             logger.debug("Running ref: %s", " ".join(shlex.quote(p) for p in run_cmd))
             with open(log_path, "w", encoding="utf-8") as logf:
                 subprocess.run(run_cmd, cwd=test_dir, check=True, stdout=logf, stderr=logf)

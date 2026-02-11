@@ -98,7 +98,7 @@ private:
     // I-Type指令子方法
     void executeImmediateOperations(const DecodedInstruction& inst);
     void executeImmediateOperations32(const DecodedInstruction& inst);  // RV64I
-    bool executeLoadOperations(const DecodedInstruction& inst);
+    void executeLoadOperations(const DecodedInstruction& inst);
     void executeJALR(const DecodedInstruction& inst);
     
     // 系统调用处理
@@ -107,10 +107,7 @@ private:
     void enterMachineTrap(uint64_t cause, uint64_t tval);
     bool isExtensionEnabled(Extension extension) const;
     bool isInstructionAddressMisaligned(uint64_t addr) const;
-    bool isDataAddressMisaligned(uint64_t addr, uint8_t access_size) const;
     void raiseInstructionAddressMisaligned(uint64_t target_addr);
-    void raiseLoadAddressMisaligned(uint64_t target_addr);
-    void raiseStoreAddressMisaligned(uint64_t target_addr);
     
     // 辅助方法
     void incrementPC() { 

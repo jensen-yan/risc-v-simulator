@@ -1,6 +1,7 @@
 target_sources(risc-v-sim-lib PRIVATE
     ooo_cpu.cpp
     dynamic_inst.cpp
+    execute_semantics.cpp
     register_rename.cpp
     reorder_buffer.cpp
     reservation_station.cpp

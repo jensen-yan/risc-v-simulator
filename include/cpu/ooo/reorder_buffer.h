@@ -140,6 +140,9 @@ public:
     
     // 检查是否有更早的未完成Store指令（用于Load-Store依赖检查）
     bool has_earlier_store_pending(uint64_t current_instruction_id) const;
+
+    // 检查是否有更早的未提交Store/AMO指令（用于AMO顺序约束）
+    bool has_earlier_store_uncommitted(uint64_t current_instruction_id) const;
     
 private:
     // 分配ROB表项ID

@@ -351,6 +351,24 @@ bool ReorderBuffer::has_earlier_store_pending(uint64_t current_instruction_id) c
     return false;
 }
 
+bool ReorderBuffer::has_earlier_store_uncommitted(uint64_t current_instruction_id) const {
+    for (int i = 0; i < entry_count; ++i) {
+        int index = (head_ptr + i) % MAX_ROB_ENTRIES;
+        if (rob_entries[index]) {
+            DynamicInstPtr inst = rob_entries[index];
+            if (inst->get_instruction_id() >= current_instruction_id) {
+                break;  // 已经检查到当前指令或之后的指令
+            }
+            const bool is_store_like = inst->is_store_instruction() ||
+                                       inst->get_decoded_info().opcode == Opcode::AMO;
+            if (is_store_like && !inst->is_retired()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // ========== 私有方法实现 ==========
 ROBEntry ReorderBuffer::allocate_rob_entry() {
     if (free_entries.empty()) {

@@ -19,6 +19,17 @@ void ExecuteStage::execute(CPUState& state) {
     if (dispatch_result.success) {
         LOGT(EXECUTE, "dispatch inst=%" PRId64 " from rs[%d] to execution unit",
             dispatch_result.instruction->get_instruction_id(), dispatch_result.rs_entry);
+
+        const auto& decoded_info = dispatch_result.instruction->get_decoded_info();
+        if (decoded_info.opcode == Opcode::AMO &&
+            state.reorder_buffer->has_earlier_store_uncommitted(dispatch_result.instruction->get_instruction_id())) {
+            // AMO必须等待更老Store/AMO提交，避免读取到尚未对内存生效的旧值。
+            dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
+            state.reservation_station->release_execution_unit(dispatch_result.unit_type, dispatch_result.unit_id);
+            LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay dispatch",
+                dispatch_result.instruction->get_instruction_id());
+            return;
+        }
         
         ExecutionUnit* unit = get_available_unit(dispatch_result.unit_type, state);
         if (unit) {
@@ -29,7 +40,6 @@ void ExecuteStage::execute(CPUState& state) {
             const char* unit_type_str = "";
             
             // 使用预解析的执行周期数，无需重复判断指令类型
-            const auto& decoded_info = dispatch_result.instruction->get_decoded_info();
             unit->remaining_cycles = decoded_info.execution_cycles;
             
             // 根据执行单元类型设置调试信息
@@ -73,10 +83,10 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             if (unit.remaining_cycles <= 0) {
                 const auto& inst = unit.instruction->get_decoded_info();
                 if (inst.opcode == Opcode::AMO &&
-                    state.reorder_buffer->has_earlier_store_pending(unit.instruction->get_instruction_id())) {
-                    // AMO需在更老Store完成后再结束，避免破坏单线程程序顺序可见性。
+                    state.reorder_buffer->has_earlier_store_uncommitted(unit.instruction->get_instruction_id())) {
+                    // 双保险：若AMO执行期间出现顺序约束，延迟完成，等待更老Store/AMO提交。
                     unit.remaining_cycles = 1;
-                    LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier STORE, delay completion",
+                    LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay completion",
                         unit.instruction->get_instruction_id());
                     continue;
                 }

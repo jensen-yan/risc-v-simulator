@@ -19,6 +19,8 @@ constexpr std::uint32_t kMcause = 0x342;
 constexpr std::uint32_t kMtval = 0x343;
 
 constexpr std::uint64_t kInstructionAddressMisalignedCause = 0;
+constexpr std::uint64_t kLoadAddressMisalignedCause = 4;
+constexpr std::uint64_t kStoreAddressMisalignedCause = 6;
 constexpr std::uint64_t kBreakpointCause = 3;
 constexpr std::uint64_t kMachineEcallCause = 11;
 

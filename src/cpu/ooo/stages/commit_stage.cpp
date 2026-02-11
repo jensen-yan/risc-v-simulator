@@ -98,42 +98,54 @@ void CommitStage::execute(CPUState& state) {
 
         bool wrote_integer_reg = false;
         if (InstructionExecutor::isFloatingPointInstruction(decoded_info)) {
-            const uint8_t current_frm =
-                static_cast<uint8_t>(csr::read(state.csr_registers, csr::kFrm) & 0x7U);
-            InstructionExecutor::FpExecuteResult fp_result{};
-
+            DynamicInst::FpExecuteInfo fp_info{};
             if (decoded_info.opcode == Opcode::LOAD_FP) {
-                fp_result.value = committed_inst->get_result();
-                fp_result.write_fp_reg = true;
+                fp_info.value = committed_inst->get_result();
+                fp_info.write_fp_reg = true;
             } else if (decoded_info.opcode == Opcode::STORE_FP) {
                 // 无寄存器写回
-            } else if (decoded_info.opcode == Opcode::FMADD ||
-                       decoded_info.opcode == Opcode::FMSUB ||
-                       decoded_info.opcode == Opcode::FNMSUB ||
-                       decoded_info.opcode == Opcode::FNMADD) {
-                fp_result = InstructionExecutor::executeFusedFPOperation(
-                    decoded_info,
-                    state.arch_fp_registers[decoded_info.rs1],
-                    state.arch_fp_registers[decoded_info.rs2],
-                    state.arch_fp_registers[decoded_info.rs3],
-                    current_frm);
             } else {
-                fp_result = InstructionExecutor::executeFPOperation(
-                    decoded_info,
-                    state.arch_fp_registers[decoded_info.rs1],
-                    state.arch_fp_registers[decoded_info.rs2],
-                    state.arch_registers[decoded_info.rs1],
-                    current_frm);
+                if (committed_inst->has_fp_execute_info()) {
+                    fp_info = committed_inst->get_fp_execute_info();
+                } else {
+                    // 防御性回退：理论上浮点执行结果应在 execute 阶段产出并随 DynamicInst 传递。
+                    LOGW(COMMIT, "missing fp execute info at commit, fallback to recompute");
+                    const uint8_t current_frm =
+                        static_cast<uint8_t>(csr::read(state.csr_registers, csr::kFrm) & 0x7U);
+                    InstructionExecutor::FpExecuteResult fallback_result{};
+                    if (decoded_info.opcode == Opcode::FMADD ||
+                        decoded_info.opcode == Opcode::FMSUB ||
+                        decoded_info.opcode == Opcode::FNMSUB ||
+                        decoded_info.opcode == Opcode::FNMADD) {
+                        fallback_result = InstructionExecutor::executeFusedFPOperation(
+                            decoded_info,
+                            state.arch_fp_registers[decoded_info.rs1],
+                            state.arch_fp_registers[decoded_info.rs2],
+                            state.arch_fp_registers[decoded_info.rs3],
+                            current_frm);
+                    } else {
+                        fallback_result = InstructionExecutor::executeFPOperation(
+                            decoded_info,
+                            state.arch_fp_registers[decoded_info.rs1],
+                            state.arch_fp_registers[decoded_info.rs2],
+                            state.arch_registers[decoded_info.rs1],
+                            current_frm);
+                    }
+                    fp_info.value = fallback_result.value;
+                    fp_info.write_int_reg = fallback_result.write_int_reg;
+                    fp_info.write_fp_reg = fallback_result.write_fp_reg;
+                    fp_info.fflags = fallback_result.fflags;
+                }
             }
 
-            if (fp_result.fflags != 0) {
+            if (fp_info.fflags != 0) {
                 csr::write(state.csr_registers,
                            csr::kFflags,
-                           csr::read(state.csr_registers, csr::kFflags) | fp_result.fflags);
+                           csr::read(state.csr_registers, csr::kFflags) | fp_info.fflags);
             }
 
-            if (fp_result.write_int_reg && decoded_info.rd != 0) {
-                const uint64_t int_result = fp_result.value;
+            if (fp_info.write_int_reg && decoded_info.rd != 0) {
+                const uint64_t int_result = fp_info.value;
                 state.arch_registers[decoded_info.rd] = int_result;
                 if (committed_inst->get_physical_dest() != 0) {
                     state.register_rename->commit_instruction(committed_inst->get_logical_dest(),
@@ -143,10 +155,10 @@ void CommitStage::execute(CPUState& state) {
                 wrote_integer_reg = true;
                 LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
                     committed_inst->get_instruction_id(), decoded_info.rd, int_result);
-            } else if (fp_result.write_fp_reg) {
-                state.arch_fp_registers[decoded_info.rd] = fp_result.value;
+            } else if (fp_info.write_fp_reg) {
+                state.arch_fp_registers[decoded_info.rd] = fp_info.value;
                 LOGT(COMMIT, "inst=%" PRId64 " f%d = 0x%016" PRIx64,
-                    committed_inst->get_instruction_id(), decoded_info.rd, fp_result.value);
+                    committed_inst->get_instruction_id(), decoded_info.rd, fp_info.value);
             } else {
                 LOGT(COMMIT, "inst=%" PRId64 " (no destination register)",
                     committed_inst->get_instruction_id());

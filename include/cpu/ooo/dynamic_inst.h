@@ -78,6 +78,13 @@ public:
                       address_ready(false), store_forwarded(false) {}
     };
 
+    struct FpExecuteInfo {
+        uint64_t value = 0;
+        bool write_int_reg = false;
+        bool write_fp_reg = false;
+        uint8_t fflags = 0;
+    };
+
 private:
     // ========== 核心指令信息 ==========
     DecodedInstruction decoded_info_;          // 解码后的指令信息（只存储一份）
@@ -107,6 +114,8 @@ private:
     bool has_trap_;                           // 是否触发可恢复陷入
     uint64_t trap_cause_;                     // 陷入原因（mcause）
     uint64_t trap_tval_;                      // 陷入附加值（mtval）
+    bool has_fp_execute_info_;                // 是否携带浮点执行附加结果
+    FpExecuteInfo fp_execute_info_;           // 浮点执行附加结果（fflags/目的寄存器类型）
 
     // ========== ROB 关联信息 ==========
     ROBEntry rob_entry_;                      // 关联的ROB表项编号
@@ -185,6 +194,16 @@ public:
     void set_result(uint64_t result) { 
         result_ = result; 
         result_ready_ = true; 
+    }
+    void set_fp_execute_info(const FpExecuteInfo& info) {
+        has_fp_execute_info_ = true;
+        fp_execute_info_ = info;
+    }
+    bool has_fp_execute_info() const { return has_fp_execute_info_; }
+    const FpExecuteInfo& get_fp_execute_info() const { return fp_execute_info_; }
+    void clear_fp_execute_info() {
+        has_fp_execute_info_ = false;
+        fp_execute_info_ = FpExecuteInfo{};
     }
 
     // ========== 异常处理接口 ==========

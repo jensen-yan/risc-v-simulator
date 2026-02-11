@@ -89,6 +89,7 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                 } else if (InstructionExecutor::isFloatingPointInstruction(inst)) {
                     const uint8_t current_frm =
                         static_cast<uint8_t>(csr::read(state.csr_registers, csr::kFrm) & 0x7U);
+                    DynamicInst::FpExecuteInfo fp_info{};
                     if (inst.opcode == Opcode::FMADD ||
                         inst.opcode == Opcode::FMSUB ||
                         inst.opcode == Opcode::FNMSUB ||
@@ -99,7 +100,10 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                             state.arch_fp_registers[inst.rs2],
                             state.arch_fp_registers[inst.rs3],
                             current_frm);
-                        unit.result = fp_result.value;
+                        fp_info.value = fp_result.value;
+                        fp_info.write_int_reg = fp_result.write_int_reg;
+                        fp_info.write_fp_reg = fp_result.write_fp_reg;
+                        fp_info.fflags = fp_result.fflags;
                     } else {
                         const auto fp_result = InstructionExecutor::executeFPOperation(
                             inst,
@@ -107,8 +111,13 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                             state.arch_fp_registers[inst.rs2],
                             state.arch_registers[inst.rs1],
                             current_frm);
-                        unit.result = fp_result.value;
+                        fp_info.value = fp_result.value;
+                        fp_info.write_int_reg = fp_result.write_int_reg;
+                        fp_info.write_fp_reg = fp_result.write_fp_reg;
+                        fp_info.fflags = fp_result.fflags;
                     }
+                    unit.result = fp_info.value;
+                    instruction->set_fp_execute_info(fp_info);
                 } else if (inst.opcode == Opcode::OP) {
                     // OP指令包含基础整数和M扩展，按funct7分流
                     if (inst.funct7 == Funct7::M_EXT) {

@@ -144,6 +144,12 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                         unit.instruction->get_instruction_id(), i);
                     continue;
                 }
+                if (load_result == LoadExecutionResult::Exception) {
+                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu raised exception: %s",
+                        unit.instruction->get_instruction_id(), i, unit.exception_msg.c_str());
+                    complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
+                    continue;
+                }
                 
                 LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu done, %s result=0x%" PRIx64 " -> CDB",
                     unit.instruction->get_instruction_id(),
@@ -335,19 +341,26 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
                        addr, unit.result, inst.is_signed_load ? "sign" : "zero");
         return LoadExecutionResult::Forwarded; // 使用了转发
     } else {
-        if (inst.opcode == Opcode::LOAD_FP) {
-            unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);
-            LOGT(EXECUTE, "fp memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
-            return LoadExecutionResult::LoadedFromMemory;
-        }
+        try {
+            if (inst.opcode == Opcode::LOAD_FP) {
+                unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);
+                LOGT(EXECUTE, "fp memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+                return LoadExecutionResult::LoadedFromMemory;
+            }
 
-        // 没有转发，从内存读取
-        LOGT(EXECUTE, "store-to-load forwarding miss, read from memory");
-        
-        unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
-        
-        LOGT(EXECUTE, "memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
-        return LoadExecutionResult::LoadedFromMemory; // 没有使用转发
+            // 没有转发，从内存读取
+            LOGT(EXECUTE, "store-to-load forwarding miss, read from memory");
+            
+            unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
+            
+            LOGT(EXECUTE, "memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+            return LoadExecutionResult::LoadedFromMemory; // 没有使用转发
+        } catch (const SimulatorException& e) {
+            unit.has_exception = true;
+            unit.exception_msg = e.what();
+            unit.result = 0;
+            return LoadExecutionResult::Exception;
+        }
     }
 }
 

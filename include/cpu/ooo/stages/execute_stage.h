@@ -25,7 +25,8 @@ private:
     enum class LoadExecutionResult {
         Forwarded,
         LoadedFromMemory,
-        BlockedByStore
+        BlockedByStore,
+        Exception
     };
 
     // 辅助方法

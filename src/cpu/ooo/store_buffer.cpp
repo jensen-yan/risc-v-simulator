@@ -28,6 +28,13 @@ void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64
 }
 
 bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value) const {
+    bool blocked = false;
+    return forward_load(address, size, result_value, std::numeric_limits<uint64_t>::max(), blocked);
+}
+
+bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value,
+                               uint64_t current_instruction_id, bool& blocked) const {
+    blocked = false;
     // 从最新的Store开始向前搜索（最近的Store优先）
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         // 从最近分配的位置开始向前搜索
@@ -35,6 +42,11 @@ bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_
         const StoreBufferEntry& entry = entries[index];
         
         if (!entry.valid) continue;
+        if (!entry.instruction) continue;
+        if (entry.instruction->get_instruction_id() >= current_instruction_id) {
+            // 仅允许从更老的Store转发
+            continue;
+        }
         
         // 检查地址是否有重叠
         if (addresses_overlap(entry.address, entry.size, address, size)) {
@@ -56,6 +68,7 @@ bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_
                 // 有重叠但无法转发（如部分字节写入）- 这种情况下Load必须等待Store提交到内存
                 LOGT(EXECUTE, "store-to-load overlap but cannot forward: load_addr=0x%" PRIx64 ", load_size=%d, store_addr=0x%" PRIx64 ", store_size=%d (inst=%" PRId64 ")",
                         address, size, entry.address, entry.size, entry.instruction->get_instruction_id());
+                blocked = true;
                 return false; // 无法转发，Load需要等待
             }
         }

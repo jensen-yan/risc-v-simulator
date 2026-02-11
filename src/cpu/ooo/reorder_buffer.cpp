@@ -341,7 +341,9 @@ bool ReorderBuffer::has_earlier_store_pending(uint64_t current_instruction_id) c
             if (inst->get_instruction_id() >= current_instruction_id) {
                 break;  // 已经检查到当前指令或之后的指令
             }
-            if (inst->is_store_instruction() && !inst->is_completed()) {
+            const bool is_store_like = inst->is_store_instruction() ||
+                                       inst->get_decoded_info().opcode == Opcode::AMO;
+            if (is_store_like && !inst->is_completed()) {
                 return true;
             }
         }

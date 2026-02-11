@@ -126,12 +126,19 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 }
                 
                 // 没有Store依赖，可以完成
-                // 尝试Store-to-Load Forwarding
-                bool used_forwarding = perform_load_execution(unit, state);
+                // 尝试Store-to-Load Forwarding/内存读取
+                LoadExecutionResult load_result = perform_load_execution(unit, state);
+                if (load_result == LoadExecutionResult::BlockedByStore) {
+                    unit.remaining_cycles = 1; // 等待更老Store提交后再重试
+                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, retry next cycle",
+                        unit.instruction->get_instruction_id(), i);
+                    continue;
+                }
                 
                 LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu done, %s result=0x%" PRIx64 " -> CDB",
                     unit.instruction->get_instruction_id(),
-                    i, (used_forwarding ? "(store-forwarded)" : "(loaded-from-memory)"), unit.result);
+                    i, (load_result == LoadExecutionResult::Forwarded ? "(store-forwarded)" : "(loaded-from-memory)"),
+                    unit.result);
                 
                 complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
             }
@@ -246,22 +253,33 @@ void ExecuteStage::reset() {
     LOGT(EXECUTE, "execute stage reset");
 }
 
-bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) {
+ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) {
     const auto& inst = unit.instruction->get_decoded_info();
     uint64_t addr = unit.load_address;
     uint8_t access_size = unit.load_size;
-
-    if (inst.opcode == Opcode::LOAD_FP) {
-        unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);
-        LOGT(EXECUTE, "fp memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
-        return false;
-    }
     
     // 尝试Store-to-Load Forwarding
     uint64_t forwarded_value;
-    bool forwarded = state.store_buffer->forward_load(addr, access_size, forwarded_value);
+    bool blocked = false;
+    bool forwarded = state.store_buffer->forward_load(
+        addr, access_size, forwarded_value, unit.instruction->get_instruction_id(), blocked);
+    if (blocked) {
+        return LoadExecutionResult::BlockedByStore;
+    }
     
     if (forwarded) {
+        if (inst.opcode == Opcode::LOAD_FP) {
+            // FLW 需要nan-box到64位浮点寄存器；FLD 直接写入64位
+            if (access_size == 4) {
+                unit.result = 0xFFFFFFFF00000000ULL | (forwarded_value & 0xFFFFFFFFULL);
+            } else {
+                unit.result = forwarded_value;
+            }
+            LOGT(EXECUTE, "fp store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64,
+                 addr, unit.result);
+            return LoadExecutionResult::Forwarded;
+        }
+
         // 从Store Buffer获得转发数据，根据预解析的符号扩展信息处理
         if (inst.is_signed_load) {
             // 符号扩展Load指令：LB, LH, LW
@@ -305,15 +323,21 @@ bool ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) 
         
         LOGT(EXECUTE, "store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64 " %s-extended",
                        addr, unit.result, inst.is_signed_load ? "sign" : "zero");
-        return true; // 使用了转发
+        return LoadExecutionResult::Forwarded; // 使用了转发
     } else {
+        if (inst.opcode == Opcode::LOAD_FP) {
+            unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);
+            LOGT(EXECUTE, "fp memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+            return LoadExecutionResult::LoadedFromMemory;
+        }
+
         // 没有转发，从内存读取
         LOGT(EXECUTE, "store-to-load forwarding miss, read from memory");
         
         unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
         
         LOGT(EXECUTE, "memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
-        return false; // 没有使用转发
+        return LoadExecutionResult::LoadedFromMemory; // 没有使用转发
     }
 }
 

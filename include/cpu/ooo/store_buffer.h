@@ -4,6 +4,7 @@
 #include "cpu/ooo/dynamic_inst.h"
 #include <array>
 #include <cstdint>
+#include <limits>
 
 namespace riscv {
 
@@ -33,6 +34,8 @@ public:
     
     // 查找匹配的Store (返回是否找到，如果找到则通过result_value返回值)
     bool forward_load(uint64_t address, uint8_t size, uint64_t& result_value) const;
+    bool forward_load(uint64_t address, uint8_t size, uint64_t& result_value,
+                      uint64_t current_instruction_id, bool& blocked) const;
     
     // 清除指定指令ID及之前的Store条目（当Store指令提交时调用）
     void retire_stores_before(uint64_t instruction_id);

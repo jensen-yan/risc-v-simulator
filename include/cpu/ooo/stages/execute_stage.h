@@ -22,10 +22,16 @@ public:
     const char* get_stage_name() const override { return "EXECUTE"; }
 
 private:
+    enum class LoadExecutionResult {
+        Forwarded,
+        LoadedFromMemory,
+        BlockedByStore
+    };
+
     // 辅助方法
     void update_execution_units(CPUState& state);
     ExecutionUnit* get_available_unit(ExecutionUnitType type, CPUState& state);
-    bool perform_load_execution(ExecutionUnit& unit, CPUState& state);
+    LoadExecutionResult perform_load_execution(ExecutionUnit& unit, CPUState& state);
     void reset_execution_units(CPUState& state);
     
     // 执行单元重置的辅助函数

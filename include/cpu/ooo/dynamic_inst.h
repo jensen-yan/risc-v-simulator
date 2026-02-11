@@ -85,6 +85,15 @@ public:
         uint8_t fflags = 0;
     };
 
+    struct AtomicExecuteInfo {
+        bool acquire_reservation = false;
+        bool release_reservation = false;
+        bool do_store = false;
+        uint64_t address = 0;
+        uint64_t store_value = 0;
+        Funct3 width = Funct3::LW;
+    };
+
 private:
     // ========== 核心指令信息 ==========
     DecodedInstruction decoded_info_;          // 解码后的指令信息（只存储一份）
@@ -116,6 +125,8 @@ private:
     uint64_t trap_tval_;                      // 陷入附加值（mtval）
     bool has_fp_execute_info_;                // 是否携带浮点执行附加结果
     FpExecuteInfo fp_execute_info_;           // 浮点执行附加结果（fflags/目的寄存器类型）
+    bool has_atomic_execute_info_;            // 是否携带原子执行附加结果
+    AtomicExecuteInfo atomic_execute_info_;   // 原子执行附加结果（提交时更新内存/预留）
 
     // ========== ROB 关联信息 ==========
     ROBEntry rob_entry_;                      // 关联的ROB表项编号
@@ -204,6 +215,16 @@ public:
     void clear_fp_execute_info() {
         has_fp_execute_info_ = false;
         fp_execute_info_ = FpExecuteInfo{};
+    }
+    void set_atomic_execute_info(const AtomicExecuteInfo& info) {
+        has_atomic_execute_info_ = true;
+        atomic_execute_info_ = info;
+    }
+    bool has_atomic_execute_info() const { return has_atomic_execute_info_; }
+    const AtomicExecuteInfo& get_atomic_execute_info() const { return atomic_execute_info_; }
+    void clear_atomic_execute_info() {
+        has_atomic_execute_info_ = false;
+        atomic_execute_info_ = AtomicExecuteInfo{};
     }
 
     // ========== 异常处理接口 ==========

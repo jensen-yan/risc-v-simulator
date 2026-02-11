@@ -14,6 +14,7 @@ DynamicInst::DynamicInst()
       result_(0), result_ready_(false), has_exception_(false), has_trap_(false),
       trap_cause_(0), trap_tval_(0),
       has_fp_execute_info_(false), fp_execute_info_{},
+      has_atomic_execute_info_(false), atomic_execute_info_{},
       rob_entry_(0), rs_entry_(0), is_jump_(false), jump_target_(0),
       fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
@@ -28,6 +29,7 @@ DynamicInst::DynamicInst(const DecodedInstruction& decoded_info, uint64_t pc, ui
       result_(0), result_ready_(false), has_exception_(false), has_trap_(false),
       trap_cause_(0), trap_tval_(0),
       has_fp_execute_info_(false), fp_execute_info_{},
+      has_atomic_execute_info_(false), atomic_execute_info_{},
       rob_entry_(0), rs_entry_(0), is_jump_(false), jump_target_(0),
       fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
@@ -219,6 +221,7 @@ void DynamicInst::reset_to_allocated() {
     trap_cause_ = 0;
     trap_tval_ = 0;
     clear_fp_execute_info();
+    clear_atomic_execute_info();
     is_jump_ = false;
     jump_target_ = 0;
     rs_entry_ = 0;

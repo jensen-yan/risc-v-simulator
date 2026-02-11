@@ -20,19 +20,6 @@ uint64_t readAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Fu
     }
 }
 
-void writeAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 width, uint64_t value) {
-    switch (width) {
-        case Funct3::LW:
-            memory->writeWord(addr, static_cast<uint32_t>(value));
-            return;
-        case Funct3::LD:
-            memory->write64(addr, value);
-            return;
-        default:
-            throw IllegalInstructionException("A扩展仅支持W/D宽度");
-    }
-}
-
 bool isExtensionEnabled(const CPUState& state, Extension extension) {
     return (state.enabled_extensions & static_cast<uint32_t>(extension)) != 0;
 }
@@ -54,16 +41,18 @@ void executeAtomicOperation(ExecutionUnit& unit, const DynamicInstPtr& instructi
     const auto amo_result = InstructionExecutor::executeAtomicOperation(
         inst, memory_value, instruction->get_src2_value(), reservation_hit);
 
-    if (amo_result.acquire_reservation) {
-        state.reservation_valid = true;
-        state.reservation_addr = addr;
-    }
-    if (amo_result.release_reservation) {
-        state.reservation_valid = false;
-    }
+    DynamicInst::AtomicExecuteInfo atomic_info{};
+    atomic_info.acquire_reservation = amo_result.acquire_reservation;
+    atomic_info.release_reservation = amo_result.release_reservation;
+    atomic_info.do_store = amo_result.do_store;
+    atomic_info.address = addr;
+    atomic_info.store_value = amo_result.store_value;
+    atomic_info.width = inst.funct3;
+
     if (amo_result.do_store) {
-        writeAtomicMemoryValue(state.memory, addr, inst.funct3, amo_result.store_value);
+        state.store_buffer->add_store(instruction, addr, amo_result.store_value, inst.memory_access_size);
     }
+    instruction->set_atomic_execute_info(atomic_info);
 
     unit.result = amo_result.rd_value;
 }
@@ -284,25 +273,22 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                 // 存储指令 - 使用预解析的静态信息
                 {
                     uint64_t addr = instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+                    const uint64_t store_value = instruction->get_src2_value();
+
+                    auto& memory_info = instruction->get_memory_info();
+                    memory_info.is_memory_op = true;
+                    memory_info.is_store = true;
+                    memory_info.memory_address = addr;
+                    memory_info.memory_value = store_value;
+                    memory_info.memory_size = inst.memory_access_size;
+                    memory_info.address_ready = true;
 
                     // 异常已在解码时检测，这里直接使用预解析的信息
                     LOGT(EXECUTE, "execute STORE: addr=0x%" PRIx64 " value=0x%" PRIx64 " size=%d",
-                         addr, instruction->get_src2_value(), inst.memory_access_size);
+                         addr, store_value, inst.memory_access_size);
 
-                    // 执行Store到内存
-                    if (inst.opcode == Opcode::STORE_FP) {
-                        InstructionExecutor::storeFPToMemory(state.memory, addr, instruction->get_src2_value(), inst.funct3);
-                    } else {
-                        InstructionExecutor::storeToMemory(state.memory, addr, instruction->get_src2_value(), inst.funct3);
-                    }
-
-                    // 同时添加到Store Buffer用于Store-to-Load Forwarding
-                    if (inst.opcode == Opcode::STORE) {
-                        state.store_buffer->add_store(instruction, addr, instruction->get_src2_value(), inst.memory_access_size);
-                    }
-
-                    // 与顺序核保持一致：任意普通Store都会使LR预留失效。
-                    state.reservation_valid = false;
+                    // 仅记录待提交Store，真正写内存在commit阶段进行。
+                    state.store_buffer->add_store(instruction, addr, store_value, inst.memory_access_size);
                 }
                 break;
 

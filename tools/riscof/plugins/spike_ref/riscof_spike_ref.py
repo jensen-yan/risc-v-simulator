@@ -112,6 +112,7 @@ class spike_ref(pluginTemplate):
 
             run_cmd = [
                 self.spike,
+                "--misaligned",
                 f"--isa={testentry['isa'].lower()}",
                 f"+signature={sig_path}",
                 f"+signature-granularity={self.signature_granularity}",

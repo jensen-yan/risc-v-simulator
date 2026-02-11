@@ -73,6 +73,8 @@ void printUsage(const char* programName) {
     std::cout << "  -s, --step                   Step-by-step execution mode\n";
     std::cout << "  -d, --debug                  Debug mode\n";
     std::cout << "  -m SIZE                      Set memory size in bytes\n";
+    std::cout << "  --max-instructions=N         In-order max instruction limit (0=disable)\n";
+    std::cout << "  --max-ooo-cycles=N           Out-of-order max cycle limit (0=disable)\n";
     std::cout << "  -e, --elf                    Load ELF file (auto detect)\n";
     std::cout << "  --ooo                        Use out-of-order CPU (default)\n";
     std::cout << "  --in-order                   Use in-order CPU\n";
@@ -131,6 +133,8 @@ int main(int argc, char* argv[]) {
     bool forceElf = false;
     size_t memorySize = Memory::DEFAULT_SIZE;
     bool memorySizeSpecified = false;
+    uint64_t maxInOrderInstructions = 5000000;
+    uint64_t maxOutOfOrderCycles = 50000;
     CpuType cpuType = CpuType::OUT_OF_ORDER;  // 默认使用乱序执行CPU
     
     // 增强调试参数
@@ -169,6 +173,10 @@ int main(int argc, char* argv[]) {
         } else if (arg == "-m" && i + 1 < argc) {
             memorySize = std::stoul(argv[++i]);
             memorySizeSpecified = true;
+        } else if (arg.find("--max-instructions=") == 0) {
+            maxInOrderInstructions = std::stoull(arg.substr(19), nullptr, 0);
+        } else if (arg.find("--max-ooo-cycles=") == 0) {
+            maxOutOfOrderCycles = std::stoull(arg.substr(17), nullptr, 0);
         } else if (arg.find("--debug-flags=") == 0) {
             debugCategories = arg.substr(14);  // 去掉 "--debug-flags=" 前缀
             debugMode = true;  // 自动启用调试模式
@@ -228,6 +236,8 @@ int main(int argc, char* argv[]) {
 
         // 创建模拟器
         Simulator simulator(memorySize, cpuType);
+        simulator.setMaxInOrderInstructions(maxInOrderInstructions);
+        simulator.setMaxOutOfOrderCycles(maxOutOfOrderCycles);
         if (tohostAddrSet || fromhostAddrSet) {
             if (!tohostAddrSet || !fromhostAddrSet) {
                 std::cerr << "Error: --tohost-addr and --fromhost-addr must be provided together\n";

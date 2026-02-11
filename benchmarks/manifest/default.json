@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "description": "默认性能分析基准集合：现有 riscv-tests + CoreMark + Embench-IoT",
+  "benchmarks": [
+    {
+      "suite": "riscv-tests",
+      "name": "dhrystone",
+      "path": "riscv-tests/benchmarks/dhrystone.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "mm",
+      "path": "riscv-tests/benchmarks/mm.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "qsort",
+      "path": "riscv-tests/benchmarks/qsort.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "rsort",
+      "path": "riscv-tests/benchmarks/rsort.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "spmv",
+      "path": "riscv-tests/benchmarks/spmv.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "memcpy",
+      "path": "riscv-tests/benchmarks/memcpy.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "vvadd",
+      "path": "riscv-tests/benchmarks/vvadd.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "towers",
+      "path": "riscv-tests/benchmarks/towers.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "multiply",
+      "path": "riscv-tests/benchmarks/multiply.riscv"
+    },
+    {
+      "suite": "coremark",
+      "name": "coremark",
+      "path": "benchmarks/build/coremark/coremark.riscv",
+      "optional": true
+    },
+    {
+      "suite": "embench-iot",
+      "name": "embench",
+      "glob": "benchmarks/build/embench-iot/*.elf",
+      "optional": true
+    }
+  ]
+}

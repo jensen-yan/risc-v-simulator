@@ -47,6 +47,10 @@ public:
     bool endedOnZeroInstruction() const;
     bool isHaltedByInstructionLimit() const { return halted_by_instruction_limit_; }
     bool isHaltedByCycleLimit() const { return halted_by_cycle_limit_; }
+    void setMaxInOrderInstructions(uint64_t limit) { max_in_order_instructions_ = limit; }
+    void setMaxOutOfOrderCycles(uint64_t limit) { max_out_of_order_cycles_ = limit; }
+    uint64_t getMaxInOrderInstructions() const { return max_in_order_instructions_; }
+    uint64_t getMaxOutOfOrderCycles() const { return max_out_of_order_cycles_; }
     
     // 调试功能
     void dumpRegisters() const;
@@ -67,6 +71,9 @@ public:
     ICpuInterface* getCpu() { return cpu_.get(); }
     
 private:
+    static constexpr uint64_t kDefaultMaxInOrderInstructions = 5000000;
+    static constexpr uint64_t kDefaultMaxOutOfOrderCycles = 50000;
+
     // 主CPU内存和CPU
     std::shared_ptr<Memory> memory_;
     std::unique_ptr<ICpuInterface> cpu_;
@@ -82,12 +89,11 @@ private:
 
     bool halted_by_instruction_limit_ = false;
     bool halted_by_cycle_limit_ = false;
+    uint64_t max_in_order_instructions_ = kDefaultMaxInOrderInstructions;
+    uint64_t max_out_of_order_cycles_ = kDefaultMaxOutOfOrderCycles;
     
     // 辅助方法
     std::vector<uint8_t> loadBinaryFile(const std::string& filename);
-
-    static constexpr uint64_t kMaxInOrderInstructions = 5000000;
-    static constexpr uint64_t kMaxOutOfOrderCycles = 50000;
 };
 
 } // namespace riscv

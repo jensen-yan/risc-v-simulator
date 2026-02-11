@@ -132,18 +132,20 @@ void Simulator::run() {
         step();
 
         if (cpuType_ == CpuType::IN_ORDER &&
-            cpu_->getInstructionCount() > kMaxInOrderInstructions) {
+            max_in_order_instructions_ > 0 &&
+            cpu_->getInstructionCount() > max_in_order_instructions_) {
             LOGW(SYSTEM, "instruction count exceeds limit (%llu), auto halt",
-                    static_cast<unsigned long long>(kMaxInOrderInstructions));
+                    static_cast<unsigned long long>(max_in_order_instructions_));
             cpu_->requestHalt();
             halted_by_instruction_limit_ = true;
             break;
         }
 
         if (cpuType_ == CpuType::OUT_OF_ORDER &&
-            cycle_count_ > kMaxOutOfOrderCycles) {
+            max_out_of_order_cycles_ > 0 &&
+            cycle_count_ > max_out_of_order_cycles_) {
             LOGW(SYSTEM, "cycle count exceeds limit (%llu), auto halt",
-                    static_cast<unsigned long long>(kMaxOutOfOrderCycles));
+                    static_cast<unsigned long long>(max_out_of_order_cycles_));
             cpu_->requestHalt();
             halted_by_cycle_limit_ = true;
             break;

@@ -124,6 +124,30 @@ sudo apt install lcov
 
 提示：运行 riscv-tests 时常用 `-m 2164260864`（2GB）确保地址范围充足；默认内存为 1MB，可按需调整。
 
+## 性能基准（CoreMark + Embench-IoT + 现有子项）
+
+已新增统一 benchmark 工作流，详情见 `benchmarks/README.md`。快速流程：
+
+```bash
+# 1) 拉取外部源码
+./tools/benchmarks/fetch_external_benchmarks.sh
+
+# 2) 构建 CoreMark（裸机）
+./tools/benchmarks/build_coremark.sh
+
+# 3) 构建 Embench-IoT（或导入已有产物）
+./tools/benchmarks/build_embench_iot.sh
+# ./tools/benchmarks/import_embench_binaries.sh --src <embench_build_dir>
+
+# 4) 统一跑分（in-order + ooo）并导出 CSV/JSON
+python3 ./tools/benchmarks/run_perf_suite.py \
+  --manifest benchmarks/manifest/default.json \
+  --cpu-mode both \
+  --max-instructions 50000000 \
+  --max-ooo-cycles 500000 \
+  --output-dir benchmarks/results/latest
+```
+
 ## RISCOF 架构测试（DUT vs Spike）
 
 仓库已提供最小可用配置，目录：`tools/riscof/`。

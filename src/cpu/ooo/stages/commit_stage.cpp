@@ -8,6 +8,10 @@ namespace riscv {
 
 namespace {
 constexpr uint8_t kFenceIFunct3 = 0b001;
+constexpr uint32_t kMcycleCsrAddr = 0xB00;
+constexpr uint32_t kMinstretCsrAddr = 0xB02;
+constexpr uint32_t kCycleCsrAddr = 0xC00;
+constexpr uint32_t kInstretCsrAddr = 0xC02;
 
 void writeAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 width, uint64_t value) {
     switch (width) {
@@ -20,6 +24,15 @@ void writeAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Funct
         default:
             throw IllegalInstructionException("A扩展仅支持W/D宽度");
     }
+}
+
+void syncBasicPerfCounters(CPUState& state) {
+    // 与 in-order 保持一致：四个基础计数器统一跟随已提交指令数。
+    const uint64_t retired = state.instruction_count;
+    csr::write(state.csr_registers, kMcycleCsrAddr, retired);
+    csr::write(state.csr_registers, kMinstretCsrAddr, retired);
+    csr::write(state.csr_registers, kCycleCsrAddr, retired);
+    csr::write(state.csr_registers, kInstretCsrAddr, retired);
 }
 }  // namespace
 
@@ -99,6 +112,7 @@ void CommitStage::execute(CPUState& state) {
                                committed_inst->get_pc(),
                                committed_inst->get_trap_cause(),
                                committed_inst->get_trap_tval());
+            syncBasicPerfCounters(state);
 
             if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
                 LOGT(DIFFTEST, "inst=%" PRId64 " [COMMIT_TRACK] commit count=%" PRId64,
@@ -264,6 +278,9 @@ void CommitStage::execute(CPUState& state) {
                    static_cast<uint8_t>(decoded_info.funct3) == kFenceIFunct3) {
             should_stop_commit = handle_fencei(state, committed_inst->get_pc(), decoded_info.is_compressed);
         }
+
+        // 提交后同步基础性能计数器，保证CSR读值与顺序核一致。
+        syncBasicPerfCounters(state);
 
         // DiffTest: 在提交阶段所有体系结构状态更新完成后再做比较
         if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {

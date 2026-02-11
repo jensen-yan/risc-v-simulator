@@ -358,8 +358,13 @@ RSEntry ReservationStation::select_ready_instruction() const {
             bool ready = is_instruction_ready(rs_entries[i]);
             bool is_executing = (rs_entries[i]->get_status() == DynamicInst::Status::EXECUTING);
             
-            // 只调度准备好且没有在执行的指令
+            // 只调度准备好、未在执行、且对应执行单元当前可用的指令。
+            // 否则会出现“最老 ready 指令因单元忙而卡住，导致后续可执行指令也无法发射”的活锁。
             if (ready && !is_executing) {
+                const auto unit_type = rs_entries[i]->get_required_execution_unit();
+                if (!is_execution_unit_available(unit_type)) {
+                    continue;
+                }
                 int priority = calculate_priority(rs_entries[i]);
                 if (priority < best_priority) {
                     best_priority = priority;

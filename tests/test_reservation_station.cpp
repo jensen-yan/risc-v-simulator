@@ -301,4 +301,31 @@ TEST_F(ReservationStationTest, PriorityScheduling) {
         << "应该调度正确的指令";
 }
 
+// 测试10：当最老ready指令执行单元忙碌时，应该继续尝试后续可调度指令
+TEST_F(ReservationStationTest, SkipBusyUnitAndDispatchOtherReadyInstruction) {
+    // 先占用唯一的LOAD执行单元
+    auto busy_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
+    auto busy_load_inst = createDynamicInst(busy_load, 32, 0, 40, true, true, 0x1000, 1);
+    EXPECT_TRUE(rs.issue_instruction(busy_load_inst).success);
+    auto first_dispatch = rs.dispatch_instruction();
+    EXPECT_TRUE(first_dispatch.success);
+    EXPECT_EQ(first_dispatch.unit_type, ExecutionUnitType::LOAD);
+
+    // 再放入一条“更老”的ready LOAD（会因LOAD单元忙而暂时不可调度）
+    auto blocked_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 3, 4, 0);
+    auto blocked_load_inst = createDynamicInst(blocked_load, 41, 0, 42, true, true, 0x1004, 2);
+    EXPECT_TRUE(rs.issue_instruction(blocked_load_inst).success);
+
+    // 放入一条“更年轻”的ready STORE（STORE单元空闲，应被调度）
+    auto ready_store = createInstruction(InstructionType::S_TYPE, Opcode::STORE, 0, 5, 6);
+    auto ready_store_inst = createDynamicInst(ready_store, 43, 44, 0, true, true, 0x1008, 3);
+    EXPECT_TRUE(rs.issue_instruction(ready_store_inst).success);
+
+    auto second_dispatch = rs.dispatch_instruction();
+    EXPECT_TRUE(second_dispatch.success) << "应跳过执行单元忙的LOAD，继续调度可执行STORE";
+    EXPECT_EQ(second_dispatch.unit_type, ExecutionUnitType::STORE);
+    EXPECT_EQ(second_dispatch.instruction->get_instruction_id(),
+              ready_store_inst->get_instruction_id());
+}
+
 } // namespace riscv

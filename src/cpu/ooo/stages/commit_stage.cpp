@@ -105,37 +105,13 @@ void CommitStage::execute(CPUState& state) {
             } else if (decoded_info.opcode == Opcode::STORE_FP) {
                 // 无寄存器写回
             } else {
-                if (committed_inst->has_fp_execute_info()) {
-                    fp_info = committed_inst->get_fp_execute_info();
-                } else {
-                    // 防御性回退：理论上浮点执行结果应在 execute 阶段产出并随 DynamicInst 传递。
-                    LOGW(COMMIT, "missing fp execute info at commit, fallback to recompute");
-                    const uint8_t current_frm =
-                        static_cast<uint8_t>(csr::read(state.csr_registers, csr::kFrm) & 0x7U);
-                    InstructionExecutor::FpExecuteResult fallback_result{};
-                    if (decoded_info.opcode == Opcode::FMADD ||
-                        decoded_info.opcode == Opcode::FMSUB ||
-                        decoded_info.opcode == Opcode::FNMSUB ||
-                        decoded_info.opcode == Opcode::FNMADD) {
-                        fallback_result = InstructionExecutor::executeFusedFPOperation(
-                            decoded_info,
-                            state.arch_fp_registers[decoded_info.rs1],
-                            state.arch_fp_registers[decoded_info.rs2],
-                            state.arch_fp_registers[decoded_info.rs3],
-                            current_frm);
-                    } else {
-                        fallback_result = InstructionExecutor::executeFPOperation(
-                            decoded_info,
-                            state.arch_fp_registers[decoded_info.rs1],
-                            state.arch_fp_registers[decoded_info.rs2],
-                            state.arch_registers[decoded_info.rs1],
-                            current_frm);
-                    }
-                    fp_info.value = fallback_result.value;
-                    fp_info.write_int_reg = fallback_result.write_int_reg;
-                    fp_info.write_fp_reg = fallback_result.write_fp_reg;
-                    fp_info.fflags = fallback_result.fflags;
+                if (!committed_inst->has_fp_execute_info()) {
+                    LOGE(COMMIT, "missing fp execute info at commit, pc=0x%" PRIx64,
+                         committed_inst->get_pc());
+                    handle_exception(state, "missing fp execute info at commit", committed_inst->get_pc());
+                    break;
                 }
+                fp_info = committed_inst->get_fp_execute_info();
             }
 
             if (fp_info.fflags != 0) {

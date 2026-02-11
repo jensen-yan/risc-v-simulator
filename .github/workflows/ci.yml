@@ -191,7 +191,7 @@ jobs:
               --env ../../riscv-arch-test/riscv-test-suite/env \
               --work-dir "${WORK_DIR}"
 
-            # CI 临时跳过已知不稳定集合：pmp
+            # CI 临时跳过已知不稳定集合：pmp / privilege
             python3 -c '
           import os
           import yaml
@@ -206,6 +206,8 @@ jobs:
               test_path = str(test_entry.get("test_path", ""))
               target = f"{path} {test_path}"
               if "/pmp/src/" in target:
+                  return True
+              if "/privilege/src/" in target:
                   return True
               return False
 

@@ -41,6 +41,15 @@ void executeAtomicOperation(ExecutionUnit& unit, const DynamicInstPtr& instructi
     const auto amo_result = InstructionExecutor::executeAtomicOperation(
         inst, memory_value, instruction->get_src2_value(), reservation_hit);
 
+    // LR/SC 的成败判定依赖当前reservation状态，需在执行阶段即时更新。
+    if (amo_result.acquire_reservation) {
+        state.reservation_valid = true;
+        state.reservation_addr = addr;
+    }
+    if (amo_result.release_reservation) {
+        state.reservation_valid = false;
+    }
+
     DynamicInst::AtomicExecuteInfo atomic_info{};
     atomic_info.acquire_reservation = amo_result.acquire_reservation;
     atomic_info.release_reservation = amo_result.release_reservation;

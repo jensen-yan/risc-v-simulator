@@ -387,8 +387,12 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state) {
     
     // 6. 清空Store Buffer（刷新时清除所有推测性Store）
     state.store_buffer->flush();
+
+    // 7. 清除LR/SC预留状态，避免被冲刷的推测性LR残留可见状态。
+    state.reservation_valid = false;
+    state.reservation_addr = 0;
     
-    // 7. 重置所有执行单元（安全，因为当前指令已提交）
+    // 8. 重置所有执行单元（安全，因为当前指令已提交）
     reset_execution_units(state);
     
     LOGT(COMMIT, "pipeline flush completed, restart fetch");

@@ -133,12 +133,21 @@ void CommitStage::execute(CPUState& state) {
                     break;
                 }
 
-                if (decoded_info.opcode == Opcode::STORE_FP) {
-                    InstructionExecutor::storeFPToMemory(
-                        state.memory, memory_info.memory_address, memory_info.memory_value, decoded_info.funct3);
+                const uint8_t store_size = memory_info.memory_size != 0
+                    ? memory_info.memory_size
+                    : decoded_info.memory_access_size;
+
+                if (state.l1d_cache) {
+                    state.l1d_cache->commitStore(
+                        state.memory, memory_info.memory_address, store_size, memory_info.memory_value);
                 } else {
-                    InstructionExecutor::storeToMemory(
-                        state.memory, memory_info.memory_address, memory_info.memory_value, decoded_info.funct3);
+                    if (decoded_info.opcode == Opcode::STORE_FP) {
+                        InstructionExecutor::storeFPToMemory(
+                            state.memory, memory_info.memory_address, memory_info.memory_value, decoded_info.funct3);
+                    } else {
+                        InstructionExecutor::storeToMemory(
+                            state.memory, memory_info.memory_address, memory_info.memory_value, decoded_info.funct3);
+                    }
                 }
                 state.reservation_valid = false;
                 state.perf_counters.increment(PerfCounterId::STORES_COMMITTED);
@@ -528,6 +537,8 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state, FlushReason reaso
     state.icache_wait_cycles = 0;
     state.icache_request_pending = false;
     state.icache_request_pc = 0;
+    state.icache_pending_instruction_valid = false;
+    state.icache_pending_instruction = 0;
 
     // 7. 清除LR/SC预留状态，避免被冲刷的推测性LR残留可见状态。
     state.reservation_valid = false;

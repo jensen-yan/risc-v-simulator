@@ -93,12 +93,14 @@ struct CPUState {
     // 分支预测器（Fetch使用；Commit更新；flush时保留状态）
     std::unique_ptr<BranchPredictor> branch_predictor;
 
-    // L1 cache（时序模型）
+    // L1 cache（时序+功能模型）
     std::unique_ptr<BlockingCache> l1i_cache;
     std::unique_ptr<BlockingCache> l1d_cache;
     int icache_wait_cycles;
     bool icache_request_pending;
     uint64_t icache_request_pc;
+    bool icache_pending_instruction_valid;
+    Instruction icache_pending_instruction;
     
     // 执行单元
     std::array<ExecutionUnit, 2> alu_units;      // 2个ALU单元
@@ -131,6 +133,8 @@ struct CPUState {
         icache_wait_cycles(0),
         icache_request_pending(false),
         icache_request_pc(0),
+        icache_pending_instruction_valid(false),
+        icache_pending_instruction(0),
         branch_mispredicts(0), pipeline_stalls(0),
         reservation_valid(false), reservation_addr(0),
         global_instruction_id(0) {

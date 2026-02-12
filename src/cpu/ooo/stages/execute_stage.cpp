@@ -354,7 +354,8 @@ bool ExecuteStage::start_or_wait_dcache_access(ExecutionUnit& unit,
         return true;
     }
 
-    const auto cache_result = state.l1d_cache->access(unit.load_address, unit.load_size, access_type);
+    const auto cache_result = state.l1d_cache->access(
+        state.memory, unit.load_address, unit.load_size, access_type);
     if (cache_result.blocked) {
         unit.waiting_on_dcache = true;
         unit.remaining_cycles = 1;
@@ -475,37 +476,116 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
         }
 
         memory_info.store_forwarded = false;
-        if (!start_or_wait_dcache_access(
-                unit, state, CacheAccessType::Read, PerfCounterId::CACHE_L1D_STALL_CYCLES_LOAD)) {
-            return LoadExecutionResult::WaitingForCache;
-        }
-    }
+        try {
+            uint64_t raw_value = 0;
+            CacheAccessResult cache_result{};
+            if (state.l1d_cache) {
+                cache_result = state.l1d_cache->load(state.memory, addr, access_size, raw_value);
+            } else {
+                switch (access_size) {
+                    case 1:
+                        raw_value = state.memory->readByte(addr);
+                        break;
+                    case 2:
+                        raw_value = state.memory->readHalfWord(addr);
+                        break;
+                    case 4:
+                        raw_value = state.memory->readWord(addr);
+                        break;
+                    case 8:
+                        raw_value = state.memory->read64(addr);
+                        break;
+                    default:
+                        throw SimulatorException("unsupported load size: " + std::to_string(access_size));
+                }
+                cache_result.hit = true;
+                cache_result.latency_cycles = 1;
+            }
 
-    try {
-        if (inst.opcode == Opcode::LOAD_FP) {
-            unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);
-            LOGT(EXECUTE, "fp memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+            if (cache_result.blocked) {
+                unit.waiting_on_dcache = true;
+                unit.remaining_cycles = 1;
+                state.perf_counters.increment(PerfCounterId::CACHE_L1D_STALL_CYCLES_LOAD);
+                return LoadExecutionResult::WaitingForCache;
+            }
+
+            state.perf_counters.increment(PerfCounterId::CACHE_L1D_ACCESSES);
+            state.perf_counters.increment(PerfCounterId::CACHE_L1D_READ_ACCESSES);
+            if (cache_result.hit) {
+                state.perf_counters.increment(PerfCounterId::CACHE_L1D_HITS);
+            } else {
+                state.perf_counters.increment(PerfCounterId::CACHE_L1D_MISSES);
+            }
+            if (cache_result.dirty_eviction) {
+                state.perf_counters.increment(PerfCounterId::CACHE_L1D_DIRTY_EVICTIONS);
+            }
+
+            if (inst.opcode == Opcode::LOAD_FP) {
+                if (access_size == 4) {
+                    unit.result = 0xFFFFFFFF00000000ULL | (raw_value & 0xFFFFFFFFULL);
+                } else {
+                    unit.result = raw_value;
+                }
+            } else if (inst.is_signed_load) {
+                switch (access_size) {
+                    case 1:
+                        unit.result = static_cast<uint64_t>(static_cast<int8_t>(raw_value & 0xFF));
+                        break;
+                    case 2:
+                        unit.result = static_cast<uint64_t>(static_cast<int16_t>(raw_value & 0xFFFF));
+                        break;
+                    case 4:
+                        unit.result = static_cast<uint64_t>(static_cast<int32_t>(raw_value & 0xFFFFFFFF));
+                        break;
+                    case 8:
+                    default:
+                        unit.result = raw_value;
+                        break;
+                }
+            } else {
+                switch (access_size) {
+                    case 1:
+                        unit.result = raw_value & 0xFF;
+                        break;
+                    case 2:
+                        unit.result = raw_value & 0xFFFF;
+                        break;
+                    case 4:
+                        unit.result = raw_value & 0xFFFFFFFF;
+                        break;
+                    case 8:
+                    default:
+                        unit.result = raw_value;
+                        break;
+                }
+            }
+
             memory_info.memory_value = unit.result;
             state.perf_counters.increment(PerfCounterId::LOADS_FROM_MEMORY);
+            unit.dcache_request_sent = true;
+            unit.waiting_on_dcache = true;
+
+            const int extra_cycles = std::max(0, cache_result.latency_cycles - 1);
+            if (extra_cycles > 0) {
+                unit.remaining_cycles = extra_cycles;
+                state.perf_counters.increment(
+                    PerfCounterId::CACHE_L1D_STALL_CYCLES_LOAD, static_cast<uint64_t>(extra_cycles));
+                return LoadExecutionResult::WaitingForCache;
+            }
+
             unit.waiting_on_dcache = false;
             return LoadExecutionResult::LoadedFromMemory;
+        } catch (const SimulatorException& e) {
+            unit.has_exception = true;
+            unit.exception_msg = e.what();
+            unit.result = 0;
+            unit.waiting_on_dcache = false;
+            return LoadExecutionResult::Exception;
         }
-
-        LOGT(EXECUTE, "store-to-load forwarding miss, read from memory");
-        unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
-
-        LOGT(EXECUTE, "memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
-        memory_info.memory_value = unit.result;
-        state.perf_counters.increment(PerfCounterId::LOADS_FROM_MEMORY);
-        unit.waiting_on_dcache = false;
-        return LoadExecutionResult::LoadedFromMemory;
-    } catch (const SimulatorException& e) {
-        unit.has_exception = true;
-        unit.exception_msg = e.what();
-        unit.result = 0;
-        unit.waiting_on_dcache = false;
-        return LoadExecutionResult::Exception;
     }
+
+    unit.waiting_on_dcache = false;
+    return LoadExecutionResult::LoadedFromMemory;
 }
 
 } // namespace riscv 

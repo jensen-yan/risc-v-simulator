@@ -56,6 +56,8 @@ public:
     int getExitCode() const { return exit_code_; }
     void resetExitStatus() { should_exit_ = false; exit_code_ = 0; }
     void setHostCommAddresses(Address tohostAddr, Address fromhostAddr);
+    Address getTohostAddr() const { return tohost_addr_; }
+    Address getFromhostAddr() const { return fromhost_addr_; }
     
 private:
     std::unique_ptr<uint8_t, decltype(&std::free)> memory_;

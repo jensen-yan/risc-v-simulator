@@ -328,13 +328,12 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                     unit.is_jump = true;  // 无条件跳转总是需要改变PC
                     instruction->set_jump_info(true, unit.jump_target);
 
-                    // 无条件跳转指令：记录预测错误但不在执行阶段刷新
+                    // 无条件跳转指令：只标记重定向，刷新在提交阶段统一进行
                     LOGT(EXECUTE, "unconditional jump, target=0x%" PRIx64 " (pc=0x%" PRIx64 "), flush at commit",
                          unit.jump_target, instruction->get_pc());
 
                     // 注意：不在执行阶段刷新，让指令正常完成并提交
                     // 流水线刷新将在提交阶段进行
-                    state.recordBranchMispredict();  // 统计预测错误
                 }
                 break;
 

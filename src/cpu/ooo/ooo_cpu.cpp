@@ -78,6 +78,27 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     clearQueue(state.cdb_queue);
 }
 
+void sampleRobOccupancy(CPUState& state) {
+    if (!state.reorder_buffer) {
+        return;
+    }
+
+    const uint64_t used_entries = static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES -
+                                                        state.reorder_buffer->get_free_entry_count());
+    state.perf_counters.increment(PerfCounterId::ROB_OCCUPANCY_SAMPLES);
+    state.perf_counters.increment(PerfCounterId::ROB_OCCUPANCY_TOTAL, used_entries);
+
+    if (used_entries <= 8) {
+        state.perf_counters.increment(PerfCounterId::ROB_OCCUPANCY_BIN_0_8);
+    } else if (used_entries <= 16) {
+        state.perf_counters.increment(PerfCounterId::ROB_OCCUPANCY_BIN_9_16);
+    } else if (used_entries <= 24) {
+        state.perf_counters.increment(PerfCounterId::ROB_OCCUPANCY_BIN_17_24);
+    } else {
+        state.perf_counters.increment(PerfCounterId::ROB_OCCUPANCY_BIN_25_32);
+    }
+}
+
 } // namespace
 
 OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
@@ -130,6 +151,7 @@ void OutOfOrderCPU::step() {
         // 增加周期计数
         cpu_state_.cycle_count++;
         cpu_state_.perf_counters.increment(PerfCounterId::CYCLES);
+        sampleRobOccupancy(cpu_state_);
     } catch (const MemoryException& e) {
         handle_exception(e.what(), cpu_state_.pc);
     } catch (const SimulatorException& e) {
@@ -297,7 +319,7 @@ ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
     stats.push_back({"cycles", cpu_state_.perf_counters.value(PerfCounterId::CYCLES),
                     "Elapsed cycles"});
     stats.push_back({"branch_mispredicts", cpu_state_.perf_counters.value(PerfCounterId::BRANCH_MISPREDICTS),
-                    "Branch mispredict count"});
+                    "Conditional branch mispredict count"});
     stats.push_back({"pipeline_stalls", cpu_state_.perf_counters.value(PerfCounterId::PIPELINE_STALLS),
                     "Pipeline stall count"});
 
@@ -327,6 +349,15 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
     os << std::left << std::setw(40) << "cpu.ipc"
        << std::right << std::setw(16) << std::fixed << std::setprecision(6) << ipc
        << " # Retired instructions per cycle\n";
+
+    const uint64_t rob_samples = cpu_state_.perf_counters.value(PerfCounterId::ROB_OCCUPANCY_SAMPLES);
+    const uint64_t rob_total = cpu_state_.perf_counters.value(PerfCounterId::ROB_OCCUPANCY_TOTAL);
+    const double rob_avg = rob_samples == 0 ? 0.0
+                                            : static_cast<double>(rob_total) / static_cast<double>(rob_samples);
+    os << std::left << std::setw(40) << "cpu.rob.occupancy_avg"
+       << std::right << std::setw(16) << std::fixed << std::setprecision(6) << rob_avg
+       << " # Average occupied ROB entries per cycle\n";
+
     os << "----------- End Simulation Statistics -----------\n";
 }
 

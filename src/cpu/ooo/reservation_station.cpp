@@ -325,6 +325,28 @@ DynamicInstPtr ReservationStation::get_entry(RSEntry rs_entry) const {
     return rs_entries[rs_entry];
 }
 
+size_t ReservationStation::get_occupied_entry_count() const {
+    size_t occupied = 0;
+    for (const auto& entry : rs_entries) {
+        if (entry) {
+            ++occupied;
+        }
+    }
+    return occupied;
+}
+
+size_t ReservationStation::get_ready_entry_count() const {
+    size_t ready = 0;
+    for (const auto& entry : rs_entries) {
+        if (entry &&
+            entry->get_status() != DynamicInst::Status::EXECUTING &&
+            is_instruction_ready(entry)) {
+            ++ready;
+        }
+    }
+    return ready;
+}
+
 bool ReservationStation::is_entry_ready(RSEntry rs_entry) const {
     if (rs_entry >= MAX_RS_ENTRIES) return false;
     DynamicInstPtr inst = rs_entries[rs_entry];

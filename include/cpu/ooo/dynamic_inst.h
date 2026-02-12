@@ -72,10 +72,11 @@ public:
         uint8_t memory_size;                   // 访问大小（字节）
         bool address_ready;                    // 地址是否准备好
         bool store_forwarded;                  // 是否通过Store-to-Load转发
+        uint32_t replay_count;                 // Load replay次数（用于分布统计）
         
         MemoryInfo() : is_memory_op(false), is_load(false), is_store(false),
                       memory_address(0), memory_value(0), memory_size(0),
-                      address_ready(false), store_forwarded(false) {}
+                      address_ready(false), store_forwarded(false), replay_count(0) {}
     };
 
     struct FpExecuteInfo {

@@ -42,6 +42,9 @@ private:
     
     // 执行单元完成时的公共处理逻辑
     void complete_execution_unit(ExecutionUnit& unit, ExecutionUnitType unit_type, size_t unit_index, CPUState& state);
+
+    // 记录load replay分布桶
+    void record_load_replay_bucket(const DynamicInstPtr& instruction, CPUState& state);
 };
 
 } // namespace riscv 

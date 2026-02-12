@@ -93,7 +93,7 @@ struct CPUState {
     
     // 性能统计
     PerfCounterBank perf_counters; // 结构化性能计数器
-    uint64_t branch_mispredicts;   // 分支预测错误次数
+    uint64_t branch_mispredicts;   // 条件分支预测错误次数（仅B-type）
     uint64_t pipeline_stalls;      // 流水线停顿次数
 
     // A扩展 LR/SC 预留状态

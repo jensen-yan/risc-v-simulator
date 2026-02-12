@@ -73,6 +73,18 @@ void ExecuteStage::execute(CPUState& state) {
     } else {
         LOGT(EXECUTE, "no ready instruction in reservation station");
         state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
+
+        const size_t rs_occupied = state.reservation_station->get_occupied_entry_count();
+        if (rs_occupied == 0) {
+            state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
+        } else {
+            const size_t rs_ready = state.reservation_station->get_ready_entry_count();
+            if (rs_ready == 0) {
+                state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
+            } else {
+                state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
+            }
+        }
     }
 }
 
@@ -141,6 +153,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     reset_single_unit(unit);
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waits on earlier STORE, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
+                    blocked_inst->get_memory_info().replay_count++;
                     state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
                     continue; // 跳过完成处理
                 }
@@ -155,12 +168,14 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     reset_single_unit(unit);
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
+                    blocked_inst->get_memory_info().replay_count++;
                     state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
                     continue;
                 }
                 if (load_result == LoadExecutionResult::Exception) {
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu raised exception: %s",
                         unit.instruction->get_instruction_id(), i, unit.exception_msg.c_str());
+                    record_load_replay_bucket(unit.instruction, state);
                     complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
                     continue;
                 }
@@ -169,6 +184,8 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     unit.instruction->get_instruction_id(),
                     i, (load_result == LoadExecutionResult::Forwarded ? "(store-forwarded)" : "(loaded-from-memory)"),
                     unit.result);
+
+                record_load_replay_bucket(unit.instruction, state);
                 
                 complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
             }
@@ -266,6 +283,26 @@ void ExecuteStage::complete_execution_unit(ExecutionUnit& unit, ExecutionUnitTyp
     
     // 释放保留站中的执行单元状态
     state.reservation_station->release_execution_unit(unit_type, unit_index);
+}
+
+void ExecuteStage::record_load_replay_bucket(const DynamicInstPtr& instruction, CPUState& state) {
+    if (!instruction) {
+        return;
+    }
+
+    const auto& memory_info = instruction->get_memory_info();
+    const uint32_t replay_count = memory_info.replay_count;
+    if (replay_count == 0) {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_0);
+    } else if (replay_count == 1) {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_1);
+    } else if (replay_count == 2) {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_2);
+    } else if (replay_count == 3) {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_3);
+    } else {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_4_PLUS);
+    }
 }
 
 void ExecuteStage::reset_execution_units(CPUState& state) {

@@ -103,6 +103,10 @@ public:
     
     // 获取指定表项的详细信息
     DynamicInstPtr get_entry(RSEntry rs_entry) const;
+
+    // 统计查询（用于性能分析）
+    size_t get_occupied_entry_count() const;
+    size_t get_ready_entry_count() const;
     
     // 检查表项是否准备好执行
     bool is_entry_ready(RSEntry rs_entry) const;

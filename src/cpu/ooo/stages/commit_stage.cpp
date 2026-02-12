@@ -248,7 +248,10 @@ void CommitStage::execute(CPUState& state) {
         // 处理跳转指令：只有is_jump=true的指令才会改变PC
         if (committed_inst->is_jump()) {
             state.pc = committed_inst->get_jump_target();
-            state.perf_counters.increment(PerfCounterId::JUMPS_COMMITTED);
+            state.perf_counters.increment(PerfCounterId::CONTROL_REDIRECTS);
+            if (decoded_info.opcode == Opcode::JAL || decoded_info.opcode == Opcode::JALR) {
+                state.perf_counters.increment(PerfCounterId::UNCONDITIONAL_REDIRECTS);
+            }
             LOGT(COMMIT, "inst=%" PRId64 " jump to 0x%" PRIx64,
                 committed_inst->get_instruction_id(), committed_inst->get_jump_target());
             

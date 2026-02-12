@@ -38,6 +38,8 @@ void resetSingleExecutionUnit(ExecutionUnit& unit) {
     unit.is_jump = false;
     unit.load_address = 0;
     unit.load_size = 0;
+    unit.dcache_request_sent = false;
+    unit.waiting_on_dcache = false;
 }
 
 void resetAllExecutionUnits(CPUState& state) {
@@ -47,6 +49,17 @@ void resetAllExecutionUnits(CPUState& state) {
     for (auto& unit : state.store_units) resetSingleExecutionUnit(unit);
 }
 
+BlockingCacheConfig createDefaultL1CacheConfig() {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 32 * 1024;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 4;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.write_policy = CacheWritePolicy::WriteBackWriteAllocate;
+    return cfg;
+}
+
 void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& memory) {
     state.register_rename = std::make_unique<RegisterRenameUnit>();
     state.reservation_station = std::make_unique<ReservationStation>();
@@ -54,6 +67,9 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     state.store_buffer = std::make_unique<StoreBuffer>();
     state.syscall_handler = std::make_unique<SyscallHandler>(memory);
     state.branch_predictor = std::make_unique<BranchPredictor>();
+    const auto cache_cfg = createDefaultL1CacheConfig();
+    state.l1i_cache = std::make_unique<BlockingCache>(cache_cfg);
+    state.l1d_cache = std::make_unique<BlockingCache>(cache_cfg);
 }
 
 void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memory) {
@@ -64,6 +80,9 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.branch_mispredicts = 0;
     state.pipeline_stalls = 0;
     state.perf_counters.reset();
+    state.icache_wait_cycles = 0;
+    state.icache_request_pending = false;
+    state.icache_request_pc = 0;
     state.reservation_valid = false;
     state.reservation_addr = 0;
     state.global_instruction_id = 0;
@@ -142,6 +161,13 @@ void OutOfOrderCPU::step() {
     }
     
     try {
+        if (cpu_state_.l1i_cache) {
+            cpu_state_.l1i_cache->tick();
+        }
+        if (cpu_state_.l1d_cache) {
+            cpu_state_.l1d_cache->tick();
+        }
+
         // 流水线阶段执行（反向顺序以维护依赖关系）
         commit_stage_->execute(cpu_state_);    // 提交阶段
         writeback_stage_->execute(cpu_state_); // 写回阶段
@@ -298,6 +324,16 @@ void OutOfOrderCPU::flush_pipeline() {
     while (!cpu_state_.cdb_queue.empty()) {
         cpu_state_.cdb_queue.pop();
     }
+
+    if (cpu_state_.l1i_cache) {
+        cpu_state_.l1i_cache->flushInFlight();
+    }
+    if (cpu_state_.l1d_cache) {
+        cpu_state_.l1d_cache->flushInFlight();
+    }
+    cpu_state_.icache_wait_cycles = 0;
+    cpu_state_.icache_request_pending = false;
+    cpu_state_.icache_request_pc = 0;
 }
 
 bool OutOfOrderCPU::predict_branch(uint64_t pc) {

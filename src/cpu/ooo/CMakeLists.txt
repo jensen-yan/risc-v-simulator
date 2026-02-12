@@ -10,4 +10,5 @@ target_sources(risc-v-sim-lib PRIVATE
     store_buffer.cpp
 )
 
+add_subdirectory(cache)
 add_subdirectory(stages)

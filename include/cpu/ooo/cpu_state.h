@@ -11,6 +11,7 @@
 #include "cpu/ooo/ooo_types.h"
 #include "cpu/ooo/dynamic_inst.h"
 #include "cpu/ooo/branch_predictor.h"
+#include "cpu/ooo/cache/blocking_cache.h"
 #include "system/syscall_handler.h"
 #include "common/cpu_interface.h"
 #include <array>
@@ -45,6 +46,8 @@ struct ExecutionUnit {
     // Load指令相关字段
     uint64_t load_address;
     uint8_t load_size;
+    bool dcache_request_sent;
+    bool waiting_on_dcache;
 };
 
 /**
@@ -89,6 +92,13 @@ struct CPUState {
 
     // 分支预测器（Fetch使用；Commit更新；flush时保留状态）
     std::unique_ptr<BranchPredictor> branch_predictor;
+
+    // L1 cache（时序模型）
+    std::unique_ptr<BlockingCache> l1i_cache;
+    std::unique_ptr<BlockingCache> l1d_cache;
+    int icache_wait_cycles;
+    bool icache_request_pending;
+    uint64_t icache_request_pc;
     
     // 执行单元
     std::array<ExecutionUnit, 2> alu_units;      // 2个ALU单元
@@ -118,6 +128,9 @@ struct CPUState {
                           static_cast<uint32_t>(Extension::D) |
                           static_cast<uint32_t>(Extension::C)),
         cpu_interface(nullptr),
+        icache_wait_cycles(0),
+        icache_request_pending(false),
+        icache_request_pc(0),
         branch_mispredicts(0), pipeline_stalls(0),
         reservation_valid(false), reservation_addr(0),
         global_instruction_id(0) {
@@ -160,6 +173,8 @@ private:
             unit.is_jump = false;
             unit.load_address = 0;
             unit.load_size = 0;
+            unit.dcache_request_sent = false;
+            unit.waiting_on_dcache = false;
         };
         
         for (auto& unit : alu_units) initUnit(unit);

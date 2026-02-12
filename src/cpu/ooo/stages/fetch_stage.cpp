@@ -1,6 +1,7 @@
 #include "cpu/ooo/stages/fetch_stage.h"
 #include "cpu/ooo/branch_predictor.h"
 #include "common/debug_types.h"
+#include <algorithm>
 #include <fmt/format.h>
 
 namespace riscv {
@@ -15,11 +16,56 @@ void FetchStage::execute(CPUState& state) {
         LOGT(FETCH, "cpu halted, skip fetch");
         return;
     }
+
+    // I$ miss等待：倒计时到0的这个周期允许继续取指，避免多等一个周期。
+    if (state.icache_wait_cycles > 0) {
+        --state.icache_wait_cycles;
+        state.perf_counters.increment(PerfCounterId::CACHE_L1I_STALL_CYCLES);
+        if (state.icache_wait_cycles > 0) {
+            LOGT(FETCH, "icache waiting, remaining=%d", state.icache_wait_cycles);
+            return;
+        }
+        LOGT(FETCH, "icache wait completed, resume fetch");
+    }
     
     // 如果取指缓冲区有空间，取指令
     if (state.fetch_buffer.size() < MAX_FETCH_BUFFER_SIZE) {
         try {
             const uint64_t fetch_pc = state.pc;
+
+            const bool use_pending_icache_request =
+                state.icache_request_pending && state.icache_request_pc == fetch_pc;
+
+            if (state.l1i_cache && !use_pending_icache_request) {
+                const auto cache_result = state.l1i_cache->access(
+                    fetch_pc, /*size=*/4, CacheAccessType::Read);
+                if (cache_result.blocked) {
+                    state.perf_counters.increment(PerfCounterId::CACHE_L1I_STALL_CYCLES);
+                    LOGT(FETCH, "icache blocked by in-flight miss, pc=0x%" PRIx64, fetch_pc);
+                    return;
+                }
+
+                state.perf_counters.increment(PerfCounterId::CACHE_L1I_ACCESSES);
+                if (cache_result.hit) {
+                    state.perf_counters.increment(PerfCounterId::CACHE_L1I_HITS);
+                } else {
+                    state.perf_counters.increment(PerfCounterId::CACHE_L1I_MISSES);
+                    state.icache_wait_cycles = std::max(0, cache_result.latency_cycles - 1);
+                    state.icache_request_pending = true;
+                    state.icache_request_pc = fetch_pc;
+                    LOGT(FETCH, "icache miss: pc=0x%" PRIx64 ", latency=%d, wait=%d",
+                        fetch_pc, cache_result.latency_cycles, state.icache_wait_cycles);
+                    if (state.icache_wait_cycles > 0) {
+                        return;
+                    }
+                }
+            } else if (use_pending_icache_request) {
+                LOGT(FETCH, "reuse resolved icache miss request, pc=0x%" PRIx64, fetch_pc);
+            }
+
+            state.icache_request_pending = false;
+            state.icache_request_pc = 0;
+
             Instruction raw_inst = state.memory->fetchInstruction(fetch_pc);
             
             // 如果指令为0，可能表明程序结束，但不要立即停机

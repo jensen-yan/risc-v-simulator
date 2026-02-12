@@ -25,6 +25,7 @@ private:
     enum class LoadExecutionResult {
         Forwarded,
         LoadedFromMemory,
+        WaitingForCache,
         BlockedByStore,
         Exception
     };
@@ -33,6 +34,10 @@ private:
     void update_execution_units(CPUState& state);
     ExecutionUnit* get_available_unit(ExecutionUnitType type, CPUState& state);
     LoadExecutionResult perform_load_execution(ExecutionUnit& unit, CPUState& state);
+    bool start_or_wait_dcache_access(ExecutionUnit& unit,
+                                     CPUState& state,
+                                     CacheAccessType access_type,
+                                     PerfCounterId stall_counter_id);
     void reset_execution_units(CPUState& state);
     
     // 执行单元重置的辅助函数

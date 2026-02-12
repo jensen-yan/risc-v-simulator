@@ -99,7 +99,7 @@ TEST_F(OutOfOrderCPUTest, SimpleInstructionExecution) {
     cpu->setPC(0x0);
     
     // 执行几个周期
-    for (int i = 0; i < 10 && !cpu->isHalted(); ++i) {
+    for (int i = 0; i < 200 && !cpu->isHalted(); ++i) {
         cpu->step();
     }
     
@@ -139,7 +139,7 @@ TEST_F(OutOfOrderCPUTest, ImmediateInstructions) {
     cpu->setPC(0x0);
     
     // 执行直到停机
-    for (int i = 0; i < 20 && !cpu->isHalted(); ++i) {
+    for (int i = 0; i < 200 && !cpu->isHalted(); ++i) {
         cpu->step();
     }
     

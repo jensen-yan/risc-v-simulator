@@ -3,6 +3,7 @@
 #include "common/debug_types.h"
 #include "common/types.h"
 #include "core/instruction_executor.h"
+#include <algorithm>
 
 namespace riscv {
 
@@ -37,6 +38,8 @@ void ExecuteStage::execute(CPUState& state) {
             unit->busy = true;
             unit->instruction = dispatch_result.instruction;
             unit->has_exception = false;
+            unit->dcache_request_sent = false;
+            unit->waiting_on_dcache = false;
             
             const char* unit_type_str = "";
             
@@ -172,6 +175,11 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
                     continue;
                 }
+                if (load_result == LoadExecutionResult::WaitingForCache) {
+                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waiting for dcache, remaining=%d",
+                        unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
+                    continue;
+                }
                 if (load_result == LoadExecutionResult::Exception) {
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu raised exception: %s",
                         unit.instruction->get_instruction_id(), i, unit.exception_msg.c_str());
@@ -201,6 +209,13 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
+                if (!start_or_wait_dcache_access(
+                        unit, state, CacheAccessType::Write, PerfCounterId::CACHE_L1D_STALL_CYCLES_STORE)) {
+                    LOGT(EXECUTE, "inst=%" PRId64 " STORE%zu waiting for dcache, remaining=%d",
+                        unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
+                    continue;
+                }
+
                 // 存储指令结果为0
                 unit.result = 0;
                 
@@ -248,6 +263,10 @@ void ExecuteStage::reset_single_unit(ExecutionUnit& unit) {
     unit.jump_target = 0;
     unit.instruction = nullptr;
     unit.exception_msg.clear();
+    unit.load_address = 0;
+    unit.load_size = 0;
+    unit.dcache_request_sent = false;
+    unit.waiting_on_dcache = false;
 }
 
 template<typename UnitContainer>
@@ -321,103 +340,171 @@ void ExecuteStage::reset() {
     LOGT(EXECUTE, "execute stage reset");
 }
 
+bool ExecuteStage::start_or_wait_dcache_access(ExecutionUnit& unit,
+                                               CPUState& state,
+                                               CacheAccessType access_type,
+                                               PerfCounterId stall_counter_id) {
+    if (!state.l1d_cache) {
+        unit.waiting_on_dcache = false;
+        return true;
+    }
+
+    if (unit.dcache_request_sent) {
+        unit.waiting_on_dcache = false;
+        return true;
+    }
+
+    const auto cache_result = state.l1d_cache->access(unit.load_address, unit.load_size, access_type);
+    if (cache_result.blocked) {
+        unit.waiting_on_dcache = true;
+        unit.remaining_cycles = 1;
+        state.perf_counters.increment(stall_counter_id);
+        return false;
+    }
+
+    state.perf_counters.increment(PerfCounterId::CACHE_L1D_ACCESSES);
+    if (access_type == CacheAccessType::Read) {
+        state.perf_counters.increment(PerfCounterId::CACHE_L1D_READ_ACCESSES);
+    } else {
+        state.perf_counters.increment(PerfCounterId::CACHE_L1D_WRITE_ACCESSES);
+    }
+
+    if (cache_result.hit) {
+        state.perf_counters.increment(PerfCounterId::CACHE_L1D_HITS);
+    } else {
+        state.perf_counters.increment(PerfCounterId::CACHE_L1D_MISSES);
+    }
+
+    if (cache_result.dirty_eviction) {
+        state.perf_counters.increment(PerfCounterId::CACHE_L1D_DIRTY_EVICTIONS);
+    }
+
+    unit.dcache_request_sent = true;
+    unit.waiting_on_dcache = true;
+
+    const int extra_cycles = std::max(0, cache_result.latency_cycles - 1);
+    if (extra_cycles > 0) {
+        unit.remaining_cycles = extra_cycles;
+        state.perf_counters.increment(stall_counter_id, static_cast<uint64_t>(extra_cycles));
+        return false;
+    }
+
+    unit.waiting_on_dcache = false;
+    return true;
+}
+
 ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(ExecutionUnit& unit, CPUState& state) {
     const auto& inst = unit.instruction->get_decoded_info();
     uint64_t addr = unit.load_address;
     uint8_t access_size = unit.load_size;
+    auto& memory_info = unit.instruction->get_memory_info();
     
-    // 尝试Store-to-Load Forwarding
-    uint64_t forwarded_value;
-    bool blocked = false;
-    bool forwarded = state.store_buffer->forward_load(
-        addr, access_size, forwarded_value, unit.instruction->get_instruction_id(), blocked);
-    if (blocked) {
-        state.perf_counters.increment(PerfCounterId::LOADS_BLOCKED_BY_STORE);
-        return LoadExecutionResult::BlockedByStore;
-    }
-    
-    if (forwarded) {
-        if (inst.opcode == Opcode::LOAD_FP) {
-            // FLW 需要nan-box到64位浮点寄存器；FLD 直接写入64位
-            if (access_size == 4) {
-                unit.result = 0xFFFFFFFF00000000ULL | (forwarded_value & 0xFFFFFFFFULL);
-            } else {
-                unit.result = forwarded_value;
+    if (!unit.dcache_request_sent) {
+        // 尝试Store-to-Load Forwarding
+        uint64_t forwarded_value = 0;
+        bool blocked = false;
+        const bool forwarded = state.store_buffer->forward_load(
+            addr, access_size, forwarded_value, unit.instruction->get_instruction_id(), blocked);
+        if (blocked) {
+            state.perf_counters.increment(PerfCounterId::LOADS_BLOCKED_BY_STORE);
+            return LoadExecutionResult::BlockedByStore;
+        }
+
+        if (forwarded) {
+            memory_info.store_forwarded = true;
+            if (inst.opcode == Opcode::LOAD_FP) {
+                // FLW 需要nan-box到64位浮点寄存器；FLD 直接写入64位
+                if (access_size == 4) {
+                    unit.result = 0xFFFFFFFF00000000ULL | (forwarded_value & 0xFFFFFFFFULL);
+                } else {
+                    unit.result = forwarded_value;
+                }
+                LOGT(EXECUTE, "fp store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64,
+                     addr, unit.result);
+                memory_info.memory_value = unit.result;
+                state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
+                return LoadExecutionResult::Forwarded;
             }
-            LOGT(EXECUTE, "fp store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64,
-                 addr, unit.result);
+
+            // 从Store Buffer获得转发数据，根据预解析的符号扩展信息处理
+            if (inst.is_signed_load) {
+            // 符号扩展Load指令：LB, LH, LW
+                switch (access_size) {
+                case 1: // LB
+                        unit.result = static_cast<uint64_t>(static_cast<int8_t>(forwarded_value & 0xFF));
+                        break;
+                case 2: // LH
+                        unit.result = static_cast<uint64_t>(static_cast<int16_t>(forwarded_value & 0xFFFF));
+                        break;
+                case 4: // LW
+                        unit.result = static_cast<uint64_t>(static_cast<int32_t>(forwarded_value & 0xFFFFFFFF));
+                        break;
+                case 8: // LD (64位)
+                    unit.result = forwarded_value;
+                    break;
+                    default:
+                        unit.result = forwarded_value;
+                        break;
+                }
+            } else {
+            // 零扩展Load指令：LBU, LHU, LWU
+                switch (access_size) {
+                case 1: // LBU
+                        unit.result = forwarded_value & 0xFF;
+                        break;
+                case 2: // LHU
+                        unit.result = forwarded_value & 0xFFFF;
+                        break;
+                case 4: // LWU (RV64新增)
+                        unit.result = forwarded_value & 0xFFFFFFFF;
+                        break;
+                case 8: // LD (64位)
+                    unit.result = forwarded_value;
+                    break;
+                    default:
+                        unit.result = forwarded_value;
+                        break;
+                }
+            }
+
+            LOGT(EXECUTE, "store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64 " %s-extended",
+                           addr, unit.result, inst.is_signed_load ? "sign" : "zero");
+            memory_info.memory_value = unit.result;
             state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
             return LoadExecutionResult::Forwarded;
         }
 
-        // 从Store Buffer获得转发数据，根据预解析的符号扩展信息处理
-        if (inst.is_signed_load) {
-            // 符号扩展Load指令：LB, LH, LW
-            switch (access_size) {
-                case 1: // LB
-                    unit.result = static_cast<uint64_t>(static_cast<int8_t>(forwarded_value & 0xFF));
-                    break;
-                case 2: // LH
-                    unit.result = static_cast<uint64_t>(static_cast<int16_t>(forwarded_value & 0xFFFF));
-                    break;
-                case 4: // LW
-                    unit.result = static_cast<uint64_t>(static_cast<int32_t>(forwarded_value & 0xFFFFFFFF));
-                    break;
-                case 8: // LD (64位)
-                    unit.result = forwarded_value;
-                    break;
-                default:
-                    unit.result = forwarded_value;
-                    break;
-            }
-        } else {
-            // 零扩展Load指令：LBU, LHU, LWU
-            switch (access_size) {
-                case 1: // LBU
-                    unit.result = forwarded_value & 0xFF;
-                    break;
-                case 2: // LHU
-                    unit.result = forwarded_value & 0xFFFF;
-                    break;
-                case 4: // LWU (RV64新增)
-                    unit.result = forwarded_value & 0xFFFFFFFF;
-                    break;
-                case 8: // LD (64位)
-                    unit.result = forwarded_value;
-                    break;
-                default:
-                    unit.result = forwarded_value;
-                    break;
-            }
+        memory_info.store_forwarded = false;
+        if (!start_or_wait_dcache_access(
+                unit, state, CacheAccessType::Read, PerfCounterId::CACHE_L1D_STALL_CYCLES_LOAD)) {
+            return LoadExecutionResult::WaitingForCache;
         }
-        
-        LOGT(EXECUTE, "store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64 " %s-extended",
-                       addr, unit.result, inst.is_signed_load ? "sign" : "zero");
-        state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
-        return LoadExecutionResult::Forwarded; // 使用了转发
-    } else {
-        try {
-            if (inst.opcode == Opcode::LOAD_FP) {
-                unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);
-                LOGT(EXECUTE, "fp memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
-                state.perf_counters.increment(PerfCounterId::LOADS_FROM_MEMORY);
-                return LoadExecutionResult::LoadedFromMemory;
-            }
+    }
 
-            // 没有转发，从内存读取
-            LOGT(EXECUTE, "store-to-load forwarding miss, read from memory");
-            
-            unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
-            
-            LOGT(EXECUTE, "memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+    try {
+        if (inst.opcode == Opcode::LOAD_FP) {
+            unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);
+            LOGT(EXECUTE, "fp memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+            memory_info.memory_value = unit.result;
             state.perf_counters.increment(PerfCounterId::LOADS_FROM_MEMORY);
-            return LoadExecutionResult::LoadedFromMemory; // 没有使用转发
-        } catch (const SimulatorException& e) {
-            unit.has_exception = true;
-            unit.exception_msg = e.what();
-            unit.result = 0;
-            return LoadExecutionResult::Exception;
+            unit.waiting_on_dcache = false;
+            return LoadExecutionResult::LoadedFromMemory;
         }
+
+        LOGT(EXECUTE, "store-to-load forwarding miss, read from memory");
+        unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
+
+        LOGT(EXECUTE, "memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+        memory_info.memory_value = unit.result;
+        state.perf_counters.increment(PerfCounterId::LOADS_FROM_MEMORY);
+        unit.waiting_on_dcache = false;
+        return LoadExecutionResult::LoadedFromMemory;
+    } catch (const SimulatorException& e) {
+        unit.has_exception = true;
+        unit.exception_msg = e.what();
+        unit.result = 0;
+        unit.waiting_on_dcache = false;
+        return LoadExecutionResult::Exception;
     }
 }
 

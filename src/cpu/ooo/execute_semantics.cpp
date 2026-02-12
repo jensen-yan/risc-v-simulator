@@ -156,6 +156,12 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                     // 异常已在解码时检测，这里直接使用预解析的信息
                     unit.load_address = addr;
                     unit.load_size = inst.memory_access_size;
+                    auto& memory_info = instruction->get_memory_info();
+                    memory_info.is_memory_op = true;
+                    memory_info.is_load = true;
+                    memory_info.memory_address = addr;
+                    memory_info.memory_size = inst.memory_access_size;
+                    memory_info.address_ready = true;
                     LOGT(EXECUTE, "start LOAD: addr=0x%" PRIx64 ", size=%d", addr, inst.memory_access_size);
 
                 } else if (inst.opcode == Opcode::JALR) {
@@ -273,6 +279,9 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                     memory_info.memory_value = store_value;
                     memory_info.memory_size = inst.memory_access_size;
                     memory_info.address_ready = true;
+
+                    unit.load_address = addr;
+                    unit.load_size = inst.memory_access_size;
 
                     // 异常已在解码时检测，这里直接使用预解析的信息
                     LOGT(EXECUTE, "execute STORE: addr=0x%" PRIx64 " value=0x%" PRIx64 " size=%d",

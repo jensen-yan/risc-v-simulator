@@ -14,6 +14,17 @@ constexpr uint32_t kMinstretCsrAddr = 0xB02;
 constexpr uint32_t kCycleCsrAddr = 0xC00;
 constexpr uint32_t kInstretCsrAddr = 0xC02;
 
+uint8_t atomicWidthToSize(Funct3 width) {
+    switch (width) {
+        case Funct3::LW:
+            return 4;
+        case Funct3::LD:
+            return 8;
+        default:
+            throw IllegalInstructionException("A扩展仅支持W/D宽度");
+    }
+}
+
 void writeAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 width, uint64_t value) {
     switch (width) {
         case Funct3::LW:
@@ -168,7 +179,13 @@ void CommitStage::execute(CPUState& state) {
                     state.reservation_valid = false;
                 }
                 if (atomic_info.do_store) {
-                    writeAtomicMemoryValue(state.memory, atomic_info.address, atomic_info.width, atomic_info.store_value);
+                    if (state.l1d_cache) {
+                        const uint8_t store_size = atomicWidthToSize(atomic_info.width);
+                        state.l1d_cache->commitStore(
+                            state.memory, atomic_info.address, store_size, atomic_info.store_value);
+                    } else {
+                        writeAtomicMemoryValue(state.memory, atomic_info.address, atomic_info.width, atomic_info.store_value);
+                    }
                     LOGT(COMMIT, "inst=%" PRId64 " commit amo store addr=0x%" PRIx64 " value=0x%" PRIx64,
                          committed_inst->get_instruction_id(), atomic_info.address, atomic_info.store_value);
                 }
@@ -527,9 +544,13 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state, FlushReason reaso
     // 6. 清空Store Buffer（刷新时清除所有推测性Store）
     state.store_buffer->flush();
 
-    // 6.5 清空cache在途请求，保留已存在cache行状态。
+    // 6.5 清空cache在途请求。FENCE.I 需要额外失效 I$ 行状态。
     if (state.l1i_cache) {
-        state.l1i_cache->flushInFlight();
+        if (reason == FlushReason::FenceI) {
+            state.l1i_cache->reset();
+        } else {
+            state.l1i_cache->flushInFlight();
+        }
     }
     if (state.l1d_cache) {
         state.l1d_cache->flushInFlight();

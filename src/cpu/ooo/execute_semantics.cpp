@@ -232,9 +232,6 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                     // 设置分支结果（分支指令通常不写回寄存器，但需要完成执行）
                     unit.result = 0;  // 分支指令没有写回值
 
-                    // 简单的分支预测：静态预测不跳转
-                    bool predicted_taken = false;  // 总是预测不跳转
-
                     if (should_branch) {
                         // 分支taken：条件成立，需要跳转
                         const uint64_t target =
@@ -251,32 +248,14 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                         unit.jump_target = target;
                         unit.is_jump = true;  // 标记需要改变PC
                         instruction->set_jump_info(true, unit.jump_target);
-
-                        if (!predicted_taken) {
-                            // 预测不跳转，但实际跳转 -> 预测错误
-                            LOGT(EXECUTE,
-                                 "branch taken, target=0x%" PRIx64 " (pc=0x%" PRIx64 " + imm=%d), flush at commit",
-                                 unit.jump_target, instruction->get_pc(), inst.imm);
-                            // 注意：不在执行阶段刷新，让指令正常完成并提交
-                            state.recordBranchMispredict();
-                        } else {
-                            // 预测跳转，实际跳转 -> 预测正确
-                            LOGT(EXECUTE, "branch taken, target=0x%" PRIx64 " (prediction correct)", unit.jump_target);
-                        }
+                        LOGT(EXECUTE,
+                             "branch taken, target=0x%" PRIx64 " (pc=0x%" PRIx64 " + imm=%d)",
+                             unit.jump_target, instruction->get_pc(), inst.imm);
                     } else {
                         // 分支not taken：条件不成立，继续顺序执行
                         unit.is_jump = false;  // 不需要改变PC
                         unit.jump_target = 0;
-
-                        if (predicted_taken) {
-                            // 预测跳转，但实际不跳转 -> 预测错误
-                            LOGT(EXECUTE, "branch not taken, flush at commit");
-                            // 注意：不在执行阶段刷新，让指令正常完成并提交
-                            state.recordBranchMispredict();
-                        } else {
-                            // 预测不跳转，实际不跳转 -> 预测正确
-                            LOGT(EXECUTE, "branch not taken (prediction correct)");
-                        }
+                        LOGT(EXECUTE, "branch not taken");
                     }
                 }
                 break;
@@ -329,7 +308,7 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                     instruction->set_jump_info(true, unit.jump_target);
 
                     // 无条件跳转指令：只标记重定向，刷新在提交阶段统一进行
-                    LOGT(EXECUTE, "unconditional jump, target=0x%" PRIx64 " (pc=0x%" PRIx64 "), flush at commit",
+                    LOGT(EXECUTE, "unconditional jump, target=0x%" PRIx64 " (pc=0x%" PRIx64 ")",
                          unit.jump_target, instruction->get_pc());
 
                     // 注意：不在执行阶段刷新，让指令正常完成并提交

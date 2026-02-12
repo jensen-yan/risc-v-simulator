@@ -1,4 +1,5 @@
 #include "cpu/ooo/stages/fetch_stage.h"
+#include "cpu/ooo/branch_predictor.h"
 #include "common/debug_types.h"
 #include <fmt/format.h>
 
@@ -18,7 +19,8 @@ void FetchStage::execute(CPUState& state) {
     // 如果取指缓冲区有空间，取指令
     if (state.fetch_buffer.size() < MAX_FETCH_BUFFER_SIZE) {
         try {
-            Instruction raw_inst = state.memory->fetchInstruction(state.pc);
+            const uint64_t fetch_pc = state.pc;
+            Instruction raw_inst = state.memory->fetchInstruction(fetch_pc);
             
             // 如果指令为0，可能表明程序结束，但不要立即停机
             // 要等待流水线中的指令全部完成提交
@@ -36,21 +38,57 @@ void FetchStage::execute(CPUState& state) {
             }
             
             FetchedInstruction fetched;
-            fetched.pc = state.pc;
+            fetched.pc = fetch_pc;
             fetched.instruction = raw_inst;
             
             // 检查是否为压缩指令
             if ((raw_inst & 0x03) != 0x03) {
                 fetched.is_compressed = true;
-                state.pc += 2;
-                LOGT(FETCH, "fetch: pc=0x%" PRIx64 " inst=0x%" PRIx32 " (compressed, pc+2)",
-                    fetched.pc, raw_inst);
             } else {
                 fetched.is_compressed = false;
-                state.pc += 4;
-                LOGT(FETCH, "fetch: pc=0x%" PRIx64 " inst=0x%" PRIx32 " (normal, pc+4)",
-                    fetched.pc, raw_inst);
             }
+
+            const uint64_t fallthrough = fetch_pc + (fetched.is_compressed ? 2ULL : 4ULL);
+            uint64_t predicted_next_pc = fallthrough;
+
+            // 最小解码：复用Decoder来识别控制流并计算预测next PC。
+            // 注意：这里捕获异常，保持与原先“非法指令在decode阶段暴露”的行为一致。
+            bool decoded_ok = false;
+            DecodedInstruction decoded{};
+            try {
+                if (fetched.is_compressed) {
+                    decoded = state.decoder.decodeCompressed(static_cast<uint16_t>(raw_inst), state.enabled_extensions);
+                } else {
+                    decoded = state.decoder.decode(raw_inst, state.enabled_extensions);
+                }
+                decoded_ok = true;
+            } catch (const SimulatorException&) {
+                decoded_ok = false;
+            }
+
+            if (decoded_ok && state.branch_predictor) {
+                const auto pred = state.branch_predictor->predict(fetch_pc, decoded, fallthrough);
+                predicted_next_pc = pred.next_pc;
+
+                if (decoded.opcode == Opcode::JALR) {
+                    state.perf_counters.increment(PerfCounterId::PREDICTOR_BTB_LOOKUPS);
+                    if (pred.btb_hit) {
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_BTB_HITS);
+                    } else {
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_BTB_MISSES);
+                    }
+                } else if (decoded.opcode == Opcode::BRANCH) {
+                    state.perf_counters.increment(PerfCounterId::PREDICTOR_BHT_LOOKUPS);
+                }
+            }
+
+            fetched.predicted_next_pc = predicted_next_pc;
+            state.pc = predicted_next_pc;
+
+            LOGT(FETCH, "fetch: pc=0x%" PRIx64 " inst=0x%" PRIx32 " (%s) predicted_next_pc=0x%" PRIx64,
+                fetched.pc, raw_inst,
+                (fetched.is_compressed ? "compressed" : "normal"),
+                fetched.predicted_next_pc);
             
             state.fetch_buffer.push(fetched);
             state.perf_counters.increment(PerfCounterId::FETCHED_INSTRUCTIONS);

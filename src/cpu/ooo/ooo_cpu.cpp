@@ -5,6 +5,7 @@
 #include "cpu/ooo/stages/execute_stage.h"
 #include "cpu/ooo/stages/writeback_stage.h"
 #include "cpu/ooo/stages/commit_stage.h"
+#include "cpu/ooo/branch_predictor.h"
 #include "core/csr_utils.h"
 #include "core/instruction_executor.h"
 #include "common/debug_types.h"
@@ -52,6 +53,7 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     state.reorder_buffer = std::make_unique<ReorderBuffer>();
     state.store_buffer = std::make_unique<StoreBuffer>();
     state.syscall_handler = std::make_unique<SyscallHandler>(memory);
+    state.branch_predictor = std::make_unique<BranchPredictor>();
 }
 
 void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memory) {
@@ -268,6 +270,16 @@ void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint64_t 
 }
 
 void OutOfOrderCPU::flush_pipeline() {
+    // 异常导致的全流水线flush（通常伴随halt）。计数器用于离线分析。
+    const uint64_t rob_used_entries =
+        cpu_state_.reorder_buffer
+            ? static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES - cpu_state_.reorder_buffer->get_free_entry_count())
+            : 0ULL;
+    cpu_state_.perf_counters.increment(PerfCounterId::PIPELINE_FLUSHES);
+    cpu_state_.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_EXCEPTION);
+    cpu_state_.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, rob_used_entries);
+    cpu_state_.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_EXCEPTION, rob_used_entries);
+
     // 清空取指缓冲区
     while (!cpu_state_.fetch_buffer.empty()) {
         cpu_state_.fetch_buffer.pop();
@@ -357,6 +369,75 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
     os << std::left << std::setw(40) << "cpu.rob.occupancy_avg"
        << std::right << std::setw(16) << std::fixed << std::setprecision(6) << rob_avg
        << " # Average occupied ROB entries per cycle\n";
+
+    // ===== Topdown-lite (以Execute每周期最多dispatch 1条为slot口径) =====
+    const uint64_t execute_frontend_starved =
+        cpu_state_.perf_counters.value(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
+    const uint64_t execute_dependency_blocked =
+        cpu_state_.perf_counters.value(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
+    const uint64_t execute_resource_blocked =
+        cpu_state_.perf_counters.value(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
+    const uint64_t execute_no_unit =
+        cpu_state_.perf_counters.value(PerfCounterId::STALL_EXECUTE_NO_UNIT);
+    const uint64_t execute_amo_wait =
+        cpu_state_.perf_counters.value(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
+    const uint64_t dispatched =
+        cpu_state_.perf_counters.value(PerfCounterId::DISPATCHED_INSTRUCTIONS);
+
+    const uint64_t frontend_bound_cycles = execute_frontend_starved;
+    const uint64_t backend_bound_cycles =
+        execute_dependency_blocked + execute_resource_blocked + execute_no_unit + execute_amo_wait;
+    const uint64_t executing_cycles = dispatched;  // ExecuteStage每周期最多dispatch 1条
+
+    const uint64_t accounted =
+        frontend_bound_cycles + backend_bound_cycles + executing_cycles;
+    const uint64_t other_cycles = (cycles > accounted) ? (cycles - accounted) : 0ULL;
+
+    auto printUintStat = [&](const char* name, uint64_t value, const char* desc) {
+        os << std::left << std::setw(40) << name
+           << std::right << std::setw(16) << value
+           << " # " << desc << "\n";
+    };
+    auto printDoubleStat = [&](const char* name, double value, const char* desc) {
+        os << std::left << std::setw(40) << name
+           << std::right << std::setw(16) << std::fixed << std::setprecision(6) << value
+           << " # " << desc << "\n";
+    };
+
+    const auto pct = [&](uint64_t part) -> double {
+        return cycles == 0 ? 0.0 : (static_cast<double>(part) * 100.0 / static_cast<double>(cycles));
+    };
+
+    printUintStat("cpu.topdown.cycles.total", cycles, "Topdown-lite total cycles (slot=1 per cycle)");
+    printUintStat("cpu.topdown.cycles.executing", executing_cycles,
+                 "Cycles where Execute successfully dispatched an instruction to an execution unit");
+    printUintStat("cpu.topdown.cycles.frontend_bound", frontend_bound_cycles,
+                 "Cycles where Execute had no work because RS is empty (frontend starved)");
+    printUintStat("cpu.topdown.cycles.backend_bound", backend_bound_cycles,
+                 "Cycles where Execute had work but could not make progress (dependency/resource/no_unit/amo_wait)");
+    printUintStat("cpu.topdown.cycles.other", other_cycles,
+                 "Remaining cycles not accounted by executing/frontend/backend categories");
+
+    printDoubleStat("cpu.topdown.cycles.executing_pct", pct(executing_cycles),
+                   "Executing cycles / total cycles (%)");
+    printDoubleStat("cpu.topdown.cycles.frontend_bound_pct", pct(frontend_bound_cycles),
+                   "Frontend-bound cycles / total cycles (%)");
+    printDoubleStat("cpu.topdown.cycles.backend_bound_pct", pct(backend_bound_cycles),
+                   "Backend-bound cycles / total cycles (%)");
+    printDoubleStat("cpu.topdown.cycles.other_pct", pct(other_cycles),
+                   "Other cycles / total cycles (%)");
+
+    // 指令域：用ROB flushed_entries衡量BadSpec的“工作量”（不是周期）。
+    const uint64_t flushed_entries = cpu_state_.perf_counters.value(PerfCounterId::ROB_FLUSHED_ENTRIES);
+    const uint64_t total_work = retired + flushed_entries;
+    const double flushed_pct = total_work == 0 ? 0.0
+                                               : (static_cast<double>(flushed_entries) * 100.0 /
+                                                  static_cast<double>(total_work));
+    printUintStat("cpu.topdown.insts.retired", retired, "Retired instructions");
+    printUintStat("cpu.topdown.insts.flushed", flushed_entries,
+                 "ROB flushed entries (work squashed by flushes)");
+    printDoubleStat("cpu.topdown.insts.flushed_pct", flushed_pct,
+                   "Flushed work / (retired + flushed) (%)");
 
     os << "----------- End Simulation Statistics -----------\n";
 }

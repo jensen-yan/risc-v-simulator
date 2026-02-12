@@ -1,4 +1,5 @@
 #include "cpu/ooo/stages/commit_stage.h"
+#include "cpu/ooo/branch_predictor.h"
 #include "cpu/ooo/dynamic_inst.h"
 #include "core/csr_utils.h"
 #include "core/instruction_executor.h"
@@ -244,19 +245,79 @@ void CommitStage::execute(CPUState& state) {
         // Store Buffer清理：提交指令时，清除该指令及之前的Store条目
         // 这确保Store指令提交到内存后，相应的Store Buffer条目被清除
         state.store_buffer->retire_stores_before(committed_inst->get_instruction_id());
-        
-        // 处理跳转指令：只有is_jump=true的指令才会改变PC
-        if (committed_inst->is_jump()) {
-            state.pc = committed_inst->get_jump_target();
-            state.perf_counters.increment(PerfCounterId::CONTROL_REDIRECTS);
-            if (decoded_info.opcode == Opcode::JAL || decoded_info.opcode == Opcode::JALR) {
-                state.perf_counters.increment(PerfCounterId::UNCONDITIONAL_REDIRECTS);
+
+        // ====== 控制流：commit仅在预测错时redirect/flush ======
+        const bool is_control_flow =
+            (decoded_info.opcode == Opcode::BRANCH ||
+             decoded_info.opcode == Opcode::JAL ||
+             decoded_info.opcode == Opcode::JALR);
+
+        bool need_redirect_flush = false;
+        uint64_t redirect_pc = 0;
+        FlushReason flush_reason = FlushReason::Other;
+
+        if (is_control_flow) {
+            const uint64_t instruction_pc = committed_inst->get_pc();
+            const uint64_t fallthrough = instruction_pc + (decoded_info.is_compressed ? 2ULL : 4ULL);
+            const uint64_t actual_next_pc = committed_inst->is_jump()
+                                                ? committed_inst->get_jump_target()
+                                                : fallthrough;
+            const uint64_t predicted_next_pc = committed_inst->has_predicted_next_pc()
+                                                   ? committed_inst->get_predicted_next_pc()
+                                                   : fallthrough;
+            const bool correct = (predicted_next_pc == actual_next_pc);
+
+            if (correct) {
+                state.perf_counters.increment(PerfCounterId::PREDICTOR_CONTROL_CORRECT);
+            } else {
+                state.perf_counters.increment(PerfCounterId::PREDICTOR_CONTROL_INCORRECT);
             }
-            LOGT(COMMIT, "inst=%" PRId64 " jump to 0x%" PRIx64,
-                committed_inst->get_instruction_id(), committed_inst->get_jump_target());
-            
-            // 跳转指令提交后，刷新流水线中错误推测的指令
-            flush_pipeline_after_commit(state);
+
+            // 统计：真实控制流改变（taken branch + jump）
+            if (committed_inst->is_jump()) {
+                state.perf_counters.increment(PerfCounterId::CONTROL_REDIRECTS);
+                if (decoded_info.opcode == Opcode::JAL || decoded_info.opcode == Opcode::JALR) {
+                    state.perf_counters.increment(PerfCounterId::UNCONDITIONAL_REDIRECTS);
+                }
+            }
+
+            // 条件分支：预测对/错、以及BRANCH_MISPREDICTS口径统一到commit
+            if (decoded_info.opcode == Opcode::BRANCH) {
+                if (correct) {
+                    state.perf_counters.increment(PerfCounterId::PREDICTOR_BHT_CORRECT);
+                } else {
+                    state.perf_counters.increment(PerfCounterId::PREDICTOR_BHT_INCORRECT);
+                    state.recordBranchMispredict();
+                }
+            }
+
+            // JALR：预测错次数
+            if (decoded_info.opcode == Opcode::JALR && !correct) {
+                state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_MISPREDICTS);
+            }
+
+            // Commit阶段训练预测器（flush不应清空预测器状态）
+            if (state.branch_predictor) {
+                const bool actual_taken = committed_inst->is_jump();
+                state.branch_predictor->update(instruction_pc, decoded_info, actual_taken, actual_next_pc);
+            }
+
+            if (!correct) {
+                need_redirect_flush = true;
+                redirect_pc = actual_next_pc;
+                flush_reason = (decoded_info.opcode == Opcode::BRANCH)
+                                   ? FlushReason::BranchMispredict
+                                   : FlushReason::UnconditionalRedirect;
+                LOGT(COMMIT,
+                     "inst=%" PRId64 " control-flow mispredict: pc=0x%" PRIx64
+                     " predicted_next=0x%" PRIx64 " actual_next=0x%" PRIx64 " -> redirect+flush",
+                     committed_inst->get_instruction_id(), instruction_pc, predicted_next_pc, actual_next_pc);
+            } else {
+                LOGT(COMMIT,
+                     "inst=%" PRId64 " control-flow correct: pc=0x%" PRIx64
+                     " next=0x%" PRIx64,
+                     committed_inst->get_instruction_id(), instruction_pc, actual_next_pc);
+            }
         }
         
         bool should_stop_commit = false;
@@ -296,6 +357,12 @@ void CommitStage::execute(CPUState& state) {
                 committed_inst->get_instruction_id(), state.instruction_count);
             state.cpu_interface->performDiffTestWithCommittedPC(committed_inst->get_pc());
             LOGT(COMMIT, "run difftest comparison");
+        }
+
+        if (need_redirect_flush) {
+            state.pc = redirect_pc;
+            flush_pipeline_after_commit(state, flush_reason);
+            break;
         }
 
         if (should_stop_commit || state.halted) {
@@ -361,7 +428,7 @@ bool CommitStage::handle_ebreak(CPUState& state, uint64_t instruction_pc) {
 
 bool CommitStage::handle_mret(CPUState& state) {
     state.pc = csr::read(state.csr_registers, csr::kMepc);
-    flush_pipeline_after_commit(state);
+    flush_pipeline_after_commit(state, FlushReason::Mret);
     return true;
 }
 
@@ -369,7 +436,7 @@ bool CommitStage::handle_fencei(CPUState& state, uint64_t instruction_pc, bool i
     const uint64_t next_pc = instruction_pc + (is_compressed ? 2ULL : 4ULL);
     LOGT(COMMIT, "detected FENCE.I at pc=0x%" PRIx64 ", refetch from 0x%" PRIx64, instruction_pc, next_pc);
     state.pc = next_pc;
-    flush_pipeline_after_commit(state);
+    flush_pipeline_after_commit(state, FlushReason::FenceI);
     return true;
 }
 
@@ -378,7 +445,7 @@ void CommitStage::enter_machine_trap(CPUState& state,
                                      uint64_t cause,
                                      uint64_t tval) {
     state.pc = csr::enterMachineTrap(state.csr_registers, instruction_pc, cause, tval);
-    flush_pipeline_after_commit(state);
+    flush_pipeline_after_commit(state, FlushReason::Trap);
 }
 
 void CommitStage::handle_exception(CPUState& state, const std::string& exception_msg, uint64_t pc) {
@@ -387,9 +454,46 @@ void CommitStage::handle_exception(CPUState& state, const std::string& exception
     state.halted = true;
 }
 
-void CommitStage::flush_pipeline_after_commit(CPUState& state) {
+void CommitStage::flush_pipeline_after_commit(CPUState& state, FlushReason reason) {
     LOGT(COMMIT, "serializing event committed, start pipeline flush");
+
+    const uint64_t rob_used =
+        static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES - state.reorder_buffer->get_free_entry_count());
+
     state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSHES);
+    switch (reason) {
+        case FlushReason::BranchMispredict:
+            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_BRANCH_MISPREDICT);
+            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_BRANCH_MISPREDICT, rob_used);
+            break;
+        case FlushReason::UnconditionalRedirect:
+            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_UNCONDITIONAL_REDIRECT);
+            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_UNCONDITIONAL_REDIRECT, rob_used);
+            break;
+        case FlushReason::Trap:
+            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_TRAP);
+            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_TRAP, rob_used);
+            break;
+        case FlushReason::Mret:
+            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_MRET);
+            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_MRET, rob_used);
+            break;
+        case FlushReason::FenceI:
+            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_FENCEI);
+            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_FENCEI, rob_used);
+            break;
+        case FlushReason::Exception:
+            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_EXCEPTION);
+            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_EXCEPTION, rob_used);
+            break;
+        case FlushReason::Other:
+        default:
+            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_OTHER);
+            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_OTHER, rob_used);
+            break;
+    }
+
+    state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, rob_used);
     
     // 1. 清空取指缓冲区（错误推测的指令）
     while (!state.fetch_buffer.empty()) {

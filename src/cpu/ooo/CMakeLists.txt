@@ -1,5 +1,6 @@
 target_sources(risc-v-sim-lib PRIVATE
     ooo_cpu.cpp
+    branch_predictor.cpp
     dynamic_inst.cpp
     execute_semantics.cpp
     perf_counters.cpp

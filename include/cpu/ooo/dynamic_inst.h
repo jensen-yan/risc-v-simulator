@@ -137,6 +137,10 @@ private:
     bool is_jump_;                            // 是否需要跳转
     uint64_t jump_target_;                    // 跳转目标地址
 
+    // ========== 控制流预测信息（Fetch生成，Commit对比） ==========
+    uint64_t predicted_next_pc_;              // 预测的下一条取指PC
+    bool has_predicted_next_pc_;              // 是否记录了预测next PC
+
     // ========== 扩展信息（可选，支持未来功能） ==========
     std::optional<ExecutionInfo> exec_info_;  // 执行相关扩展信息
     std::optional<BranchInfo> branch_info_;   // 分支预测相关信息
@@ -267,6 +271,14 @@ public:
     bool is_jump() const { return is_jump_; }
     uint64_t get_jump_target() const { return jump_target_; }
     void set_jump_info(bool is_jump, uint64_t target = 0);
+
+    // ========== 控制流预测接口 ==========
+    void set_predicted_next_pc(uint64_t pc) {
+        predicted_next_pc_ = pc;
+        has_predicted_next_pc_ = true;
+    }
+    bool has_predicted_next_pc() const { return has_predicted_next_pc_; }
+    uint64_t get_predicted_next_pc() const { return predicted_next_pc_; }
 
     // ========== 扩展信息接口 ==========
     ExecutionInfo& get_execution_info() { 

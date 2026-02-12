@@ -16,6 +16,7 @@ DynamicInst::DynamicInst()
       has_fp_execute_info_(false), fp_execute_info_{},
       has_atomic_execute_info_(false), atomic_execute_info_{},
       rob_entry_(0), rs_entry_(0), is_jump_(false), jump_target_(0),
+      predicted_next_pc_(0), has_predicted_next_pc_(false),
       fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
 }
@@ -31,6 +32,7 @@ DynamicInst::DynamicInst(const DecodedInstruction& decoded_info, uint64_t pc, ui
       has_fp_execute_info_(false), fp_execute_info_{},
       has_atomic_execute_info_(false), atomic_execute_info_{},
       rob_entry_(0), rs_entry_(0), is_jump_(false), jump_target_(0),
+      predicted_next_pc_(0), has_predicted_next_pc_(false),
       fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
     
@@ -224,6 +226,8 @@ void DynamicInst::reset_to_allocated() {
     clear_atomic_execute_info();
     is_jump_ = false;
     jump_target_ = 0;
+    predicted_next_pc_ = 0;
+    has_predicted_next_pc_ = false;
     rs_entry_ = 0;
     
     // 保留 ROB entry、instruction_id、pc 等基础信息

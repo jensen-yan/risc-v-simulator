@@ -10,6 +10,7 @@
 #include "cpu/ooo/perf_counters.h"
 #include "cpu/ooo/ooo_types.h"
 #include "cpu/ooo/dynamic_inst.h"
+#include "cpu/ooo/branch_predictor.h"
 #include "system/syscall_handler.h"
 #include "common/cpu_interface.h"
 #include <array>
@@ -25,6 +26,7 @@ struct FetchedInstruction {
     uint64_t pc;
     Instruction instruction;
     bool is_compressed;
+    uint64_t predicted_next_pc;
 };
 
 /**
@@ -84,6 +86,9 @@ struct CPUState {
     std::unique_ptr<ReservationStation> reservation_station;
     std::unique_ptr<ReorderBuffer> reorder_buffer;
     std::unique_ptr<StoreBuffer> store_buffer;  // Store Buffer用于Store-to-Load Forwarding
+
+    // 分支预测器（Fetch使用；Commit更新；flush时保留状态）
+    std::unique_ptr<BranchPredictor> branch_predictor;
     
     // 执行单元
     std::array<ExecutionUnit, 2> alu_units;      // 2个ALU单元

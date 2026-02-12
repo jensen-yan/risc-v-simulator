@@ -42,6 +42,9 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 # 调试预设/分类与周期过滤
 ./risc-v-sim --debug --debug-preset=ooo -e program.elf
 ./risc-v-sim --debug-categories=fetch,decode,commit --debug-cycles=100-200 -e program.elf
+
+# 导出详细 OOO 统计（gem5 风格文本）
+./risc-v-sim --ooo --stats-file=stats.txt -e ./riscv-tests/isa/rv32ui-p-add
 ```
 
 ## 项目结构

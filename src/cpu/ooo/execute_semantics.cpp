@@ -60,6 +60,7 @@ void executeAtomicOperation(ExecutionUnit& unit, const DynamicInstPtr& instructi
 
     if (amo_result.do_store) {
         state.store_buffer->add_store(instruction, addr, amo_result.store_value, inst.memory_access_size);
+        state.perf_counters.increment(PerfCounterId::STORES_TO_BUFFER);
     }
     instruction->set_atomic_execute_info(atomic_info);
 
@@ -223,6 +224,8 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
             case InstructionType::B_TYPE:
                 // 分支指令（BNE, BEQ, BLT等）
                 {
+                    state.perf_counters.increment(PerfCounterId::BRANCH_INSTRUCTIONS);
+
                     bool should_branch = InstructionExecutor::evaluateBranchCondition(
                         inst, instruction->get_src1_value(), instruction->get_src2_value());
 
@@ -255,7 +258,7 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                                  "branch taken, target=0x%" PRIx64 " (pc=0x%" PRIx64 " + imm=%d), flush at commit",
                                  unit.jump_target, instruction->get_pc(), inst.imm);
                             // 注意：不在执行阶段刷新，让指令正常完成并提交
-                            state.branch_mispredicts++;
+                            state.recordBranchMispredict();
                         } else {
                             // 预测跳转，实际跳转 -> 预测正确
                             LOGT(EXECUTE, "branch taken, target=0x%" PRIx64 " (prediction correct)", unit.jump_target);
@@ -269,7 +272,7 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                             // 预测跳转，但实际不跳转 -> 预测错误
                             LOGT(EXECUTE, "branch not taken, flush at commit");
                             // 注意：不在执行阶段刷新，让指令正常完成并提交
-                            state.branch_mispredicts++;
+                            state.recordBranchMispredict();
                         } else {
                             // 预测不跳转，实际不跳转 -> 预测正确
                             LOGT(EXECUTE, "branch not taken (prediction correct)");
@@ -298,6 +301,7 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
 
                     // 仅记录待提交Store，真正写内存在commit阶段进行。
                     state.store_buffer->add_store(instruction, addr, store_value, inst.memory_access_size);
+                    state.perf_counters.increment(PerfCounterId::STORES_TO_BUFFER);
                 }
                 break;
 
@@ -330,7 +334,7 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
 
                     // 注意：不在执行阶段刷新，让指令正常完成并提交
                     // 流水线刷新将在提交阶段进行
-                    state.branch_mispredicts++;  // 统计预测错误
+                    state.recordBranchMispredict();  // 统计预测错误
                 }
                 break;
 

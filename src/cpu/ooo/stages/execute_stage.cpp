@@ -26,6 +26,7 @@ void ExecuteStage::execute(CPUState& state) {
             // AMO必须等待更老Store/AMO提交，避免读取到尚未对内存生效的旧值。
             dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
             state.reservation_station->release_execution_unit(dispatch_result.unit_type, dispatch_result.unit_id);
+            state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
             LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay dispatch",
                 dispatch_result.instruction->get_instruction_id());
             return;
@@ -60,14 +61,18 @@ void ExecuteStage::execute(CPUState& state) {
             
             LOGT(EXECUTE, "inst=%" PRId64 " start on %s, cycles=%d",
                 dispatch_result.instruction->get_instruction_id(), unit_type_str, unit->remaining_cycles);
+
+            state.perf_counters.increment(PerfCounterId::DISPATCHED_INSTRUCTIONS);
             
             // 开始执行指令语义
             OOOExecuteSemantics::executeInstruction(*unit, dispatch_result.instruction, state);
         } else {
             LOGT(EXECUTE, "no available execution unit");
+            state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_UNIT);
         }
     } else {
         LOGT(EXECUTE, "no ready instruction in reservation station");
+        state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
     }
 }
 
@@ -136,6 +141,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     reset_single_unit(unit);
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waits on earlier STORE, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
+                    state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
                     continue; // 跳过完成处理
                 }
                 
@@ -149,6 +155,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     reset_single_unit(unit);
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
+                    state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
                     continue;
                 }
                 if (load_result == LoadExecutionResult::Exception) {
@@ -248,6 +255,7 @@ void ExecuteStage::complete_execution_unit(ExecutionUnit& unit, ExecutionUnitTyp
     // 执行完成，发送到CDB
     CommonDataBusEntry cdb_entry(unit.instruction);
     state.cdb_queue.push(cdb_entry);
+    state.perf_counters.increment(PerfCounterId::CDB_ENQUEUED);
     
     // 清空对应的保留站条目
     RSEntry rs_entry = unit.instruction->get_rs_entry();
@@ -287,6 +295,7 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
     bool forwarded = state.store_buffer->forward_load(
         addr, access_size, forwarded_value, unit.instruction->get_instruction_id(), blocked);
     if (blocked) {
+        state.perf_counters.increment(PerfCounterId::LOADS_BLOCKED_BY_STORE);
         return LoadExecutionResult::BlockedByStore;
     }
     
@@ -300,6 +309,7 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
             }
             LOGT(EXECUTE, "fp store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64,
                  addr, unit.result);
+            state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
             return LoadExecutionResult::Forwarded;
         }
 
@@ -346,12 +356,14 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
         
         LOGT(EXECUTE, "store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64 " %s-extended",
                        addr, unit.result, inst.is_signed_load ? "sign" : "zero");
+        state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
         return LoadExecutionResult::Forwarded; // 使用了转发
     } else {
         try {
             if (inst.opcode == Opcode::LOAD_FP) {
                 unit.result = InstructionExecutor::loadFPFromMemory(state.memory, addr, inst.funct3);
                 LOGT(EXECUTE, "fp memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+                state.perf_counters.increment(PerfCounterId::LOADS_FROM_MEMORY);
                 return LoadExecutionResult::LoadedFromMemory;
             }
 
@@ -361,6 +373,7 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
             unit.result = InstructionExecutor::loadFromMemory(state.memory, addr, inst.funct3);
             
             LOGT(EXECUTE, "memory load done: addr=0x%" PRIx64 " result=0x%" PRIx64, addr, unit.result);
+            state.perf_counters.increment(PerfCounterId::LOADS_FROM_MEMORY);
             return LoadExecutionResult::LoadedFromMemory; // 没有使用转发
         } catch (const SimulatorException& e) {
             unit.has_exception = true;

@@ -13,6 +13,8 @@
 #include <array>
 #include <memory>
 #include <queue>
+#include <iosfwd>
+#include <string>
 
 namespace riscv {
 
@@ -82,6 +84,8 @@ public:
     
     // 性能统计
     StatsList getStats() const override;
+    void dumpDetailedStats(std::ostream& os) const;
+    bool dumpStatsToFile(const std::string& path) const;
     
     // 调试功能
     void dumpRegisters() const override;

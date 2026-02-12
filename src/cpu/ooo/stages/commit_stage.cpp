@@ -108,6 +108,7 @@ void CommitStage::execute(CPUState& state) {
 
         if (committed_inst->has_trap()) {
             state.instruction_count++;
+            state.perf_counters.increment(PerfCounterId::INSTRUCTIONS_RETIRED);
             enter_machine_trap(state,
                                committed_inst->get_pc(),
                                committed_inst->get_trap_cause(),
@@ -139,6 +140,7 @@ void CommitStage::execute(CPUState& state) {
                         state.memory, memory_info.memory_address, memory_info.memory_value, decoded_info.funct3);
                 }
                 state.reservation_valid = false;
+                state.perf_counters.increment(PerfCounterId::STORES_COMMITTED);
                 LOGT(COMMIT, "inst=%" PRId64 " commit store addr=0x%" PRIx64 " value=0x%" PRIx64,
                      committed_inst->get_instruction_id(), memory_info.memory_address, memory_info.memory_value);
             } else if (decoded_info.opcode == Opcode::AMO) {
@@ -160,6 +162,7 @@ void CommitStage::execute(CPUState& state) {
                     LOGT(COMMIT, "inst=%" PRId64 " commit amo store addr=0x%" PRIx64 " value=0x%" PRIx64,
                          committed_inst->get_instruction_id(), atomic_info.address, atomic_info.store_value);
                 }
+                state.perf_counters.increment(PerfCounterId::AMOS_COMMITTED);
             }
         } catch (const SimulatorException& e) {
             handle_exception(state, e.what(), committed_inst->get_pc());
@@ -236,6 +239,7 @@ void CommitStage::execute(CPUState& state) {
         }
         
         state.instruction_count++;
+        state.perf_counters.increment(PerfCounterId::INSTRUCTIONS_RETIRED);
         
         // Store Buffer清理：提交指令时，清除该指令及之前的Store条目
         // 这确保Store指令提交到内存后，相应的Store Buffer条目被清除
@@ -244,6 +248,7 @@ void CommitStage::execute(CPUState& state) {
         // 处理跳转指令：只有is_jump=true的指令才会改变PC
         if (committed_inst->is_jump()) {
             state.pc = committed_inst->get_jump_target();
+            state.perf_counters.increment(PerfCounterId::JUMPS_COMMITTED);
             LOGT(COMMIT, "inst=%" PRId64 " jump to 0x%" PRIx64,
                 committed_inst->get_instruction_id(), committed_inst->get_jump_target());
             
@@ -381,6 +386,7 @@ void CommitStage::handle_exception(CPUState& state, const std::string& exception
 
 void CommitStage::flush_pipeline_after_commit(CPUState& state) {
     LOGT(COMMIT, "serializing event committed, start pipeline flush");
+    state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSHES);
     
     // 1. 清空取指缓冲区（错误推测的指令）
     while (!state.fetch_buffer.empty()) {

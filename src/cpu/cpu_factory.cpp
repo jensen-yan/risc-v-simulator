@@ -94,6 +94,10 @@ public:
     bool isDiffTestEnabled() const override { return cpu_->isDiffTestEnabled(); }
 
     StatsList getStats() const override { return cpu_->getStats(); }
+
+    bool dumpDetailedStatsToFile(const std::string& path) const override {
+        return cpu_->dumpStatsToFile(path);
+    }
     
     // 乱序执行CPU特有的功能
     OutOfOrderCPU* getOooCpu() { return cpu_.get(); }

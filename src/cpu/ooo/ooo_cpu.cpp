@@ -11,6 +11,7 @@
 #include "system/difftest.h"
 #include "system/syscall_handler.h"
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <iomanip>
 
@@ -60,6 +61,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.cycle_count = 0;
     state.branch_mispredicts = 0;
     state.pipeline_stalls = 0;
+    state.perf_counters.reset();
     state.reservation_valid = false;
     state.reservation_addr = 0;
     state.global_instruction_id = 0;
@@ -127,6 +129,7 @@ void OutOfOrderCPU::step() {
         
         // 增加周期计数
         cpu_state_.cycle_count++;
+        cpu_state_.perf_counters.increment(PerfCounterId::CYCLES);
     } catch (const MemoryException& e) {
         handle_exception(e.what(), cpu_state_.pc);
     } catch (const SimulatorException& e) {
@@ -285,12 +288,57 @@ int32_t OutOfOrderCPU::signExtend(uint32_t value, int bits) const {
 }
 
 ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
-    return {
-        {"instructions", cpu_state_.instruction_count, "Retired instruction count"},
-        {"cycles", cpu_state_.cycle_count, "Elapsed cycles"},
-        {"branch_mispredicts", cpu_state_.branch_mispredicts, "Branch mispredict count"},
-        {"pipeline_stalls", cpu_state_.pipeline_stalls, "Pipeline stall count"},
-    };
+    StatsList stats;
+    stats.reserve(4 + PerfCounterBank::NUM_COUNTERS);
+
+    // 兼容现有脚本字段
+    stats.push_back({"instructions", cpu_state_.perf_counters.value(PerfCounterId::INSTRUCTIONS_RETIRED),
+                    "Retired instruction count"});
+    stats.push_back({"cycles", cpu_state_.perf_counters.value(PerfCounterId::CYCLES),
+                    "Elapsed cycles"});
+    stats.push_back({"branch_mispredicts", cpu_state_.perf_counters.value(PerfCounterId::BRANCH_MISPREDICTS),
+                    "Branch mispredict count"});
+    stats.push_back({"pipeline_stalls", cpu_state_.perf_counters.value(PerfCounterId::PIPELINE_STALLS),
+                    "Pipeline stall count"});
+
+    for (size_t i = 0; i < PerfCounterBank::NUM_COUNTERS; ++i) {
+        const auto id = static_cast<PerfCounterId>(i);
+        const auto& meta = PerfCounterBank::meta(id);
+        stats.push_back({meta.name, cpu_state_.perf_counters.value(id), meta.description});
+    }
+
+    return stats;
+}
+
+void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
+    os << "---------- Begin Simulation Statistics ----------\n";
+
+    for (size_t i = 0; i < PerfCounterBank::NUM_COUNTERS; ++i) {
+        const auto id = static_cast<PerfCounterId>(i);
+        const auto& meta = PerfCounterBank::meta(id);
+        os << std::left << std::setw(40) << meta.name
+           << std::right << std::setw(16) << cpu_state_.perf_counters.value(id)
+           << " # " << meta.description << "\n";
+    }
+
+    const uint64_t cycles = cpu_state_.perf_counters.value(PerfCounterId::CYCLES);
+    const uint64_t retired = cpu_state_.perf_counters.value(PerfCounterId::INSTRUCTIONS_RETIRED);
+    const double ipc = cycles == 0 ? 0.0 : static_cast<double>(retired) / static_cast<double>(cycles);
+    os << std::left << std::setw(40) << "cpu.ipc"
+       << std::right << std::setw(16) << std::fixed << std::setprecision(6) << ipc
+       << " # Retired instructions per cycle\n";
+    os << "----------- End Simulation Statistics -----------\n";
+}
+
+bool OutOfOrderCPU::dumpStatsToFile(const std::string& path) const {
+    std::ofstream out(path);
+    if (!out.is_open()) {
+        LOGW(SYSTEM, "failed to open stats file: %s", path.c_str());
+        return false;
+    }
+
+    dumpDetailedStats(out);
+    return true;
 }
 
 void OutOfOrderCPU::dumpRegisters() const {

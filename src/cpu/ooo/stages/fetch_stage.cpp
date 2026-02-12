@@ -53,6 +53,7 @@ void FetchStage::execute(CPUState& state) {
             }
             
             state.fetch_buffer.push(fetched);
+            state.perf_counters.increment(PerfCounterId::FETCHED_INSTRUCTIONS);
             
         } catch (const MemoryException& e) {
             // 取指失败，停止取指但等待流水线清空
@@ -69,6 +70,7 @@ void FetchStage::execute(CPUState& state) {
         }
     } else {
         LOGT(FETCH, "fetch buffer full(size=%zu), skip fetch", state.fetch_buffer.size());
+        state.recordPipelineStall(PerfCounterId::STALL_FETCH_BUFFER_FULL);
     }
     
     // 每个周期结束时检查是否应该停机

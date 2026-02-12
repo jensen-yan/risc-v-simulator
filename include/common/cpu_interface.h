@@ -67,6 +67,12 @@ public:
 
     // 性能统计（默认返回空）
     virtual StatsList getStats() const { return {}; }
+
+    // 导出详细统计到文件（默认不支持）
+    virtual bool dumpDetailedStatsToFile(const std::string& path) const {
+        (void)path;
+        return false;
+    }
 };
 
 /**

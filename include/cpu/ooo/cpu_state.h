@@ -7,6 +7,7 @@
 #include "cpu/ooo/reservation_station.h"
 #include "cpu/ooo/reorder_buffer.h"
 #include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/perf_counters.h"
 #include "cpu/ooo/ooo_types.h"
 #include "cpu/ooo/dynamic_inst.h"
 #include "system/syscall_handler.h"
@@ -91,6 +92,7 @@ struct CPUState {
     std::array<ExecutionUnit, 1> store_units;    // 1个存储单元
     
     // 性能统计
+    PerfCounterBank perf_counters; // 结构化性能计数器
     uint64_t branch_mispredicts;   // 分支预测错误次数
     uint64_t pipeline_stalls;      // 流水线停顿次数
 
@@ -124,6 +126,20 @@ struct CPUState {
         
         // 批量初始化执行单元
         initializeExecutionUnits();
+    }
+
+    // 兼容旧统计字段，同时维护结构化计数器。
+    void recordPipelineStall(PerfCounterId reason) {
+        ++pipeline_stalls;
+        perf_counters.increment(PerfCounterId::PIPELINE_STALLS);
+        if (reason != PerfCounterId::PIPELINE_STALLS) {
+            perf_counters.increment(reason);
+        }
+    }
+
+    void recordBranchMispredict() {
+        ++branch_mispredicts;
+        perf_counters.increment(PerfCounterId::BRANCH_MISPREDICTS);
     }
 
 private:

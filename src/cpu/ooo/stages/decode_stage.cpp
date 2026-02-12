@@ -20,7 +20,7 @@ void DecodeStage::execute(CPUState& state) {
     // 如果ROB已满，无法译码
     if (!state.reorder_buffer->has_free_entry()) {
         LOGT(DECODE, "rob full, decode stalled");
-        state.pipeline_stalls++;
+        state.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
         return;
     }
     
@@ -47,9 +47,11 @@ void DecodeStage::execute(CPUState& state) {
         // ROB分配失败，放回取指缓冲区
         state.fetch_buffer.push(fetched);
         LOGT(DECODE, "rob allocation failed, push instruction back to fetch buffer");
-        state.pipeline_stalls++;
+        state.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
         return;
     }
+
+    state.perf_counters.increment(PerfCounterId::DECODED_INSTRUCTIONS);
     
     LOGT(DECODE, "allocated rob[%d], pc=0x%" PRIx64 ", inst=%" PRId64,
         dynamic_inst->get_rob_entry(), fetched.pc, instruction_id);

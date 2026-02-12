@@ -85,6 +85,7 @@ void printUsage(const char* programName) {
     std::cout << "  --tohost-addr=ADDR           Override tohost address (hex/dec)\n";
     std::cout << "  --fromhost-addr=ADDR         Override fromhost address (hex/dec)\n";
     std::cout << "  --isa=ISA                    Override enabled ISA extensions (e.g. RV64I_Zicsr)\n";
+    std::cout << "  --stats-file=FILE            Dump detailed OOO stats to FILE\n";
     std::cout << "  +signature=FILE              Spike-compatible signature file option\n";
     std::cout << "  +signature-granularity=N     Spike-compatible granularity option\n";
     std::cout << "\n";
@@ -153,6 +154,7 @@ int main(int argc, char* argv[]) {
     bool tohostAddrSet = false;
     bool fromhostAddrSet = false;
     std::string isaString;
+    std::string statsFile;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -220,6 +222,8 @@ int main(int argc, char* argv[]) {
             fromhostAddrSet = true;
         } else if (arg.find("--isa=") == 0) {
             isaString = arg.substr(6);
+        } else if (arg.find("--stats-file=") == 0) {
+            statsFile = arg.substr(13);
         } else if (filename.empty()) {
             filename = arg;
         }
@@ -424,6 +428,14 @@ int main(int argc, char* argv[]) {
                 }
             } else {
                 std::cout << "Warning: failed to get OOO CPU stats\n";
+            }
+
+            if (!statsFile.empty()) {
+                if (simulator.getCpu()->dumpDetailedStatsToFile(statsFile)) {
+                    std::cout << "Detailed OOO stats dumped to: " << statsFile << "\n";
+                } else {
+                    std::cout << "Warning: failed to dump OOO stats to file: " << statsFile << "\n";
+                }
             }
         }
 

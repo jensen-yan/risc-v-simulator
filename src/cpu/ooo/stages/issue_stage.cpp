@@ -23,6 +23,7 @@ void IssueStage::execute(CPUState& state) {
     auto dispatchable_entry = state.reorder_buffer->get_dispatchable_entry();
     if (!dispatchable_entry) {  // 没有可发射的指令
         LOGT(ISSUE, "no dispatchable instruction");
+        state.recordPipelineStall(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE);
         return;
     }
     
@@ -41,7 +42,7 @@ void IssueStage::execute(CPUState& state) {
             InstructionExecutor::isFloatingPointInstruction(head_inst->get_decoded_info()) &&
             head_entry != dispatchable_entry->get_rob_entry()) {
             LOGT(ISSUE, "fp instruction at ROB head, block younger issue");
-            state.pipeline_stalls++;
+            state.recordPipelineStall(PerfCounterId::STALL_ISSUE_FP_HEAD_BLOCKED);
             return;
         }
     }
@@ -52,7 +53,7 @@ void IssueStage::execute(CPUState& state) {
         InstructionExecutor::isCsrInstruction(decoded_info)) {
         if (head_entry != dispatchable_entry->get_rob_entry()) {
             LOGT(ISSUE, "csr instruction waits for ROB head commit");
-            state.pipeline_stalls++;
+            state.recordPipelineStall(PerfCounterId::STALL_ISSUE_CSR_HEAD_BLOCKED);
             return;
         }
     }
@@ -60,7 +61,7 @@ void IssueStage::execute(CPUState& state) {
     // 检查保留站是否有空闲表项
     if (!state.reservation_station->has_free_entry()) {
         LOGT(ISSUE, "reservation station full, issue stalled");
-        state.pipeline_stalls++;
+        state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
         return;
     }
 
@@ -68,7 +69,7 @@ void IssueStage::execute(CPUState& state) {
     if (InstructionExecutor::isFloatingPointInstruction(decoded_info)) {
         if (head_entry != dispatchable_entry->get_rob_entry()) {
             LOGT(ISSUE, "fp instruction waits for ROB head commit");
-            state.pipeline_stalls++;
+            state.recordPipelineStall(PerfCounterId::STALL_ISSUE_FP_HEAD_BLOCKED);
             return;
         }
         const bool fp_write_int = InstructionExecutor::isFPIntegerDestination(decoded_info);
@@ -77,7 +78,7 @@ void IssueStage::execute(CPUState& state) {
             auto rename_result = state.register_rename->rename_instruction(dispatchable_entry->get_decoded_info());
             if (!rename_result.success) {
                 LOGT(ISSUE, "rename failed for fp-int instruction");
-                state.pipeline_stalls++;
+                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RENAME_FAIL);
                 return;
             }
 
@@ -91,12 +92,13 @@ void IssueStage::execute(CPUState& state) {
             if (!issue_result.success) {
                 LOGT(ISSUE, "rs issue failed for fp-int instruction");
                 state.register_rename->release_physical_register(rename_result.dest_reg);
-                state.pipeline_stalls++;
+                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
                 return;
             }
 
             LOGT(ISSUE, "issued fp-int inst=%" PRId64 " to rs[%d]",
                  dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
+            state.perf_counters.increment(PerfCounterId::ISSUED_INSTRUCTIONS);
             dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
             return;
         } else {
@@ -115,12 +117,13 @@ void IssueStage::execute(CPUState& state) {
             auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
             if (!issue_result.success) {
                 LOGT(ISSUE, "rs issue failed for fp instruction");
-                state.pipeline_stalls++;
+                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
                 return;
             }
 
             LOGT(ISSUE, "issued fp inst=%" PRId64 " to rs[%d]",
                  dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
+            state.perf_counters.increment(PerfCounterId::ISSUED_INSTRUCTIONS);
             dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
             return;
         }
@@ -130,7 +133,7 @@ void IssueStage::execute(CPUState& state) {
     auto rename_result = state.register_rename->rename_instruction(dispatchable_entry->get_decoded_info());
     if (!rename_result.success) {
         LOGT(ISSUE, "rename failed, issue stalled");
-        state.pipeline_stalls++;
+        state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RENAME_FAIL);
         return;
     }
     
@@ -148,12 +151,13 @@ void IssueStage::execute(CPUState& state) {
     if (!issue_result.success) {
         LOGT(ISSUE, "rs issue failed, rollback rename");
         state.register_rename->release_physical_register(rename_result.dest_reg);
-        state.pipeline_stalls++;
+        state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
         return;
     }
     
     LOGT(ISSUE, "issued inst=%" PRId64 " to rs[%d]",
         dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
+    state.perf_counters.increment(PerfCounterId::ISSUED_INSTRUCTIONS);
     
     // 更新指令状态，标记为已发射到保留站
     dispatchable_entry->set_status(DynamicInst::Status::ISSUED);

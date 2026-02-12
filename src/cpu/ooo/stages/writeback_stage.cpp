@@ -27,6 +27,8 @@ void WritebackStage::execute(CPUState& state) {
         
         LOGT(WRITEBACK, "cdb writeback: rob[%d] p%d = 0x%" PRIx64,
                 rob_entry, static_cast<int>(phys_dest), result);
+
+        state.perf_counters.increment(PerfCounterId::WRITEBACKS);
         
         // 更新保留站中的操作数
         state.reservation_station->update_operands(cdb_entry);

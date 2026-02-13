@@ -38,6 +38,9 @@ private:
                                      CPUState& state,
                                      CacheAccessType access_type,
                                      PerfCounterId stall_counter_id);
+    void record_dcache_access_result(CPUState& state,
+                                     CacheAccessType access_type,
+                                     const CacheAccessResult& cache_result);
     void reset_execution_units(CPUState& state);
     
     // 执行单元重置的辅助函数

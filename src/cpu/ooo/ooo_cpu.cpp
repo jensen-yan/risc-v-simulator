@@ -38,8 +38,7 @@ void resetSingleExecutionUnit(ExecutionUnit& unit) {
     unit.is_jump = false;
     unit.load_address = 0;
     unit.load_size = 0;
-    unit.dcache_request_sent = false;
-    unit.waiting_on_dcache = false;
+    unit.dcache.reset();
 }
 
 void resetAllExecutionUnits(CPUState& state) {
@@ -80,11 +79,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.branch_mispredicts = 0;
     state.pipeline_stalls = 0;
     state.perf_counters.reset();
-    state.icache_wait_cycles = 0;
-    state.icache_request_pending = false;
-    state.icache_request_pc = 0;
-    state.icache_pending_instruction_valid = false;
-    state.icache_pending_instruction = 0;
+    state.icache.reset();
     state.reservation_valid = false;
     state.reservation_addr = 0;
     state.global_instruction_id = 0;
@@ -333,11 +328,7 @@ void OutOfOrderCPU::flush_pipeline() {
     if (cpu_state_.l1d_cache) {
         cpu_state_.l1d_cache->flushInFlight();
     }
-    cpu_state_.icache_wait_cycles = 0;
-    cpu_state_.icache_request_pending = false;
-    cpu_state_.icache_request_pc = 0;
-    cpu_state_.icache_pending_instruction_valid = false;
-    cpu_state_.icache_pending_instruction = 0;
+    cpu_state_.icache.reset();
 }
 
 bool OutOfOrderCPU::predict_branch(uint64_t pc) {

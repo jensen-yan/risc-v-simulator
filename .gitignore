@@ -1,6 +1,7 @@
 # 构建目录
 build/
 build-codex/
+build-debug/
 build_coverage/
 cmake-build-*/
 

@@ -38,8 +38,7 @@ void ExecuteStage::execute(CPUState& state) {
             unit->busy = true;
             unit->instruction = dispatch_result.instruction;
             unit->has_exception = false;
-            unit->dcache_request_sent = false;
-            unit->waiting_on_dcache = false;
+            unit->dcache.reset();
             
             const char* unit_type_str = "";
             
@@ -265,8 +264,7 @@ void ExecuteStage::reset_single_unit(ExecutionUnit& unit) {
     unit.exception_msg.clear();
     unit.load_address = 0;
     unit.load_size = 0;
-    unit.dcache_request_sent = false;
-    unit.waiting_on_dcache = false;
+    unit.dcache.reset();
 }
 
 template<typename UnitContainer>
@@ -340,29 +338,9 @@ void ExecuteStage::reset() {
     LOGT(EXECUTE, "execute stage reset");
 }
 
-bool ExecuteStage::start_or_wait_dcache_access(ExecutionUnit& unit,
-                                               CPUState& state,
+void ExecuteStage::record_dcache_access_result(CPUState& state,
                                                CacheAccessType access_type,
-                                               PerfCounterId stall_counter_id) {
-    if (!state.l1d_cache) {
-        unit.waiting_on_dcache = false;
-        return true;
-    }
-
-    if (unit.dcache_request_sent) {
-        unit.waiting_on_dcache = false;
-        return true;
-    }
-
-    const auto cache_result = state.l1d_cache->access(
-        state.memory, unit.load_address, unit.load_size, access_type);
-    if (cache_result.blocked) {
-        unit.waiting_on_dcache = true;
-        unit.remaining_cycles = 1;
-        state.perf_counters.increment(stall_counter_id);
-        return false;
-    }
-
+                                               const CacheAccessResult& cache_result) {
     state.perf_counters.increment(PerfCounterId::CACHE_L1D_ACCESSES);
     if (access_type == CacheAccessType::Read) {
         state.perf_counters.increment(PerfCounterId::CACHE_L1D_READ_ACCESSES);
@@ -379,9 +357,35 @@ bool ExecuteStage::start_or_wait_dcache_access(ExecutionUnit& unit,
     if (cache_result.dirty_eviction) {
         state.perf_counters.increment(PerfCounterId::CACHE_L1D_DIRTY_EVICTIONS);
     }
+}
 
-    unit.dcache_request_sent = true;
-    unit.waiting_on_dcache = true;
+bool ExecuteStage::start_or_wait_dcache_access(ExecutionUnit& unit,
+                                               CPUState& state,
+                                               CacheAccessType access_type,
+                                               PerfCounterId stall_counter_id) {
+    if (!state.l1d_cache) {
+        unit.dcache.waiting = false;
+        return true;
+    }
+
+    if (unit.dcache.request_sent) {
+        unit.dcache.waiting = false;
+        return true;
+    }
+
+    const auto cache_result = state.l1d_cache->access(
+        state.memory, unit.load_address, unit.load_size, access_type);
+    if (cache_result.blocked) {
+        unit.dcache.waiting = true;
+        unit.remaining_cycles = 1;
+        state.perf_counters.increment(stall_counter_id);
+        return false;
+    }
+
+    record_dcache_access_result(state, access_type, cache_result);
+
+    unit.dcache.request_sent = true;
+    unit.dcache.waiting = true;
 
     const int extra_cycles = std::max(0, cache_result.latency_cycles - 1);
     if (extra_cycles > 0) {
@@ -390,7 +394,7 @@ bool ExecuteStage::start_or_wait_dcache_access(ExecutionUnit& unit,
         return false;
     }
 
-    unit.waiting_on_dcache = false;
+    unit.dcache.waiting = false;
     return true;
 }
 
@@ -400,7 +404,7 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
     uint8_t access_size = unit.load_size;
     auto& memory_info = unit.instruction->get_memory_info();
     
-    if (!unit.dcache_request_sent) {
+    if (!unit.dcache.request_sent) {
         // 尝试Store-to-Load Forwarding
         uint64_t forwarded_value = 0;
         bool blocked = false;
@@ -503,22 +507,13 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
             }
 
             if (cache_result.blocked) {
-                unit.waiting_on_dcache = true;
+                unit.dcache.waiting = true;
                 unit.remaining_cycles = 1;
                 state.perf_counters.increment(PerfCounterId::CACHE_L1D_STALL_CYCLES_LOAD);
                 return LoadExecutionResult::WaitingForCache;
             }
 
-            state.perf_counters.increment(PerfCounterId::CACHE_L1D_ACCESSES);
-            state.perf_counters.increment(PerfCounterId::CACHE_L1D_READ_ACCESSES);
-            if (cache_result.hit) {
-                state.perf_counters.increment(PerfCounterId::CACHE_L1D_HITS);
-            } else {
-                state.perf_counters.increment(PerfCounterId::CACHE_L1D_MISSES);
-            }
-            if (cache_result.dirty_eviction) {
-                state.perf_counters.increment(PerfCounterId::CACHE_L1D_DIRTY_EVICTIONS);
-            }
+            record_dcache_access_result(state, CacheAccessType::Read, cache_result);
 
             if (inst.opcode == Opcode::LOAD_FP) {
                 if (access_size == 4) {
@@ -562,8 +557,8 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
 
             memory_info.memory_value = unit.result;
             state.perf_counters.increment(PerfCounterId::LOADS_FROM_MEMORY);
-            unit.dcache_request_sent = true;
-            unit.waiting_on_dcache = true;
+            unit.dcache.request_sent = true;
+            unit.dcache.waiting = true;
 
             const int extra_cycles = std::max(0, cache_result.latency_cycles - 1);
             if (extra_cycles > 0) {
@@ -573,18 +568,18 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
                 return LoadExecutionResult::WaitingForCache;
             }
 
-            unit.waiting_on_dcache = false;
+            unit.dcache.waiting = false;
             return LoadExecutionResult::LoadedFromMemory;
         } catch (const SimulatorException& e) {
             unit.has_exception = true;
             unit.exception_msg = e.what();
             unit.result = 0;
-            unit.waiting_on_dcache = false;
+            unit.dcache.waiting = false;
             return LoadExecutionResult::Exception;
         }
     }
 
-    unit.waiting_on_dcache = false;
+    unit.dcache.waiting = false;
     return LoadExecutionResult::LoadedFromMemory;
 }
 

@@ -89,12 +89,14 @@ CacheAccessResult BlockingCache::fetchInstruction(std::shared_ptr<Memory> memory
     }
 
     uint64_t first_half_raw = 0;
+    // 先取低16位：既能直接得到压缩指令，也能判断是否需要再取高16位。
     auto first_result = load(memory, address, /*size=*/2, first_half_raw);
     if (first_result.blocked) {
         return first_result;
     }
 
     const uint16_t first_half = static_cast<uint16_t>(first_half_raw & 0xFFFFU);
+    // RISC-V C扩展约定：最低2位 != 0b11 表示16位压缩指令。
     if ((first_half & 0x03U) != 0x03U) {
         instruction = static_cast<uint32_t>(first_half);
         return first_result;
@@ -105,6 +107,8 @@ CacheAccessResult BlockingCache::fetchInstruction(std::shared_ptr<Memory> memory
     if (second_result.blocked) {
         const uint64_t first_line = address / config_.line_size_bytes;
         const uint64_t second_line = (address + 2) / config_.line_size_bytes;
+        // 特例：第一拍是 miss 且两半指令其实同一条 cache line。
+        // 此时第一拍 miss 已把整行装入cache，第二拍若仅因 in-flight miss 被阻塞，可直接回读高16位。
         if (!first_result.hit && first_line == second_line) {
             const uint16_t recovered_second_half = static_cast<uint16_t>(
                 static_cast<uint16_t>(readCachedByte(address + 2)) |
@@ -121,6 +125,7 @@ CacheAccessResult BlockingCache::fetchInstruction(std::shared_ptr<Memory> memory
 
     CacheAccessResult merged{};
     merged.hit = first_result.hit && second_result.hit;
+    // 一条32位指令由两次2B访问组成，总延迟取两者较慢者，命中需两次都命中。
     merged.latency_cycles = std::max(first_result.latency_cycles, second_result.latency_cycles);
     merged.dirty_eviction = first_result.dirty_eviction || second_result.dirty_eviction;
     return merged;

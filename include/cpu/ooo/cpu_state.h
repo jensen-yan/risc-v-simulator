@@ -34,6 +34,18 @@ struct FetchedInstruction {
  * 执行单元状态
  */
 struct ExecutionUnit {
+    struct DCacheAccessState {
+        bool request_sent;
+        bool waiting;
+
+        DCacheAccessState() : request_sent(false), waiting(false) {}
+
+        void reset() {
+            request_sent = false;
+            waiting = false;
+        }
+    };
+
     bool busy;
     int remaining_cycles;
     DynamicInstPtr instruction;    // 使用DynamicInst指针代替原来的副本
@@ -46,8 +58,51 @@ struct ExecutionUnit {
     // Load指令相关字段
     uint64_t load_address;
     uint8_t load_size;
-    bool dcache_request_sent;
-    bool waiting_on_dcache;
+    DCacheAccessState dcache;
+};
+
+struct ICacheFetchState {
+    int wait_cycles;
+    bool request_pending;
+    uint64_t request_pc;
+    bool pending_instruction_valid;
+    Instruction pending_instruction;
+
+    ICacheFetchState()
+        : wait_cycles(0),
+          request_pending(false),
+          request_pc(0),
+          pending_instruction_valid(false),
+          pending_instruction(0) {}
+
+    void reset() {
+        wait_cycles = 0;
+        request_pending = false;
+        request_pc = 0;
+        pending_instruction_valid = false;
+        pending_instruction = 0;
+    }
+
+    bool hasPendingFor(uint64_t pc) const {
+        return request_pending && pending_instruction_valid && request_pc == pc;
+    }
+
+    bool consumeIfMatch(uint64_t pc, Instruction& instruction_out) {
+        if (!hasPendingFor(pc)) {
+            return false;
+        }
+        instruction_out = pending_instruction;
+        reset();
+        return true;
+    }
+
+    void startMissWait(uint64_t pc, Instruction instruction_in, int latency_cycles) {
+        wait_cycles = (latency_cycles > 1) ? (latency_cycles - 1) : 0;
+        request_pending = true;
+        request_pc = pc;
+        pending_instruction_valid = true;
+        pending_instruction = instruction_in;
+    }
 };
 
 /**
@@ -96,11 +151,7 @@ struct CPUState {
     // L1 cache（时序+功能模型）
     std::unique_ptr<BlockingCache> l1i_cache;
     std::unique_ptr<BlockingCache> l1d_cache;
-    int icache_wait_cycles;
-    bool icache_request_pending;
-    uint64_t icache_request_pc;
-    bool icache_pending_instruction_valid;
-    Instruction icache_pending_instruction;
+    ICacheFetchState icache;
     
     // 执行单元
     std::array<ExecutionUnit, 2> alu_units;      // 2个ALU单元
@@ -130,11 +181,6 @@ struct CPUState {
                           static_cast<uint32_t>(Extension::D) |
                           static_cast<uint32_t>(Extension::C)),
         cpu_interface(nullptr),
-        icache_wait_cycles(0),
-        icache_request_pending(false),
-        icache_request_pc(0),
-        icache_pending_instruction_valid(false),
-        icache_pending_instruction(0),
         branch_mispredicts(0), pipeline_stalls(0),
         reservation_valid(false), reservation_addr(0),
         global_instruction_id(0) {
@@ -177,8 +223,7 @@ private:
             unit.is_jump = false;
             unit.load_address = 0;
             unit.load_size = 0;
-            unit.dcache_request_sent = false;
-            unit.waiting_on_dcache = false;
+            unit.dcache.reset();
         };
         
         for (auto& unit : alu_units) initUnit(unit);

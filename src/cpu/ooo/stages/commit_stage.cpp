@@ -555,11 +555,7 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state, FlushReason reaso
     if (state.l1d_cache) {
         state.l1d_cache->flushInFlight();
     }
-    state.icache_wait_cycles = 0;
-    state.icache_request_pending = false;
-    state.icache_request_pc = 0;
-    state.icache_pending_instruction_valid = false;
-    state.icache_pending_instruction = 0;
+    state.icache.reset();
 
     // 7. 清除LR/SC预留状态，避免被冲刷的推测性LR残留可见状态。
     state.reservation_valid = false;
@@ -581,8 +577,7 @@ void CommitStage::reset_execution_units(CPUState& state) {
         unit.jump_target = 0;
         unit.load_address = 0;
         unit.load_size = 0;
-        unit.dcache_request_sent = false;
-        unit.waiting_on_dcache = false;
+        unit.dcache.reset();
     }
     
     for (auto& unit : state.branch_units) {
@@ -593,8 +588,7 @@ void CommitStage::reset_execution_units(CPUState& state) {
         unit.jump_target = 0;
         unit.load_address = 0;
         unit.load_size = 0;
-        unit.dcache_request_sent = false;
-        unit.waiting_on_dcache = false;
+        unit.dcache.reset();
     }
     
     for (auto& unit : state.load_units) {
@@ -605,8 +599,7 @@ void CommitStage::reset_execution_units(CPUState& state) {
         unit.jump_target = 0;
         unit.load_address = 0;
         unit.load_size = 0;
-        unit.dcache_request_sent = false;
-        unit.waiting_on_dcache = false;
+        unit.dcache.reset();
     }
     
     for (auto& unit : state.store_units) {
@@ -617,8 +610,7 @@ void CommitStage::reset_execution_units(CPUState& state) {
         unit.jump_target = 0;
         unit.load_address = 0;
         unit.load_size = 0;
-        unit.dcache_request_sent = false;
-        unit.waiting_on_dcache = false;
+        unit.dcache.reset();
     }
 }
 

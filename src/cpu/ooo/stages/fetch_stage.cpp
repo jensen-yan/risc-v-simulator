@@ -18,11 +18,11 @@ void FetchStage::execute(CPUState& state) {
     }
 
     // I$ miss等待：倒计时到0的这个周期允许继续取指，避免多等一个周期。
-    if (state.icache_wait_cycles > 0) {
-        --state.icache_wait_cycles;
+    if (state.icache.wait_cycles > 0) {
+        --state.icache.wait_cycles;
         state.perf_counters.increment(PerfCounterId::CACHE_L1I_STALL_CYCLES);
-        if (state.icache_wait_cycles > 0) {
-            LOGT(FETCH, "icache waiting, remaining=%d", state.icache_wait_cycles);
+        if (state.icache.wait_cycles > 0) {
+            LOGT(FETCH, "icache waiting, remaining=%d", state.icache.wait_cycles);
             return;
         }
         LOGT(FETCH, "icache wait completed, resume fetch");
@@ -33,17 +33,8 @@ void FetchStage::execute(CPUState& state) {
         try {
             const uint64_t fetch_pc = state.pc;
             Instruction raw_inst = 0;
-            const bool use_pending_icache_request =
-                state.icache_request_pending &&
-                state.icache_pending_instruction_valid &&
-                state.icache_request_pc == fetch_pc;
-
+            const bool use_pending_icache_request = state.icache.consumeIfMatch(fetch_pc, raw_inst);
             if (use_pending_icache_request) {
-                raw_inst = state.icache_pending_instruction;
-                state.icache_request_pending = false;
-                state.icache_request_pc = 0;
-                state.icache_pending_instruction_valid = false;
-                state.icache_pending_instruction = 0;
                 LOGT(FETCH, "reuse resolved icache miss request, pc=0x%" PRIx64, fetch_pc);
             } else if (state.l1i_cache) {
                 Instruction fetched_inst = 0;
@@ -59,23 +50,16 @@ void FetchStage::execute(CPUState& state) {
                     state.perf_counters.increment(PerfCounterId::CACHE_L1I_HITS);
                 } else {
                     state.perf_counters.increment(PerfCounterId::CACHE_L1I_MISSES);
-                    state.icache_wait_cycles = std::max(0, cache_result.latency_cycles - 1);
-                    state.icache_request_pending = true;
-                    state.icache_request_pc = fetch_pc;
-                    state.icache_pending_instruction_valid = true;
-                    state.icache_pending_instruction = fetched_inst;
+                    state.icache.startMissWait(fetch_pc, fetched_inst, cache_result.latency_cycles);
                     LOGT(FETCH, "icache miss: pc=0x%" PRIx64 ", latency=%d, wait=%d",
-                         fetch_pc, cache_result.latency_cycles, state.icache_wait_cycles);
-                    if (state.icache_wait_cycles > 0) {
+                         fetch_pc, cache_result.latency_cycles, state.icache.wait_cycles);
+                    if (state.icache.wait_cycles > 0) {
                         return;
                     }
                 }
 
                 raw_inst = fetched_inst;
-                state.icache_request_pending = false;
-                state.icache_request_pc = 0;
-                state.icache_pending_instruction_valid = false;
-                state.icache_pending_instruction = 0;
+                state.icache.reset();
             } else {
                 raw_inst = state.memory->fetchInstruction(fetch_pc);
             }

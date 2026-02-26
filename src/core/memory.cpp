@@ -5,6 +5,7 @@
 #include <fstream>
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 namespace riscv {
 
@@ -27,8 +28,7 @@ uint8_t Memory::readByte(Address addr) const {
 }
 
 void Memory::writeByte(Address addr, uint8_t value) {
-    checkAddress(addr, 1);
-    memory_.get()[addr] = value;
+    writeByteRaw(addr, value);
 }
 
 uint16_t Memory::readHalfWord(Address addr) const {
@@ -41,11 +41,7 @@ uint16_t Memory::readHalfWord(Address addr) const {
 }
 
 void Memory::writeHalfWord(Address addr, uint16_t value) {
-    checkAddress(addr, 2);
-    
-    // 小端序存储
-    memory_.get()[addr] = static_cast<uint8_t>(value & 0xFF);
-    memory_.get()[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    writeHalfWordRaw(addr, value);
 }
 
 uint32_t Memory::readWord(Address addr) const {
@@ -64,14 +60,7 @@ void Memory::writeWord(Address addr, uint32_t value) {
         handleTohost(static_cast<uint64_t>(value));
         return;
     }
-
-    checkAddress(addr, 4);
-    
-    // 小端序存储
-    memory_.get()[addr] = static_cast<uint8_t>(value & 0xFF);
-    memory_.get()[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
-    memory_.get()[addr + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
-    memory_.get()[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+    writeWordRaw(addr, value);
 }
 
 uint64_t Memory::read64(Address addr) const {
@@ -95,18 +84,28 @@ void Memory::write64(Address addr, uint64_t value) {
         handleTohost(value);
         return;
     }
-    
-    checkAddress(addr, 8);
-    
-    // 小端序存储
-    memory_.get()[addr] = static_cast<uint8_t>(value & 0xFF);
-    memory_.get()[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
-    memory_.get()[addr + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
-    memory_.get()[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
-    memory_.get()[addr + 4] = static_cast<uint8_t>((value >> 32) & 0xFF);
-    memory_.get()[addr + 5] = static_cast<uint8_t>((value >> 40) & 0xFF);
-    memory_.get()[addr + 6] = static_cast<uint8_t>((value >> 48) & 0xFF);
-    memory_.get()[addr + 7] = static_cast<uint8_t>((value >> 56) & 0xFF);
+    write64Raw(addr, value);
+}
+
+void Memory::writeByteExternal(Address addr, uint8_t value) {
+    writeByteRaw(addr, value);
+    notifyExternalWrite(addr, 1);
+}
+
+void Memory::writeHalfWordExternal(Address addr, uint16_t value) {
+    writeHalfWordRaw(addr, value);
+    notifyExternalWrite(addr, 2);
+}
+
+void Memory::writeWordExternal(Address addr, uint32_t value) {
+    writeWordRaw(addr, value);
+    notifyExternalWrite(addr, 4);
+}
+
+void Memory::write64External(Address addr, uint64_t value) {
+    write64Raw(addr, value);
+    // 外部写必须通知观察者；否则CPU私有cache可能读取到旧行。
+    notifyExternalWrite(addr, 8);
 }
 
 Instruction Memory::fetchInstruction(Address addr) const {
@@ -191,6 +190,46 @@ void Memory::checkAddress(Address addr, size_t accessSize) const {
     }
 }
 
+void Memory::notifyExternalWrite(Address addr, size_t accessSize) {
+    // 统一外部写事件入口：Memory不关心具体策略，由观察者决定如何做一致性处理。
+    for (const auto& observer : external_write_observers_) {
+        if (observer.callback) {
+            observer.callback(addr, accessSize);
+        }
+    }
+}
+
+void Memory::writeByteRaw(Address addr, uint8_t value) {
+    checkAddress(addr, 1);
+    memory_.get()[addr] = value;
+}
+
+void Memory::writeHalfWordRaw(Address addr, uint16_t value) {
+    checkAddress(addr, 2);
+    memory_.get()[addr] = static_cast<uint8_t>(value & 0xFF);
+    memory_.get()[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+}
+
+void Memory::writeWordRaw(Address addr, uint32_t value) {
+    checkAddress(addr, 4);
+    memory_.get()[addr] = static_cast<uint8_t>(value & 0xFF);
+    memory_.get()[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    memory_.get()[addr + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    memory_.get()[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+}
+
+void Memory::write64Raw(Address addr, uint64_t value) {
+    checkAddress(addr, 8);
+    memory_.get()[addr] = static_cast<uint8_t>(value & 0xFF);
+    memory_.get()[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    memory_.get()[addr + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    memory_.get()[addr + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+    memory_.get()[addr + 4] = static_cast<uint8_t>((value >> 32) & 0xFF);
+    memory_.get()[addr + 5] = static_cast<uint8_t>((value >> 40) & 0xFF);
+    memory_.get()[addr + 6] = static_cast<uint8_t>((value >> 48) & 0xFF);
+    memory_.get()[addr + 7] = static_cast<uint8_t>((value >> 56) & 0xFF);
+}
+
 void Memory::handleTohost(uint64_t value) {
     if (value == 0) {
         // 忽略零值写入
@@ -232,28 +271,46 @@ void Memory::processSyscall(Address magic_mem_addr) {
                 std::cout.write(buffer.data(), arg2);
                 std::cout.flush();
                 
-                // 返回成功
-                write64(magic_mem_addr, arg2); // 返回写入的字节数
+                // 返回成功属于“外部写回”（非CPU流水线写），必须走External路径。
+                write64External(magic_mem_addr, arg2);
             }
         } else {
             LOGW(SYSTEM, "[tohost] unsupported syscall: %" PRIx64, syscall_num);
-            // 返回错误
-            write64(magic_mem_addr, static_cast<uint64_t>(-1));
+            // 返回错误同样属于外部写回。
+            write64External(magic_mem_addr, static_cast<uint64_t>(-1));
         }
         
-        // 写入 fromhost 表示处理完成，解除程序等待
-        write64(fromhost_addr_, 1);
+        // 写入 fromhost 属于外部设备语义，走External路径保持一致性。
+        write64External(fromhost_addr_, 1);
         
     } catch (const MemoryException& e) {
         LOGE(SYSTEM, "[tohost] syscall handling error: %s", e.what());
         // 写入 fromhost 表示处理完成（即使出错）
-        write64(fromhost_addr_, 1);
+        write64External(fromhost_addr_, 1);
     }
 }
 
 void Memory::setHostCommAddresses(Address tohostAddr, Address fromhostAddr) {
     tohost_addr_ = tohostAddr;
     fromhost_addr_ = fromhostAddr;
+}
+
+Memory::ExternalWriteObserverId Memory::addExternalWriteObserver(ExternalWriteObserver observer) {
+    const ExternalWriteObserverId id = next_external_write_observer_id_++;
+    external_write_observers_.push_back({id, std::move(observer)});
+    return id;
+}
+
+void Memory::removeExternalWriteObserver(ExternalWriteObserverId id) {
+    external_write_observers_.erase(
+        std::remove_if(external_write_observers_.begin(),
+                       external_write_observers_.end(),
+                       [id](const ExternalWriteObserverEntry& entry) { return entry.id == id; }),
+        external_write_observers_.end());
+}
+
+void Memory::clearExternalWriteObservers() {
+    external_write_observers_.clear();
 }
 
 } // namespace riscv

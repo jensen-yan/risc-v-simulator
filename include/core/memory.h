@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/types.h"
+#include <functional>
 #include <vector>
 #include <memory>
 #include <cstdlib>
@@ -13,6 +14,9 @@ namespace riscv {
  */
 class Memory {
 public:
+    using ExternalWriteObserver = std::function<void(Address, size_t)>;
+    using ExternalWriteObserverId = uint64_t;
+
     static constexpr size_t DEFAULT_SIZE = 1 * 1024 * 1024; // 默认1MB内存
     
     explicit Memory(size_t size = DEFAULT_SIZE);
@@ -37,6 +41,13 @@ public:
     // 双字访问（64位）
     uint64_t read64(Address addr) const;
     void write64(Address addr, uint64_t value);
+
+    // 外部写入（设备/宿主等绕过CPU缓存路径写内存）。
+    // 与普通 write* 的区别：会触发外部写通知，供cache做一致性处理。
+    void writeByteExternal(Address addr, uint8_t value);
+    void writeHalfWordExternal(Address addr, uint16_t value);
+    void writeWordExternal(Address addr, uint32_t value);
+    void write64External(Address addr, uint64_t value);
     
     // 指令获取
     Instruction fetchInstruction(Address addr) const;
@@ -58,8 +69,19 @@ public:
     void setHostCommAddresses(Address tohostAddr, Address fromhostAddr);
     Address getTohostAddr() const { return tohost_addr_; }
     Address getFromhostAddr() const { return fromhost_addr_; }
+
+    // 外部写观察者（用于cache一致性失效等）。
+    // 约定：回调应轻量且不可再回写Memory，避免递归通知。
+    ExternalWriteObserverId addExternalWriteObserver(ExternalWriteObserver observer);
+    void removeExternalWriteObserver(ExternalWriteObserverId id);
+    void clearExternalWriteObservers();
     
 private:
+    struct ExternalWriteObserverEntry {
+        ExternalWriteObserverId id;
+        ExternalWriteObserver callback;
+    };
+
     std::unique_ptr<uint8_t, decltype(&std::free)> memory_;
     size_t memory_size_;
     
@@ -72,8 +94,16 @@ private:
     // 程序退出状态
     bool should_exit_ = false;
     int exit_code_ = 0;
+
+    std::vector<ExternalWriteObserverEntry> external_write_observers_;
+    ExternalWriteObserverId next_external_write_observer_id_ = 1;
     
     void checkAddress(Address addr, size_t accessSize) const;
+    void notifyExternalWrite(Address addr, size_t accessSize);
+    void writeByteRaw(Address addr, uint8_t value);
+    void writeHalfWordRaw(Address addr, uint16_t value);
+    void writeWordRaw(Address addr, uint32_t value);
+    void write64Raw(Address addr, uint64_t value);
     void handleTohost(uint64_t value);
     void processSyscall(Address magic_mem_addr);
 };

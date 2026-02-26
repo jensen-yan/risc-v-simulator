@@ -160,6 +160,7 @@ void CommitStage::execute(CPUState& state) {
                             state.memory, memory_info.memory_address, memory_info.memory_value, decoded_info.funct3);
                     }
                 }
+
                 state.reservation_valid = false;
                 state.perf_counters.increment(PerfCounterId::STORES_COMMITTED);
                 LOGT(COMMIT, "inst=%" PRId64 " commit store addr=0x%" PRIx64 " value=0x%" PRIx64,

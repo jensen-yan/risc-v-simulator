@@ -113,6 +113,16 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
     // 初始化可变运行态（寄存器、队列、ooo组件等）
     resetCpuStateForReuse(cpu_state_, memory_);
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
+
+    if (memory_) {
+        memory_external_write_observer_id_ = memory_->addExternalWriteObserver(
+            [this](Address addr, size_t size) {
+                // 任何外部写（tohost/syscall/DMA类）都可能让D$陈旧，按range失效即可。
+                if (cpu_state_.l1d_cache) {
+                    cpu_state_.l1d_cache->invalidateRange(addr, size);
+                }
+            });
+    }
     
     // DiffTest将由Simulator通过setDiffTest()方法设置
     
@@ -127,7 +137,12 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
     LOGI(SYSTEM, "ooo cpu initialized (new pipeline), difftest will be configured by simulator");
 }
 
-OutOfOrderCPU::~OutOfOrderCPU() = default;
+OutOfOrderCPU::~OutOfOrderCPU() {
+    if (memory_ && memory_external_write_observer_id_ != 0) {
+        memory_->removeExternalWriteObserver(memory_external_write_observer_id_);
+        memory_external_write_observer_id_ = 0;
+    }
+}
 
 
 

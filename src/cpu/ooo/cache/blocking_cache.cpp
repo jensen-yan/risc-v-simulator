@@ -153,6 +153,25 @@ void BlockingCache::commitStore(std::shared_ptr<Memory> memory, uint64_t address
     writeMemoryValue(memory, address, size, value);
 }
 
+void BlockingCache::invalidateRange(uint64_t address, uint64_t size) {
+    if (size == 0) {
+        return;
+    }
+
+    const uint64_t start_line = address / config_.line_size_bytes;
+    const uint64_t end_line = (address + size - 1) / config_.line_size_bytes;
+    for (uint64_t line_address = start_line; line_address <= end_line; ++line_address) {
+        CacheLine* line = findLine(line_address);
+        if (line) {
+            line->valid = false;
+            line->dirty = false;
+            line->tag = 0;
+            line->lru_stamp = 0;
+            std::fill(line->data.begin(), line->data.end(), 0);
+        }
+    }
+}
+
 void BlockingCache::tick() {
     if (!miss_in_flight_) {
         return;

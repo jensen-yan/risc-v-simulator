@@ -79,3 +79,27 @@ TEST_F(MemoryTest, ClearMemory) {
     EXPECT_EQ(memory->readByte(0), 0);
     EXPECT_EQ(memory->readWord(4), 0);
 }
+
+TEST_F(MemoryTest, ExternalWriteObserverNotification) {
+    Address observed_addr = 0;
+    size_t observed_size = 0;
+    int notify_count = 0;
+
+    const auto observer_id = memory->addExternalWriteObserver(
+        [&](Address addr, size_t access_size) {
+            observed_addr = addr;
+            observed_size = access_size;
+            notify_count++;
+        });
+
+    memory->write64External(64, 0x1122334455667788ULL);
+
+    EXPECT_EQ(memory->read64(64), 0x1122334455667788ULL);
+    EXPECT_EQ(notify_count, 1);
+    EXPECT_EQ(observed_addr, 64);
+    EXPECT_EQ(observed_size, 8);
+
+    memory->removeExternalWriteObserver(observer_id);
+    memory->writeWordExternal(128, 0xAABBCCDDU);
+    EXPECT_EQ(notify_count, 1);
+}

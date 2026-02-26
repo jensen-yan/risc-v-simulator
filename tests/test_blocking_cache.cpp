@@ -113,6 +113,37 @@ TEST(BlockingCacheTest, CommitStoreUpdatesCachedDataForLaterLoad) {
     EXPECT_EQ(memory->readWord(0x120), 0x22222222u);
 }
 
+TEST(BlockingCacheTest, InvalidateRangeRefreshesExternalMemoryWrite) {
+    auto memory = std::make_shared<Memory>(4096);
+    constexpr uint64_t kAddr = 0x180;
+    memory->write64(kAddr, 0x40);
+
+    BlockingCache cache(makeDefaultConfig());
+
+    uint64_t load_value = 0;
+    const auto first_load = cache.load(memory, kAddr, 8, load_value);
+    EXPECT_FALSE(first_load.blocked);
+    EXPECT_FALSE(first_load.hit);
+    EXPECT_EQ(load_value, 0x40u);
+    drainMiss(cache);
+
+    // 模拟cache外部写回（如tohost syscall处理逻辑）。
+    memory->write64(kAddr, 0x30);
+
+    const auto stale_load = cache.load(memory, kAddr, 8, load_value);
+    EXPECT_FALSE(stale_load.blocked);
+    EXPECT_TRUE(stale_load.hit);
+    EXPECT_EQ(load_value, 0x40u);
+
+    cache.invalidateRange(kAddr, 8);
+    drainMiss(cache);
+
+    const auto refreshed_load = cache.load(memory, kAddr, 8, load_value);
+    EXPECT_FALSE(refreshed_load.blocked);
+    EXPECT_FALSE(refreshed_load.hit);
+    EXPECT_EQ(load_value, 0x30u);
+}
+
 TEST(BlockingCacheTest, FetchInstructionCrossLineReportsSecondHalfMiss) {
     BlockingCacheConfig cfg;
     cfg.size_bytes = 8;

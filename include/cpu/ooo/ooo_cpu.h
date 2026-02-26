@@ -111,6 +111,7 @@ private:
     
     // 向后兼容：保留必要的接口变量  
     std::shared_ptr<Memory> memory_;
+    Memory::ExternalWriteObserverId memory_external_write_observer_id_ = 0;
     std::unique_ptr<SyscallHandler> syscall_handler_;
     
     // DiffTest组件（由Simulator管理，这里只保存引用）

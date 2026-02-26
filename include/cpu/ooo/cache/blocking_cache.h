@@ -56,6 +56,8 @@ public:
                                        Instruction& instruction);
     // 非时序提交写：用于Store commit阶段，把值写入D$（并维护主存镜像）。
     void commitStore(std::shared_ptr<Memory> memory, uint64_t address, uint8_t size, uint64_t value);
+    // 失效给定范围命中的cache line，用于处理cache外部写入导致的数据陈旧。
+    void invalidateRange(uint64_t address, uint64_t size);
 
     void tick();
     void flushInFlight();

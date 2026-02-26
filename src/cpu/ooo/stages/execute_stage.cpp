@@ -152,7 +152,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     auto blocked_inst = unit.instruction;
                     blocked_inst->set_status(DynamicInst::Status::ISSUED);
                     state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, static_cast<int>(i));
-                    reset_single_unit(unit);
+                    resetExecutionUnitState(unit);
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waits on earlier STORE, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
                     blocked_inst->get_memory_info().replay_count++;
@@ -167,7 +167,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     auto blocked_inst = unit.instruction;
                     blocked_inst->set_status(DynamicInst::Status::ISSUED);
                     state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, static_cast<int>(i));
-                    reset_single_unit(unit);
+                    resetExecutionUnitState(unit);
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
                     blocked_inst->get_memory_info().replay_count++;
@@ -253,28 +253,6 @@ ExecutionUnit* ExecuteStage::get_available_unit(ExecutionUnitType type, CPUState
     return nullptr;
 }
 
-void ExecuteStage::reset_single_unit(ExecutionUnit& unit) {
-    // 重置单个执行单元的通用逻辑
-    unit.busy = false;
-    unit.remaining_cycles = 0;
-    unit.has_exception = false;
-    unit.is_jump = false;
-    unit.jump_target = 0;
-    unit.instruction = nullptr;
-    unit.exception_msg.clear();
-    unit.load_address = 0;
-    unit.load_size = 0;
-    unit.dcache.reset();
-}
-
-template<typename UnitContainer>
-void ExecuteStage::reset_unit_container(UnitContainer& units) {
-    // 重置执行单元容器的通用函数
-    for (auto& unit : units) {
-        reset_single_unit(unit);
-    }
-}
-
 void ExecuteStage::complete_execution_unit(ExecutionUnit& unit, ExecutionUnitType unit_type, size_t unit_index, CPUState& state) {
     if (unit.has_exception) {
         unit.instruction->set_exception(unit.exception_msg);
@@ -296,7 +274,7 @@ void ExecuteStage::complete_execution_unit(ExecutionUnit& unit, ExecutionUnitTyp
     state.reservation_station->release_entry(rs_entry);
     
     // 释放执行单元
-    reset_single_unit(unit);
+    resetExecutionUnitState(unit);
     
     // 释放保留站中的执行单元状态
     state.reservation_station->release_execution_unit(unit_type, unit_index);
@@ -320,14 +298,6 @@ void ExecuteStage::record_load_replay_bucket(const DynamicInstPtr& instruction, 
     } else {
         state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_4_PLUS);
     }
-}
-
-void ExecuteStage::reset_execution_units(CPUState& state) {
-    // 重置所有执行单元
-    reset_unit_container(state.alu_units);
-    reset_unit_container(state.branch_units);
-    reset_unit_container(state.load_units);
-    reset_unit_container(state.store_units);
 }
 
 void ExecuteStage::flush() {

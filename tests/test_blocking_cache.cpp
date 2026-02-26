@@ -139,4 +139,27 @@ TEST(BlockingCacheTest, FetchInstructionCrossLineReportsSecondHalfMiss) {
     EXPECT_EQ(instruction, 0x00000013u);
 }
 
+TEST(BlockingCacheTest, FetchInstructionSameLineMissCanRecoverSecondHalf) {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 32;
+    cfg.line_size_bytes = 8;
+    cfg.associativity = 1;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+
+    auto memory = std::make_shared<Memory>(256);
+    memory->writeHalfWord(0x2, 0x0013); // addi x0, x0, 0 (低16位)
+    memory->writeHalfWord(0x4, 0xABCD); // 高16位，和低16位同属一个cache line
+
+    BlockingCache cache(cfg);
+    Instruction instruction = 0;
+
+    const auto first = cache.fetchInstruction(memory, 0x2, instruction);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+    EXPECT_EQ(first.latency_cycles, 21);
+    EXPECT_TRUE(cache.hasMissInFlight());
+    EXPECT_EQ(instruction, 0xABCD0013u);
+}
+
 } // namespace riscv

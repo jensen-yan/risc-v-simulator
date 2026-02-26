@@ -27,27 +27,6 @@ void clearQueue(std::queue<T>& q) {
     }
 }
 
-void resetSingleExecutionUnit(ExecutionUnit& unit) {
-    unit.busy = false;
-    unit.remaining_cycles = 0;
-    unit.instruction = nullptr;
-    unit.result = 0;
-    unit.has_exception = false;
-    unit.exception_msg.clear();
-    unit.jump_target = 0;
-    unit.is_jump = false;
-    unit.load_address = 0;
-    unit.load_size = 0;
-    unit.dcache.reset();
-}
-
-void resetAllExecutionUnits(CPUState& state) {
-    for (auto& unit : state.alu_units) resetSingleExecutionUnit(unit);
-    for (auto& unit : state.branch_units) resetSingleExecutionUnit(unit);
-    for (auto& unit : state.load_units) resetSingleExecutionUnit(unit);
-    for (auto& unit : state.store_units) resetSingleExecutionUnit(unit);
-}
-
 BlockingCacheConfig createDefaultL1CacheConfig() {
     BlockingCacheConfig cfg;
     cfg.size_bytes = 32 * 1024;
@@ -91,7 +70,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.physical_fp_registers.fill(0);
 
     recreateRuntimeComponents(state, memory);
-    resetAllExecutionUnits(state);
+    state.resetExecutionUnits();
     clearQueue(state.fetch_buffer);
     clearQueue(state.cdb_queue);
 }

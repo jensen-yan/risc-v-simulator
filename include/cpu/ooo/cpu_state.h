@@ -62,48 +62,82 @@ struct ExecutionUnit {
 };
 
 struct ICacheFetchState {
-    int wait_cycles;
-    bool request_pending;
-    uint64_t request_pc;
-    bool pending_instruction_valid;
-    Instruction pending_instruction;
-
-    ICacheFetchState()
-        : wait_cycles(0),
-          request_pending(false),
-          request_pc(0),
-          pending_instruction_valid(false),
-          pending_instruction(0) {}
+    ICacheFetchState() : wait_cycles_(0), request_pending_(false), request_pc_(0), pending_instruction_valid_(false), pending_instruction_(0) {}
 
     void reset() {
-        wait_cycles = 0;
-        request_pending = false;
-        request_pc = 0;
-        pending_instruction_valid = false;
-        pending_instruction = 0;
+        wait_cycles_ = 0;
+        request_pending_ = false;
+        request_pc_ = 0;
+        pending_instruction_valid_ = false;
+        pending_instruction_ = 0;
     }
 
     bool hasPendingFor(uint64_t pc) const {
-        return request_pending && pending_instruction_valid && request_pc == pc;
+        return request_pending_ && pending_instruction_valid_ && request_pc_ == pc;
     }
 
     bool consumeIfMatch(uint64_t pc, Instruction& instruction_out) {
         if (!hasPendingFor(pc)) {
             return false;
         }
-        instruction_out = pending_instruction;
+        instruction_out = pending_instruction_;
         reset();
         return true;
     }
 
     void startMissWait(uint64_t pc, Instruction instruction_in, int latency_cycles) {
-        wait_cycles = (latency_cycles > 1) ? (latency_cycles - 1) : 0;
-        request_pending = true;
-        request_pc = pc;
-        pending_instruction_valid = true;
-        pending_instruction = instruction_in;
+        wait_cycles_ = (latency_cycles > 1) ? (latency_cycles - 1) : 0;
+        request_pending_ = true;
+        request_pc_ = pc;
+        pending_instruction_valid_ = true;
+        pending_instruction_ = instruction_in;
     }
+
+    bool hasMissWait() const {
+        return wait_cycles_ > 0;
+    }
+
+    // 消耗一个等待周期；返回 true 表示当前周期结束后仍需继续等待。
+    bool advanceMissWaitCycle() {
+        if (wait_cycles_ <= 0) {
+            return false;
+        }
+        --wait_cycles_;
+        return wait_cycles_ > 0;
+    }
+
+    int remainingWaitCycles() const {
+        return wait_cycles_;
+    }
+
+private:
+    int wait_cycles_;
+    bool request_pending_;
+    uint64_t request_pc_;
+    bool pending_instruction_valid_;
+    Instruction pending_instruction_;
 };
+
+inline void resetExecutionUnitState(ExecutionUnit& unit) {
+    unit.busy = false;
+    unit.remaining_cycles = 0;
+    unit.instruction = nullptr;
+    unit.result = 0;
+    unit.has_exception = false;
+    unit.exception_msg.clear();
+    unit.jump_target = 0;
+    unit.is_jump = false;
+    unit.load_address = 0;
+    unit.load_size = 0;
+    unit.dcache.reset();
+}
+
+template<typename UnitContainer>
+inline void resetExecutionUnitContainer(UnitContainer& units) {
+    for (auto& unit : units) {
+        resetExecutionUnitState(unit);
+    }
+}
 
 /**
  * CPU共享状态结构
@@ -193,7 +227,7 @@ struct CPUState {
         physical_fp_registers.fill(0);
         
         // 批量初始化执行单元
-        initializeExecutionUnits();
+        resetExecutionUnits();
     }
 
     // 兼容旧统计字段，同时维护结构化计数器。
@@ -210,26 +244,11 @@ struct CPUState {
         perf_counters.increment(PerfCounterId::BRANCH_MISPREDICTS);
     }
 
-private:
-    void initializeExecutionUnits() {
-        auto initUnit = [](ExecutionUnit& unit) {
-            unit.busy = false;
-            unit.remaining_cycles = 0;
-            unit.instruction = nullptr;  // 初始化为空指针
-            unit.result = 0;
-            unit.has_exception = false;
-            unit.exception_msg = "";
-            unit.jump_target = 0;
-            unit.is_jump = false;
-            unit.load_address = 0;
-            unit.load_size = 0;
-            unit.dcache.reset();
-        };
-        
-        for (auto& unit : alu_units) initUnit(unit);
-        for (auto& unit : branch_units) initUnit(unit);
-        for (auto& unit : load_units) initUnit(unit);
-        for (auto& unit : store_units) initUnit(unit);
+    void resetExecutionUnits() {
+        resetExecutionUnitContainer(alu_units);
+        resetExecutionUnitContainer(branch_units);
+        resetExecutionUnitContainer(load_units);
+        resetExecutionUnitContainer(store_units);
     }
 };
 

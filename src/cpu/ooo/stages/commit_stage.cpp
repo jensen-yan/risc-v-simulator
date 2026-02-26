@@ -562,56 +562,9 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state, FlushReason reaso
     state.reservation_addr = 0;
     
     // 8. 重置所有执行单元（安全，因为当前指令已提交）
-    reset_execution_units(state);
+    state.resetExecutionUnits();
     
     LOGT(COMMIT, "pipeline flush completed, restart fetch");
-}
-
-void CommitStage::reset_execution_units(CPUState& state) {
-    // 重置所有执行单元
-    for (auto& unit : state.alu_units) {
-        unit.busy = false;
-        unit.remaining_cycles = 0;
-        unit.has_exception = false;
-        unit.is_jump = false;
-        unit.jump_target = 0;
-        unit.load_address = 0;
-        unit.load_size = 0;
-        unit.dcache.reset();
-    }
-    
-    for (auto& unit : state.branch_units) {
-        unit.busy = false;
-        unit.remaining_cycles = 0;
-        unit.has_exception = false;
-        unit.is_jump = false;
-        unit.jump_target = 0;
-        unit.load_address = 0;
-        unit.load_size = 0;
-        unit.dcache.reset();
-    }
-    
-    for (auto& unit : state.load_units) {
-        unit.busy = false;
-        unit.remaining_cycles = 0;
-        unit.has_exception = false;
-        unit.is_jump = false;
-        unit.jump_target = 0;
-        unit.load_address = 0;
-        unit.load_size = 0;
-        unit.dcache.reset();
-    }
-    
-    for (auto& unit : state.store_units) {
-        unit.busy = false;
-        unit.remaining_cycles = 0;
-        unit.has_exception = false;
-        unit.is_jump = false;
-        unit.jump_target = 0;
-        unit.load_address = 0;
-        unit.load_size = 0;
-        unit.dcache.reset();
-    }
 }
 
 } // namespace riscv 

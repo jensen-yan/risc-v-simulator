@@ -43,7 +43,6 @@ private:
     
     // 流水线刷新（用于跳转/异常返回/fence.i 等需要重新取指的场景）
     void flush_pipeline_after_commit(CPUState& state, FlushReason reason);
-    void reset_execution_units(CPUState& state);
 };
 
 } // namespace riscv 

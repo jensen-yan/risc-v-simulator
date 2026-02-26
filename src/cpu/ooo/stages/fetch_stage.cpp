@@ -18,11 +18,11 @@ void FetchStage::execute(CPUState& state) {
     }
 
     // I$ miss等待：倒计时到0的这个周期允许继续取指，避免多等一个周期。
-    if (state.icache.wait_cycles > 0) {
-        --state.icache.wait_cycles;
+    if (state.icache.hasMissWait()) {
+        const bool still_waiting = state.icache.advanceMissWaitCycle();
         state.perf_counters.increment(PerfCounterId::CACHE_L1I_STALL_CYCLES);
-        if (state.icache.wait_cycles > 0) {
-            LOGT(FETCH, "icache waiting, remaining=%d", state.icache.wait_cycles);
+        if (still_waiting) {
+            LOGT(FETCH, "icache waiting, remaining=%d", state.icache.remainingWaitCycles());
             return;
         }
         LOGT(FETCH, "icache wait completed, resume fetch");
@@ -52,8 +52,8 @@ void FetchStage::execute(CPUState& state) {
                     state.perf_counters.increment(PerfCounterId::CACHE_L1I_MISSES);
                     state.icache.startMissWait(fetch_pc, fetched_inst, cache_result.latency_cycles);
                     LOGT(FETCH, "icache miss: pc=0x%" PRIx64 ", latency=%d, wait=%d",
-                         fetch_pc, cache_result.latency_cycles, state.icache.wait_cycles);
-                    if (state.icache.wait_cycles > 0) {
+                         fetch_pc, cache_result.latency_cycles, state.icache.remainingWaitCycles());
+                    if (state.icache.hasMissWait()) {
                         return;
                     }
                 }

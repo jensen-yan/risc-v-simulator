@@ -110,5 +110,32 @@ TEST(OutOfOrderCacheTest, StorePenaltyCountedInExecuteStage) {
     EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.stall_cycles_store"), 20u);
 }
 
-} // namespace riscv
+TEST(OutOfOrderCacheTest, DCacheStoreRecoversAfterBlockedByInflightLoadMiss) {
+    auto memory = std::make_shared<Memory>(4096);
+    auto cpu = std::make_unique<OutOfOrderCPU>(memory);
 
+    memory->writeWord(0x200, 0x12345678);
+
+    memory->writeWord(0x0, createIType(Opcode::OP_IMM, 1, 0, 0x200, Funct3::ADD_SUB)); // addi x1, x0, 0x200
+    memory->writeWord(0x4, createIType(Opcode::LOAD, 2, 1, 0, Funct3::LW));             // lw x2, 0(x1)
+    memory->writeWord(0x8, createIType(Opcode::OP_IMM, 3, 0, 0x300, Funct3::ADD_SUB)); // addi x3, x0, 0x300
+    memory->writeWord(0xC, createIType(Opcode::OP_IMM, 4, 0, 7, Funct3::ADD_SUB));      // addi x4, x0, 7
+    memory->writeWord(0x10, createSType(Opcode::STORE, 3, 4, 0, Funct3::SW));           // sw x4, 0(x3)
+    memory->writeWord(0x14, 0x00000073);                                                  // ECALL
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 600 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    EXPECT_TRUE(cpu->isHalted());
+    EXPECT_EQ(cpu->getRegister(2), 0x12345678u);
+    EXPECT_EQ(memory->readWord(0x300), 7u);
+
+    const auto stats = cpu->getStats();
+    EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.stall_cycles_load"), 20u);
+    EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.write_accesses"), 1u);
+    EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.stall_cycles_store"), 21u);
+}
+
+} // namespace riscv

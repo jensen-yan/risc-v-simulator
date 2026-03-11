@@ -297,6 +297,10 @@ void OutOfOrderCPU::flush_pipeline() {
     cpu_state_.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, rob_used_entries);
     cpu_state_.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_EXCEPTION, rob_used_entries);
 
+    if (cpu_state_.branch_predictor) {
+        cpu_state_.branch_predictor->on_pipeline_flush();
+    }
+
     // 清空取指缓冲区
     while (!cpu_state_.fetch_buffer.empty()) {
         cpu_state_.fetch_buffer.pop();
@@ -463,6 +467,30 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                  "ROB flushed entries (work squashed by flushes)");
     printDoubleStat("cpu.topdown.insts.flushed_pct", flushed_pct,
                    "Flushed work / (retired + flushed) (%)");
+
+    if (!cpu_state_.branch_profiles.empty()) {
+        std::vector<std::pair<uint64_t, BranchProfileEntry>> entries(
+            cpu_state_.branch_profiles.begin(), cpu_state_.branch_profiles.end());
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            if (a.second.mispredicts != b.second.mispredicts) {
+                return a.second.mispredicts > b.second.mispredicts;
+            }
+            return a.second.executions > b.second.executions;
+        });
+
+        os << "cpu.branch_profile.top.begin\n";
+        const size_t limit = std::min<size_t>(10, entries.size());
+        for (size_t i = 0; i < limit; ++i) {
+            const auto& [pc, prof] = entries[i];
+            os << "cpu.branch_profile.top[" << i << "].pc 0x"
+               << std::hex << pc << std::dec
+               << " exec=" << prof.executions
+               << " taken=" << prof.taken
+               << " predicted_taken=" << prof.predicted_taken
+               << " mispredicts=" << prof.mispredicts << "\n";
+        }
+        os << "cpu.branch_profile.top.end\n";
+    }
 
     os << "----------- End Simulation Statistics -----------\n";
 }

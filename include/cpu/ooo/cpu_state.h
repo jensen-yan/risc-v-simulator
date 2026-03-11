@@ -17,6 +17,7 @@
 #include <array>
 #include <memory>
 #include <queue>
+#include <unordered_map>
 
 namespace riscv {
 
@@ -28,6 +29,12 @@ struct FetchedInstruction {
     Instruction instruction;
     bool is_compressed;
     uint64_t predicted_next_pc;
+    bool has_branch_meta;
+    BranchPredictor::BranchMeta branch_meta;
+
+    FetchedInstruction()
+        : pc(0), instruction(0), is_compressed(false), predicted_next_pc(0),
+          has_branch_meta(false), branch_meta{} {}
 };
 
 /**
@@ -143,6 +150,13 @@ inline void resetExecutionUnitContainer(UnitContainer& units) {
  * CPU共享状态结构
  * 包含所有流水线阶段需要访问的共享数据
  */
+struct BranchProfileEntry {
+    uint64_t executions = 0;
+    uint64_t taken = 0;
+    uint64_t predicted_taken = 0;
+    uint64_t mispredicts = 0;
+};
+
 struct CPUState {
     // 基本CPU状态
     uint64_t pc;                    // 程序计数器（取指PC）
@@ -197,6 +211,7 @@ struct CPUState {
     PerfCounterBank perf_counters; // 结构化性能计数器
     uint64_t branch_mispredicts;   // 条件分支预测错误次数（仅B-type）
     uint64_t pipeline_stalls;      // 流水线停顿次数
+    std::unordered_map<uint64_t, BranchProfileEntry> branch_profiles;
 
     // A扩展 LR/SC 预留状态
     bool reservation_valid;        // LR 预留是否有效

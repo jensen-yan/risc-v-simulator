@@ -98,6 +98,7 @@ public:
     bool isDiffTestEnabled() const override;
     void performDiffTestWithCommittedPC(uint64_t committed_pc) override;
     void getDiffTestStats(uint64_t& comparisons, uint64_t& mismatches) const;
+    const CPUState& getCPUState() const { return cpu_state_; }
     
 private:
     // 新的流水线设计

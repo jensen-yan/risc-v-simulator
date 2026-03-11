@@ -310,6 +310,37 @@ void CommitStage::execute(CPUState& state) {
 
             // 条件分支：预测对/错、以及BRANCH_MISPREDICTS口径统一到commit
             if (decoded_info.opcode == Opcode::BRANCH) {
+                const BranchPredictor::BranchMeta* branch_meta = nullptr;
+                if (committed_inst->has_branch_predict_meta()) {
+                    branch_meta = &committed_inst->get_branch_predict_meta();
+                }
+
+                auto& profile = state.branch_profiles[instruction_pc];
+                profile.executions++;
+                if (committed_inst->is_jump()) {
+                    profile.taken++;
+                }
+                if (predicted_next_pc != fallthrough) {
+                    profile.predicted_taken++;
+                }
+                if (!correct) {
+                    profile.mispredicts++;
+                }
+
+                if (branch_meta && branch_meta->valid) {
+                    if (branch_meta->local_pred_taken == committed_inst->is_jump()) {
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_LOCAL_CORRECT);
+                    } else {
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_LOCAL_INCORRECT);
+                    }
+
+                    if (branch_meta->global_pred_taken == committed_inst->is_jump()) {
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_GLOBAL_CORRECT);
+                    } else {
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_GLOBAL_INCORRECT);
+                    }
+                }
+
                 if (correct) {
                     state.perf_counters.increment(PerfCounterId::PREDICTOR_BHT_CORRECT);
                 } else {
@@ -326,7 +357,16 @@ void CommitStage::execute(CPUState& state) {
             // Commit阶段训练预测器（flush不应清空预测器状态）
             if (state.branch_predictor) {
                 const bool actual_taken = committed_inst->is_jump();
-                state.branch_predictor->update(instruction_pc, decoded_info, actual_taken, actual_next_pc);
+                const BranchPredictor::BranchMeta* branch_meta = nullptr;
+                if (decoded_info.opcode == Opcode::BRANCH && committed_inst->has_branch_predict_meta()) {
+                    branch_meta = &committed_inst->get_branch_predict_meta();
+                }
+                state.branch_predictor->update(instruction_pc, decoded_info, actual_taken, actual_next_pc, branch_meta);
+
+                if (!correct && decoded_info.opcode == Opcode::BRANCH) {
+                    state.branch_predictor->recover_after_branch_mispredict(instruction_pc, actual_taken, branch_meta);
+                    state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_RECOVERIES);
+                }
             }
 
             if (!correct) {
@@ -521,6 +561,11 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state, FlushReason reaso
     }
 
     state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, rob_used);
+
+    if (state.branch_predictor && reason != FlushReason::BranchMispredict) {
+        // 分支误预测由recover_after_branch_mispredict负责回滚；其它flush统一丢弃投机历史。
+        state.branch_predictor->on_pipeline_flush();
+    }
     
     // 1. 清空取指缓冲区（错误推测的指令）
     while (!state.fetch_buffer.empty()) {

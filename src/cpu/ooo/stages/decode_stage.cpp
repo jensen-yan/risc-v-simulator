@@ -55,6 +55,9 @@ void DecodeStage::execute(CPUState& state) {
 
     // 记录Fetch阶段生成的预测next PC，用于Commit阶段判断是否需要redirect/flush。
     dynamic_inst->set_predicted_next_pc(fetched.predicted_next_pc);
+    if (fetched.has_branch_meta) {
+        dynamic_inst->set_branch_predict_meta(fetched.branch_meta);
+    }
     
     LOGT(DECODE, "allocated rob[%d], pc=0x%" PRIx64 ", inst=%" PRId64,
         dynamic_inst->get_rob_entry(), fetched.pc, instruction_id);

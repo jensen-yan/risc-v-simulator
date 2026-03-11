@@ -1,10 +1,11 @@
 #pragma once
 
 #include "common/types.h"
+#include "cpu/ooo/branch_predictor.h"
 #include "cpu/ooo/ooo_types.h"
 #include <memory>
-#include <string>
 #include <optional>
+#include <string>
 
 namespace riscv {
 
@@ -140,6 +141,8 @@ private:
     // ========== 控制流预测信息（Fetch生成，Commit对比） ==========
     uint64_t predicted_next_pc_;              // 预测的下一条取指PC
     bool has_predicted_next_pc_;              // 是否记录了预测next PC
+    bool has_branch_predict_meta_;            // 是否记录了条件分支预测元数据
+    BranchPredictor::BranchMeta branch_predict_meta_; // 条件分支预测元数据
 
     // ========== 扩展信息（可选，支持未来功能） ==========
     std::optional<ExecutionInfo> exec_info_;  // 执行相关扩展信息
@@ -279,6 +282,12 @@ public:
     }
     bool has_predicted_next_pc() const { return has_predicted_next_pc_; }
     uint64_t get_predicted_next_pc() const { return predicted_next_pc_; }
+    void set_branch_predict_meta(const BranchPredictor::BranchMeta& meta) {
+        branch_predict_meta_ = meta;
+        has_branch_predict_meta_ = meta.valid;
+    }
+    bool has_branch_predict_meta() const { return has_branch_predict_meta_; }
+    const BranchPredictor::BranchMeta& get_branch_predict_meta() const { return branch_predict_meta_; }
 
     // ========== 扩展信息接口 ==========
     ExecutionInfo& get_execution_info() { 

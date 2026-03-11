@@ -82,6 +82,7 @@ void FetchStage::execute(CPUState& state) {
             FetchedInstruction fetched;
             fetched.pc = fetch_pc;
             fetched.instruction = raw_inst;
+            fetched.has_branch_meta = false;
             
             // 检查是否为压缩指令
             if ((raw_inst & 0x03) != 0x03) {
@@ -121,6 +122,17 @@ void FetchStage::execute(CPUState& state) {
                     }
                 } else if (decoded.opcode == Opcode::BRANCH) {
                     state.perf_counters.increment(PerfCounterId::PREDICTOR_BHT_LOOKUPS);
+                    fetched.branch_meta = pred.branch_meta;
+                    fetched.has_branch_meta = pred.branch_meta.valid;
+                    if (fetched.has_branch_meta) {
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_LOCAL_LOOKUPS);
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_GLOBAL_LOOKUPS);
+                        if (pred.branch_meta.chooser_use_global) {
+                            state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_CHOOSE_GLOBAL);
+                        } else {
+                            state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_CHOOSE_LOCAL);
+                        }
+                    }
                 }
             }
 

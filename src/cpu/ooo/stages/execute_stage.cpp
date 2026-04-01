@@ -7,6 +7,36 @@
 
 namespace riscv {
 
+namespace {
+
+bool rangesOverlap(uint64_t lhs_addr, uint64_t lhs_size, uint64_t rhs_addr, uint64_t rhs_size) {
+    const uint64_t lhs_end = lhs_addr + lhs_size - 1;
+    const uint64_t rhs_end = rhs_addr + rhs_size - 1;
+    return lhs_addr <= rhs_end && rhs_addr <= lhs_end;
+}
+
+bool isHostCommAccess(const CPUState& state, uint64_t address, uint8_t size) {
+    if (!state.memory || size == 0) {
+        return false;
+    }
+
+    return rangesOverlap(address, size, state.memory->getTohostAddr(), 8) ||
+           rangesOverlap(address, size, state.memory->getFromhostAddr(), 8);
+}
+
+bool mustSerializeHostCommAccess(const CPUState& state,
+                                 const DynamicInstPtr& instruction,
+                                 uint64_t address,
+                                 uint8_t size) {
+    if (!instruction || !isHostCommAccess(state, address, size) || !state.reorder_buffer) {
+        return false;
+    }
+
+    return !state.reorder_buffer->is_head_instruction(instruction->get_instruction_id());
+}
+
+}  // namespace
+
 ExecuteStage::ExecuteStage() {
     // 构造函数：初始化执行阶段
 }
@@ -172,6 +202,19 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
+                if (mustSerializeHostCommAccess(state, unit.instruction, unit.load_address, unit.load_size)) {
+                    auto blocked_inst = unit.instruction;
+                    blocked_inst->set_status(DynamicInst::Status::ISSUED);
+                    state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, static_cast<int>(i));
+                    resetExecutionUnitState(unit);
+                    LOGT(EXECUTE,
+                         "inst=%" PRId64 " LOAD%zu waits for ROB head before host-comm access",
+                         blocked_inst->get_instruction_id(), i);
+                    blocked_inst->get_memory_info().replay_count++;
+                    state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
+                    continue;
+                }
+
                 // 在Load指令完成前，再次检查Store依赖
                 bool should_wait = state.reorder_buffer->has_earlier_store_pending(unit.instruction->get_instruction_id());
                 
@@ -237,6 +280,17 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
+                if (mustSerializeHostCommAccess(state, unit.instruction, unit.load_address, unit.load_size)) {
+                    auto blocked_inst = unit.instruction;
+                    blocked_inst->set_status(DynamicInst::Status::ISSUED);
+                    state.reservation_station->release_execution_unit(ExecutionUnitType::STORE, static_cast<int>(i));
+                    resetExecutionUnitState(unit);
+                    LOGT(EXECUTE,
+                         "inst=%" PRId64 " STORE%zu waits for ROB head before host-comm access",
+                         blocked_inst->get_instruction_id(), i);
+                    continue;
+                }
+
                 if (!start_or_wait_dcache_access(
                         unit, state, CacheAccessType::Write, PerfCounterId::CACHE_L1D_STALL_CYCLES_STORE)) {
                     LOGT(EXECUTE, "inst=%" PRId64 " STORE%zu waiting for dcache, remaining=%d",

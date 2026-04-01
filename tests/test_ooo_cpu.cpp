@@ -59,6 +59,14 @@ protected:
         return (imm << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode;
     }
 
+    // 辅助函数：创建S型指令
+    uint32_t createSTypeInstruction(int16_t imm, uint8_t rs2, uint8_t rs1, uint8_t funct3, uint8_t opcode) {
+        const uint32_t imm12 = static_cast<uint16_t>(imm) & 0x0FFFu;
+        const uint32_t imm_low = imm12 & 0x1Fu;
+        const uint32_t imm_high = (imm12 >> 5) & 0x7Fu;
+        return (imm_high << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (imm_low << 7) | opcode;
+    }
+
     // 辅助函数：创建SYSTEM指令（CSR/ECALL/EBREAK等）
     uint32_t createSystemInstruction(uint16_t imm12, uint8_t rs1, uint8_t funct3, uint8_t rd) {
         return (static_cast<uint32_t>(imm12) << 20) |
@@ -466,6 +474,36 @@ TEST_F(OutOfOrderCPUTest, FenceInstructionAsNop) {
 
     EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
     EXPECT_EQ(cpu->getRegister(2), 2) << "FENCE应按NOP处理，不影响后续计算";
+}
+
+TEST_F(OutOfOrderCPUTest, HostCommLoadWaitsForOlderTohostStoreToCommit) {
+    memory->setHostCommAddresses(0x100, 0x108);
+    memory->write64(0x180, 64);   // SYS_write
+    memory->write64(0x188, 1);    // fd=stdout
+    memory->write64(0x190, 0x200);
+    memory->write64(0x198, 1);    // count=1
+    memory->writeByte(0x200, 'A');
+
+    // ADDI x2, x0, 0x100   ; tohost
+    // ADDI x3, x0, 0x108   ; fromhost
+    // ADDI x4, x0, 0x180   ; magic_mem
+    // SD   x4, 0(x2)       ; 触发host syscall
+    // LD   x15, 0(x3)      ; 必须等store真正生效后才能读到1
+    // ECALL
+    writeInstruction(0x0, createITypeInstruction(0x100, 0, 0x0, 2, 0x13));
+    writeInstruction(0x4, createITypeInstruction(0x108, 0, 0x0, 3, 0x13));
+    writeInstruction(0x8, createITypeInstruction(0x180, 0, 0x0, 4, 0x13));
+    writeInstruction(0xC, createSTypeInstruction(0, 4, 2, 0x3, 0x23));
+    writeInstruction(0x10, createITypeInstruction(0, 3, 0x3, 15, 0x03));
+    writeInstruction(0x14, createECallInstruction());
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 120 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
+    EXPECT_EQ(cpu->getRegister(15), 1u) << "fromhost load 应等待更老的 tohost store 生效后再读取";
 }
 
 // 测试6：CPU状态重置

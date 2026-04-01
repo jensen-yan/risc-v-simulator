@@ -143,6 +143,9 @@ public:
 
     // 检查是否有更早的未提交Store/AMO指令（用于AMO顺序约束）
     bool has_earlier_store_uncommitted(uint64_t current_instruction_id) const;
+
+    // 检查给定指令是否已经来到ROB头部（用于串行化/MMIO类访问）
+    bool is_head_instruction(uint64_t current_instruction_id) const;
     
 private:
     // 分配ROB表项ID

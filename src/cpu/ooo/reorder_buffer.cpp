@@ -369,6 +369,15 @@ bool ReorderBuffer::has_earlier_store_uncommitted(uint64_t current_instruction_i
     return false;
 }
 
+bool ReorderBuffer::is_head_instruction(uint64_t current_instruction_id) const {
+    if (is_empty()) {
+        return false;
+    }
+
+    const auto& head_inst = rob_entries[head_ptr];
+    return head_inst && head_inst->get_instruction_id() == current_instruction_id;
+}
+
 // ========== 私有方法实现 ==========
 ROBEntry ReorderBuffer::allocate_rob_entry() {
     if (free_entries.empty()) {

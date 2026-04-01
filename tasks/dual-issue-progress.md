@@ -10,6 +10,7 @@
 - 所有 stage 按 bundle 推进，不做零散的定点 `for` 补丁
 - 同周期内严格保持程序顺序，尤其是 rename 和 commit
 - serializing/control redirect 指令先阻断同周期后续槽，后续再优化
+- host-comm MMIO 访问先按 ROB 顺序串行化，优先保证 CoreMark/tohost 握手正确
 
 ## 当前计划
 
@@ -17,11 +18,11 @@
 - [x] 确定分阶段实现方案
 - [x] 第一阶段：统一宽度配置 + fetch/decode 双宽
 - [x] 第二阶段：issue/rename 双宽
-- [ ] 第三阶段：RS dispatch/execute/commit 双宽
+- [x] 第三阶段：RS dispatch/execute/commit 双宽
+- [ ] 第四阶段：优化 RS 双选与双发射利用率
 
 ## 当前状态
 
-- 当前实现仍是单宽 front-end，后端只有部分执行单元是多路
-- 第一阶段已完成并提交
-- 第二阶段已完成并提交
-- 第三阶段进行中：对齐 execute 入口与 commit 限宽
+- 双发射主链已打通，完整 CoreMark 可自然结束并输出 stats
+- 已修复 host-comm MMIO 乱序导致的 DiffTest/CoreMark 收尾回归
+- 下一步聚焦 RS 双选策略和槽位利用率

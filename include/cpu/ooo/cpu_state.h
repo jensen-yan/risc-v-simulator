@@ -157,6 +157,17 @@ struct BranchProfileEntry {
     uint64_t taken = 0;
     uint64_t predicted_taken = 0;
     uint64_t mispredicts = 0;
+    uint64_t local_correct = 0;
+    uint64_t local_incorrect = 0;
+    uint64_t global_correct = 0;
+    uint64_t global_incorrect = 0;
+    uint64_t chooser_selected_local = 0;
+    uint64_t chooser_selected_global = 0;
+    uint64_t chooser_correct = 0;
+    uint64_t chooser_incorrect = 0;
+    uint64_t chooser_misses = 0;
+    uint64_t both_correct = 0;
+    uint64_t both_incorrect = 0;
 };
 
 struct CPUState {

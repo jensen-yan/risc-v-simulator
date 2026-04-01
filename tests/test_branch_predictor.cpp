@@ -120,6 +120,8 @@ TEST(BranchPredictorTest, GShareUsesDifferentHistoryContexts) {
     auto pred_ghr0 = predictor.predict(pc, branch, fallthrough);
     EXPECT_EQ(pred_ghr0.branch_meta.ghr_before, 0u);
     EXPECT_TRUE(pred_ghr0.branch_meta.global_pred_taken);
+    EXPECT_EQ(pred_ghr0.branch_meta.local_pht_index, 0u);
+    EXPECT_EQ(pred_ghr0.branch_meta.global_pht_index, 0xC0u);
 
     // 强制 speculative GHR 到 1，检查同 PC 不同 GHR 的 global 分量预测不同。
     auto force_ghr1 = makeBranchMeta(/*ghr_before=*/0, 0, 0, false, false);
@@ -127,6 +129,10 @@ TEST(BranchPredictorTest, GShareUsesDifferentHistoryContexts) {
     auto pred_ghr1 = predictor.predict(pc, branch, fallthrough);
     EXPECT_EQ(pred_ghr1.branch_meta.ghr_before, 1u);
     EXPECT_FALSE(pred_ghr1.branch_meta.global_pred_taken);
+    EXPECT_NE(pred_ghr0.branch_meta.global_pht_index, pred_ghr1.branch_meta.global_pht_index);
+    EXPECT_LE(pred_ghr1.branch_meta.chooser_counter_before, 3u);
+    EXPECT_LE(pred_ghr1.branch_meta.local_counter_before, 3u);
+    EXPECT_LE(pred_ghr1.branch_meta.global_counter_before, 3u);
 }
 
 TEST(BranchPredictorTest, TournamentChooserConvergesToGlobal) {
@@ -150,6 +156,69 @@ TEST(BranchPredictorTest, TournamentChooserConvergesToGlobal) {
     predictor.recover_after_branch_mispredict(pc, /*actual_taken=*/false, &force_ghr0); // 保持查询上下文稳定
     auto after = predictor.predict(pc, branch, fallthrough);
     EXPECT_TRUE(after.branch_meta.chooser_use_global);
+}
+
+TEST(BranchPredictorTest, TournamentChooserWeakLocalSelectsLocal) {
+    BranchPredictor predictor;
+    const DecodedInstruction branch = makeBranchInst();
+    const uint64_t pc = 0x1E0;
+    const uint64_t fallthrough = pc + 4;
+
+    auto force_ghr0 = makeBranchMeta(/*ghr_before=*/0, /*local_history_before=*/0,
+                                     /*local_history_index=*/0, /*local_pred=*/false, /*global_pred=*/false);
+    predictor.recover_after_branch_mispredict(pc, /*actual_taken=*/false, &force_ghr0);
+
+    auto train_local = makeBranchMeta(/*ghr_before=*/0, /*local_history_before=*/0,
+                                      /*local_history_index=*/0, /*local_pred=*/true, /*global_pred=*/false);
+    predictor.update(pc, branch, /*actual_taken=*/true, pc + 8, &train_local);
+
+    predictor.recover_after_branch_mispredict(pc, /*actual_taken=*/false, &force_ghr0);
+    auto pred = predictor.predict(pc, branch, fallthrough);
+    EXPECT_FALSE(pred.branch_meta.chooser_use_global);
+    EXPECT_TRUE(pred.bht_pred_taken);
+    EXPECT_EQ(pred.next_pc, pc + 8);
+}
+
+TEST(BranchPredictorTest, SaturatingCountersDoNotUnderflowOrOverflow) {
+    BranchPredictor predictor;
+    const DecodedInstruction branch = makeBranchInst();
+    const uint64_t pc = 0x240;
+    const uint64_t fallthrough = pc + 4;
+    const uint16_t local_idx = static_cast<uint16_t>((pc >> 1) & 0x3FFU);
+
+    auto force_ghr0 = makeBranchMeta(/*ghr_before=*/0, /*local_history_before=*/0,
+                                     /*local_history_index=*/local_idx,
+                                     /*local_pred=*/false, /*global_pred=*/false);
+
+    predictor.recover_after_branch_mispredict(pc, /*actual_taken=*/false, &force_ghr0);
+    auto pred0 = predictor.predict(pc, branch, fallthrough);
+    EXPECT_FALSE(pred0.bht_pred_taken);
+    EXPECT_EQ(pred0.branch_meta.local_counter_before, 1u);
+    EXPECT_EQ(pred0.branch_meta.global_counter_before, 1u);
+
+    predictor.update(pc, branch, /*actual_taken=*/false, fallthrough, &pred0.branch_meta);
+    predictor.recover_after_branch_mispredict(pc, /*actual_taken=*/false, &force_ghr0);
+    auto pred1 = predictor.predict(pc, branch, fallthrough);
+    EXPECT_FALSE(pred1.bht_pred_taken);
+    EXPECT_EQ(pred1.branch_meta.local_counter_before, 0u);
+    EXPECT_EQ(pred1.branch_meta.global_counter_before, 0u);
+
+    predictor.update(pc, branch, /*actual_taken=*/false, fallthrough, &pred1.branch_meta);
+    predictor.recover_after_branch_mispredict(pc, /*actual_taken=*/false, &force_ghr0);
+    auto pred2 = predictor.predict(pc, branch, fallthrough);
+    EXPECT_FALSE(pred2.bht_pred_taken);
+    EXPECT_EQ(pred2.branch_meta.local_counter_before, 0u);
+    EXPECT_EQ(pred2.branch_meta.global_counter_before, 0u);
+
+    predictor.update(pc, branch, /*actual_taken=*/true, pc + 8, &pred2.branch_meta);
+    predictor.update(pc, branch, /*actual_taken=*/true, pc + 8, &pred2.branch_meta);
+    predictor.update(pc, branch, /*actual_taken=*/true, pc + 8, &pred2.branch_meta);
+    predictor.update(pc, branch, /*actual_taken=*/true, pc + 8, &pred2.branch_meta);
+
+    predictor.recover_after_branch_mispredict(pc, /*actual_taken=*/false, &force_ghr0);
+    auto pred3 = predictor.predict(pc, branch, fallthrough);
+    EXPECT_TRUE(pred3.branch_meta.local_counter_before <= 3u);
+    EXPECT_TRUE(pred3.branch_meta.global_counter_before <= 3u);
 }
 
 TEST(BranchPredictorTest, RecoverAndFlushResetSpeculativeHistory) {

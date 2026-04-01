@@ -487,7 +487,18 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " exec=" << prof.executions
                << " taken=" << prof.taken
                << " predicted_taken=" << prof.predicted_taken
-               << " mispredicts=" << prof.mispredicts << "\n";
+               << " mispredicts=" << prof.mispredicts
+               << " local_correct=" << prof.local_correct
+               << " local_incorrect=" << prof.local_incorrect
+               << " global_correct=" << prof.global_correct
+               << " global_incorrect=" << prof.global_incorrect
+               << " chooser_selected_local=" << prof.chooser_selected_local
+               << " chooser_selected_global=" << prof.chooser_selected_global
+               << " chooser_correct=" << prof.chooser_correct
+               << " chooser_incorrect=" << prof.chooser_incorrect
+               << " chooser_misses=" << prof.chooser_misses
+               << " both_correct=" << prof.both_correct
+               << " both_incorrect=" << prof.both_incorrect << "\n";
         }
         os << "cpu.branch_profile.top.end\n";
     }

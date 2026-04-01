@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace riscv {
@@ -24,6 +25,13 @@ public:
         bool global_pred_taken = false;
         bool global_use_short_history = false;
         bool chooser_use_global = false;
+        uint16_t local_pht_index = 0;
+        uint16_t global_pht_index = 0;
+        uint16_t chooser_index = 0;
+        uint16_t ghr_for_global_index = 0;
+        uint8_t local_counter_before = 0;
+        uint8_t global_counter_before = 0;
+        uint8_t chooser_counter_before = 0;
     };
 
     struct Prediction {
@@ -60,7 +68,7 @@ private:
     static constexpr size_t kShortGhrBits = 6;
     static constexpr size_t kGlobalPhtEntries = 1ULL << kGhrBits;   // 4096
     static constexpr size_t kLocalHistoryEntries = 1024;
-    static constexpr size_t kLocalHistoryBits = 3;
+    static constexpr size_t kLocalHistoryBits = 6;
     static constexpr size_t kLocalPhtEntries = 1ULL << kLocalHistoryBits; // 64
     static constexpr size_t kChooserEntries = 1ULL << kGhrBits;      // 4096
 
@@ -120,6 +128,10 @@ private:
 
     bool btbLookup(uint64_t pc, uint64_t& target) const;
     void btbUpdate(uint64_t pc, uint64_t target);
+    static std::optional<uint64_t> parseTracePc();
+    bool shouldTrace(uint64_t pc) const;
+
+    std::optional<uint64_t> trace_pc_;
 };
 
 } // namespace riscv

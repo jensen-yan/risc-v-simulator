@@ -373,16 +373,49 @@ void CommitStage::execute(CPUState& state) {
                 }
 
                 if (branch_meta && branch_meta->valid) {
-                    if (branch_meta->local_pred_taken == committed_inst->is_jump()) {
+                    const bool actual_taken = committed_inst->is_jump();
+                    const bool local_correct = (branch_meta->local_pred_taken == actual_taken);
+                    const bool global_correct = (branch_meta->global_pred_taken == actual_taken);
+                    const bool chooser_correct = correct;
+
+                    if (local_correct) {
+                        profile.local_correct++;
                         state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_LOCAL_CORRECT);
                     } else {
+                        profile.local_incorrect++;
                         state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_LOCAL_INCORRECT);
                     }
 
-                    if (branch_meta->global_pred_taken == committed_inst->is_jump()) {
+                    if (global_correct) {
+                        profile.global_correct++;
                         state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_GLOBAL_CORRECT);
                     } else {
+                        profile.global_incorrect++;
                         state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_GLOBAL_INCORRECT);
+                    }
+
+                    if (branch_meta->chooser_use_global) {
+                        profile.chooser_selected_global++;
+                    } else {
+                        profile.chooser_selected_local++;
+                    }
+
+                    if (chooser_correct) {
+                        profile.chooser_correct++;
+                    } else {
+                        profile.chooser_incorrect++;
+                    }
+
+                    if (local_correct && global_correct) {
+                        profile.both_correct++;
+                    } else if (!local_correct && !global_correct) {
+                        profile.both_incorrect++;
+                    } else {
+                        const bool chosen_component_correct =
+                            branch_meta->chooser_use_global ? global_correct : local_correct;
+                        if (!chosen_component_correct) {
+                            profile.chooser_misses++;
+                        }
                     }
                 }
 

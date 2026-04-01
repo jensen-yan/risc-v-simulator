@@ -4,6 +4,7 @@
 #include "core/memory.h"
 
 #include <memory>
+#include <sstream>
 
 namespace riscv {
 
@@ -121,5 +122,32 @@ TEST(OutOfOrderControlFlowPredictionTest, JalrBtbTrainingAvoidsSecondMispredict)
     EXPECT_EQ(statValueByName(stats, "cpu.predictor.jalr.mispredicts"), 1u);
 }
 
-} // namespace riscv
+TEST(OutOfOrderControlFlowPredictionTest, DetailedStatsIncludeBranchRootCauseBreakdown) {
+    auto memory = std::make_shared<Memory>(8192);
+    auto cpu = std::make_unique<OutOfOrderCPU>(memory);
 
+    memory->writeWord(0x0, createIType(Opcode::OP_IMM, /*rd=*/2, /*rs1=*/0, /*imm=*/0, Funct3::ADD_SUB));
+    memory->writeWord(0x4, createIType(Opcode::OP_IMM, /*rd=*/3, /*rs1=*/0, /*imm=*/3, Funct3::ADD_SUB));
+    memory->writeWord(0x8, createIType(Opcode::OP_IMM, /*rd=*/2, /*rs1=*/2, /*imm=*/1, Funct3::ADD_SUB));
+    memory->writeWord(0xC, createBType(Opcode::BRANCH, /*rs1=*/2, /*rs2=*/3, /*imm=*/8, Funct3::BEQ));
+    memory->writeWord(0x10, createJType(Opcode::JAL, /*rd=*/0, /*imm=*/-8));
+    memory->writeWord(0x14, 0x00000073); // ECALL
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 500 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted());
+
+    std::ostringstream oss;
+    cpu->dumpDetailedStats(oss);
+    const std::string stats_text = oss.str();
+
+    EXPECT_NE(stats_text.find("cpu.branch_profile.top.begin"), std::string::npos);
+    EXPECT_NE(stats_text.find("chooser_misses="), std::string::npos);
+    EXPECT_NE(stats_text.find("local_correct="), std::string::npos);
+    EXPECT_NE(stats_text.find("global_correct="), std::string::npos);
+}
+
+} // namespace riscv

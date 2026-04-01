@@ -1,6 +1,9 @@
 #include "cpu/ooo/branch_predictor.h"
 
+#include "common/debug_types.h"
+
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 
 namespace riscv {
@@ -17,6 +20,7 @@ BranchPredictor::BranchPredictor() {
             mode_ = Mode::TournamentNoSpec;
         }
     }
+    trace_pc_ = parseTracePc();
     reset();
 }
 
@@ -58,15 +62,38 @@ void BranchPredictor::counterUpdate(uint8_t& counter, bool taken) {
     uint8_t& c = counter;
     c &= 0x3U;
     if (taken) {
-        c = static_cast<uint8_t>(std::min<uint8_t>(3, static_cast<uint8_t>(c + 1)));
+        if (c < 3U) {
+            ++c;
+        }
     } else {
-        c = static_cast<uint8_t>(std::max<uint8_t>(0, static_cast<uint8_t>(c - 1)));
+        if (c > 0U) {
+            --c;
+        }
     }
 }
 
 uint16_t BranchPredictor::pushHistory(uint16_t history, bool taken, uint16_t mask) {
     const uint16_t shifted = static_cast<uint16_t>((history << 1) & mask);
     return static_cast<uint16_t>(shifted | (taken ? 1U : 0U));
+}
+
+std::optional<uint64_t> BranchPredictor::parseTracePc() {
+    const char* trace_pc = std::getenv("RISCV_SIM_BP_TRACE_PC");
+    if (trace_pc == nullptr || *trace_pc == '\0') {
+        return std::nullopt;
+    }
+
+    errno = 0;
+    char* end = nullptr;
+    const unsigned long long parsed = std::strtoull(trace_pc, &end, 0);
+    if (errno != 0 || end == trace_pc || *end != '\0') {
+        return std::nullopt;
+    }
+    return static_cast<uint64_t>(parsed);
+}
+
+bool BranchPredictor::shouldTrace(uint64_t pc) const {
+    return trace_pc_.has_value() && *trace_pc_ == pc;
 }
 
 BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
@@ -102,10 +129,12 @@ BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
             const size_t global_idx = globalIndex(pc, ghr_for_global_index);
             const size_t chooser_idx = chooserIndex(pc, ghr_before);
 
-            const bool local_pred_taken = counterPredictTaken(local_pht_[local_idx]);
-            const bool global_pred_taken = counterPredictTaken(global_pht_[global_idx]);
-            const uint8_t chooser_counter = chooser_[chooser_idx] & 0x3U;
-            const bool use_local = (mode_ == Mode::Tournament && chooser_counter == 0);
+            const uint8_t local_counter = static_cast<uint8_t>(local_pht_[local_idx] & 0x3U);
+            const uint8_t global_counter = static_cast<uint8_t>(global_pht_[global_idx] & 0x3U);
+            const uint8_t chooser_counter = static_cast<uint8_t>(chooser_[chooser_idx] & 0x3U);
+            const bool local_pred_taken = counterPredictTaken(local_counter);
+            const bool global_pred_taken = counterPredictTaken(global_counter);
+            const bool use_local = (mode_ == Mode::Tournament && chooser_counter < 2);
             const bool force_global = (mode_ == Mode::Gshare || mode_ == Mode::TournamentNoSpec);
             const bool pred_taken = (force_global || !use_local)
                                         ? global_pred_taken
@@ -121,6 +150,13 @@ BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
             pred.branch_meta.global_pred_taken = global_pred_taken;
             pred.branch_meta.global_use_short_history = use_short_global_history;
             pred.branch_meta.chooser_use_global = (force_global || !use_local);
+            pred.branch_meta.local_pht_index = static_cast<uint16_t>(local_idx);
+            pred.branch_meta.global_pht_index = static_cast<uint16_t>(global_idx);
+            pred.branch_meta.chooser_index = static_cast<uint16_t>(chooser_idx);
+            pred.branch_meta.ghr_for_global_index = ghr_for_global_index;
+            pred.branch_meta.local_counter_before = local_counter;
+            pred.branch_meta.global_counter_before = global_counter;
+            pred.branch_meta.chooser_counter_before = chooser_counter;
 
             if (pred_taken) {
                 pred.next_pc = pc + static_cast<uint64_t>(static_cast<int64_t>(decoded.imm));
@@ -129,6 +165,27 @@ BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
                 speculative_local_history_table_[lht_index] =
                     pushHistory(local_history_before, pred_taken, kLocalHistoryMask);
                 speculative_ghr_ = pushHistory(speculative_ghr_, pred_taken, kGhrMask);
+            }
+            if (shouldTrace(pc) && DebugManager::getInstance().shouldLog("BRANCH")) {
+                LOGT(BRANCH,
+                     "bp predict pc=0x%" PRIx64
+                     " ghr_before=0x%x ghr_global=0x%x local_hist=0x%x"
+                     " local[idx=%zu ctr=%u pred=%d] global[idx=%zu ctr=%u pred=%d]"
+                     " chooser[idx=%zu ctr=%u choose=%s] next=0x%" PRIx64,
+                     pc,
+                     static_cast<unsigned>(ghr_before),
+                     static_cast<unsigned>(ghr_for_global_index),
+                     static_cast<unsigned>(local_history_before),
+                     local_idx,
+                     static_cast<unsigned>(local_counter),
+                     static_cast<int>(local_pred_taken),
+                     global_idx,
+                     static_cast<unsigned>(global_counter),
+                     static_cast<int>(global_pred_taken),
+                     chooser_idx,
+                     static_cast<unsigned>(chooser_counter),
+                     pred.branch_meta.chooser_use_global ? "global" : "local",
+                     pred.next_pc);
             }
             return pred;
         }
@@ -193,6 +250,14 @@ void BranchPredictor::update(uint64_t pc,
                                                      : ghr_for_index;
             const size_t global_idx = globalIndex(pc, ghr_for_global_index);
             const size_t chooser_idx = chooserIndex(pc, ghr_for_index);
+            const uint8_t local_counter_before = static_cast<uint8_t>(local_pht_[local_idx] & 0x3U);
+            const uint8_t global_counter_before = static_cast<uint8_t>(global_pht_[global_idx] & 0x3U);
+            const uint8_t chooser_counter_before = static_cast<uint8_t>(chooser_[chooser_idx] & 0x3U);
+            const bool meta_index_mismatch =
+                meta && meta->valid && meta->is_conditional_branch &&
+                (meta->local_pht_index != static_cast<uint16_t>(local_idx) ||
+                 meta->global_pht_index != static_cast<uint16_t>(global_idx) ||
+                 meta->chooser_index != static_cast<uint16_t>(chooser_idx));
 
             counterUpdate(local_pht_[local_idx], actual_taken);
             counterUpdate(global_pht_[global_idx], actual_taken);
@@ -207,6 +272,10 @@ void BranchPredictor::update(uint64_t pc,
                 }
             }
 
+            const uint8_t local_counter_after = static_cast<uint8_t>(local_pht_[local_idx] & 0x3U);
+            const uint8_t global_counter_after = static_cast<uint8_t>(global_pht_[global_idx] & 0x3U);
+            const uint8_t chooser_counter_after = static_cast<uint8_t>(chooser_[chooser_idx] & 0x3U);
+
             const uint16_t committed_local_history_base =
                 (meta && meta->valid && meta->is_conditional_branch)
                     ? static_cast<uint16_t>(meta->local_history_before & kLocalHistoryMask)
@@ -214,6 +283,30 @@ void BranchPredictor::update(uint64_t pc,
             committed_local_history_table_[local_hist_index] =
                 pushHistory(committed_local_history_base, actual_taken, kLocalHistoryMask);
             committed_ghr_ = pushHistory(committed_ghr_, actual_taken, kGhrMask);
+
+            if (shouldTrace(pc) && DebugManager::getInstance().shouldLog("BRANCH")) {
+                LOGT(BRANCH,
+                     "bp update pc=0x%" PRIx64
+                     " actual=%d local[idx=%zu %u->%u pred=%d] global[idx=%zu %u->%u pred=%d]"
+                     " chooser[idx=%zu %u->%u choose=%s mismatch=%d]"
+                     " committed_ghr=0x%x",
+                     pc,
+                     static_cast<int>(actual_taken),
+                     local_idx,
+                     static_cast<unsigned>(local_counter_before),
+                     static_cast<unsigned>(local_counter_after),
+                     static_cast<int>(local_pred_taken),
+                     global_idx,
+                     static_cast<unsigned>(global_counter_before),
+                     static_cast<unsigned>(global_counter_after),
+                     static_cast<int>(global_pred_taken),
+                     chooser_idx,
+                     static_cast<unsigned>(chooser_counter_before),
+                     static_cast<unsigned>(chooser_counter_after),
+                     (meta && meta->valid && !meta->chooser_use_global) ? "local" : "global",
+                     static_cast<int>(meta_index_mismatch),
+                     static_cast<unsigned>(committed_ghr_));
+            }
             return;
         }
         case Opcode::JALR:
@@ -236,11 +329,25 @@ void BranchPredictor::recover_after_branch_mispredict(uint64_t pc, bool actual_t
         const uint16_t ghr_before = static_cast<uint16_t>(meta->ghr_before & kGhrMask);
         speculative_ghr_ = pushHistory(ghr_before, actual_taken, kGhrMask);
         speculative_local_history_table_ = committed_local_history_table_;
+        if (shouldTrace(pc) && DebugManager::getInstance().shouldLog("BRANCH")) {
+            LOGT(BRANCH,
+                 "bp recover pc=0x%" PRIx64 " actual=%d ghr_before=0x%x -> speculative_ghr=0x%x",
+                 pc,
+                 static_cast<int>(actual_taken),
+                 static_cast<unsigned>(ghr_before),
+                 static_cast<unsigned>(speculative_ghr_));
+        }
         return;
     }
 
     speculative_ghr_ = committed_ghr_;
     speculative_local_history_table_ = committed_local_history_table_;
+    if (shouldTrace(pc) && DebugManager::getInstance().shouldLog("BRANCH")) {
+        LOGT(BRANCH,
+             "bp recover pc=0x%" PRIx64 " fallback-to-committed speculative_ghr=0x%x",
+             pc,
+             static_cast<unsigned>(speculative_ghr_));
+    }
 }
 
 void BranchPredictor::on_pipeline_flush() {
@@ -249,6 +356,10 @@ void BranchPredictor::on_pipeline_flush() {
     }
     speculative_ghr_ = committed_ghr_;
     speculative_local_history_table_ = committed_local_history_table_;
+    if (trace_pc_.has_value() && DebugManager::getInstance().shouldLog("BRANCH")) {
+        LOGT(BRANCH, "bp flush reset speculative history to committed_ghr=0x%x",
+             static_cast<unsigned>(speculative_ghr_));
+    }
 }
 
 bool BranchPredictor::usesTournamentPredictor() const {

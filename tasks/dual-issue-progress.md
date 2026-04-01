@@ -33,4 +33,6 @@
 - 完整 CoreMark IPC: `1.2474 -> 1.2721`
 - `ROB flushed entries.branch_mispredict: 836133 -> 785194`
 - 当前条件分支准确率有回落：`560722/22445 -> 549992/33175`
-- 下一步优先看 predictor recover/training 语义，再决定 JALR / RAS / indirect predictor 的优先级
+- 已补 JALR 分类统计与热点画像；CoreMark 中 `3705` 次 JALR miss 里有 `3665` 次是 return-like
+- JALR 根因也已明确：`fallthrough=46`，`wrong_target=3659`，下一步优先级偏向 RAS，而不是先做通用 indirect predictor
+- 分支侧下一步优先看 predictor recover/training 语义

@@ -58,6 +58,12 @@
       "name": "embench",
       "glob": "benchmarks/build/embench-iot/*.elf",
       "optional": true
+    },
+    {
+      "suite": "custom-lsu",
+      "name": "lsu-microbench",
+      "glob": "benchmarks/build/lsu/*.riscv",
+      "optional": true
     }
   ]
 }

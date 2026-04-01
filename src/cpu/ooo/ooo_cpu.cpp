@@ -197,6 +197,13 @@ void OutOfOrderCPU::reset() {
     LOGI(SYSTEM, "ooo cpu reset completed");
 }
 
+void OutOfOrderCPU::resetStats() {
+    cpu_state_.branch_mispredicts = 0;
+    cpu_state_.pipeline_stalls = 0;
+    cpu_state_.perf_counters.reset();
+    cpu_state_.branch_profiles.clear();
+}
+
 uint64_t OutOfOrderCPU::get_physical_register_value(PhysRegNum reg) const {
     if (reg < RegisterRenameUnit::NUM_PHYSICAL_REGS) {
         return cpu_state_.physical_registers[reg];

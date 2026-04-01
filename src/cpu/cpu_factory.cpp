@@ -46,6 +46,7 @@ public:
     void dumpState() const override { cpu_->dumpState(); }
 
     StatsList getStats() const override { return {}; }
+    void resetStats() override {}
 };
 
 /**
@@ -94,6 +95,7 @@ public:
     bool isDiffTestEnabled() const override { return cpu_->isDiffTestEnabled(); }
 
     StatsList getStats() const override { return cpu_->getStats(); }
+    void resetStats() override { cpu_->resetStats(); }
 
     bool dumpDetailedStatsToFile(const std::string& path) const override {
         return cpu_->dumpStatsToFile(path);

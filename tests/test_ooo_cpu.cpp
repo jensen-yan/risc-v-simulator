@@ -175,6 +175,52 @@ TEST_F(OutOfOrderCPUTest, MultipleInstructions) {
     EXPECT_EQ(cpu->getRegister(3), 30) << "x3应该等于30";
 }
 
+TEST_F(OutOfOrderCPUTest, ResetStatsClearsCountersButPreservesArchitecturalState) {
+    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
+    writeInstruction(0x4, createITypeInstruction(2, 1, 0x0, 1, 0x13));
+    writeInstruction(0x8, createECallInstruction());
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 200 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted()) << "程序应该已经停机";
+    ASSERT_EQ(cpu->getRegister(1), 3u) << "执行结果应保留在架构状态中";
+
+    auto hasNonZeroStat = [](const ICpuInterface::StatsList& stats, const std::string& name) {
+        for (const auto& entry : stats) {
+            if (entry.name == name) {
+                return entry.value > 0;
+            }
+        }
+        return false;
+    };
+
+    const uint64_t pcBeforeReset = cpu->getPC();
+    const uint64_t instructionsBeforeReset = cpu->getInstructionCount();
+    const auto statsBeforeReset = cpu->getStats();
+    EXPECT_TRUE(hasNonZeroStat(statsBeforeReset, "instructions"));
+    EXPECT_TRUE(hasNonZeroStat(statsBeforeReset, "cycles"));
+
+    cpu->resetStats();
+
+    EXPECT_TRUE(cpu->isHalted());
+    EXPECT_EQ(cpu->getPC(), pcBeforeReset);
+    EXPECT_EQ(cpu->getInstructionCount(), instructionsBeforeReset);
+    EXPECT_EQ(cpu->getRegister(1), 3u);
+
+    const auto statsAfterReset = cpu->getStats();
+    for (const auto& entry : statsAfterReset) {
+        if (entry.name == "instructions" ||
+            entry.name == "cycles" ||
+            entry.name == "branch_mispredicts" ||
+            entry.name == "pipeline_stalls") {
+            EXPECT_EQ(entry.value, 0u) << "统计项 " << entry.name << " 应被清零";
+        }
+    }
+}
+
 TEST_F(OutOfOrderCPUTest, MExtensionMulInstruction) {
     // ADDI x1, x0, 6
     // ADDI x2, x0, 7

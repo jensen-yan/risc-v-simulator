@@ -160,6 +160,52 @@ void Simulator::run() {
     debugManager.setGlobalContext(cycle_count_, cpu_->getPC());
 }
 
+bool Simulator::runWithWarmup(uint64_t warmupCycles, const std::function<void()>& onWarmup) {
+    auto& debugManager = DebugManager::getInstance();
+    halted_by_instruction_limit_ = false;
+    halted_by_cycle_limit_ = false;
+    bool warmup_triggered = false;
+
+    while (!cpu_->isHalted() && !memory_->shouldExit()) {
+        step();
+
+        if (!warmup_triggered && warmupCycles > 0 && cycle_count_ >= warmupCycles) {
+            warmup_triggered = true;
+            if (onWarmup) {
+                onWarmup();
+            }
+        }
+
+        if (cpuType_ == CpuType::IN_ORDER &&
+            max_in_order_instructions_ > 0 &&
+            cpu_->getInstructionCount() > max_in_order_instructions_) {
+            LOGW(SYSTEM, "instruction count exceeds limit (%llu), auto halt",
+                    static_cast<unsigned long long>(max_in_order_instructions_));
+            cpu_->requestHalt();
+            halted_by_instruction_limit_ = true;
+            break;
+        }
+
+        if (cpuType_ == CpuType::OUT_OF_ORDER &&
+            max_out_of_order_cycles_ > 0 &&
+            cycle_count_ > max_out_of_order_cycles_) {
+            LOGW(SYSTEM, "cycle count exceeds limit (%llu), auto halt",
+                    static_cast<unsigned long long>(max_out_of_order_cycles_));
+            cpu_->requestHalt();
+            halted_by_cycle_limit_ = true;
+            break;
+        }
+    }
+
+    if (memory_->shouldExit()) {
+        LOGI(SYSTEM, "[tohost] program exited via tohost, code=%d",
+                static_cast<int>(memory_->getExitCode()));
+    }
+
+    debugManager.setGlobalContext(cycle_count_, cpu_->getPC());
+    return warmup_triggered;
+}
+
 void Simulator::reset() {
     cpu_->reset();
     memory_->clear();

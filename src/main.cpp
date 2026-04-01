@@ -86,6 +86,7 @@ void printUsage(const char* programName) {
     std::cout << "  --fromhost-addr=ADDR         Override fromhost address (hex/dec)\n";
     std::cout << "  --isa=ISA                    Override enabled ISA extensions (e.g. RV64I_Zicsr)\n";
     std::cout << "  --stats-file=FILE            Dump detailed OOO stats to FILE\n";
+    std::cout << "  --stats-warmup-cycles=N      Print pre-warmup stats, then reset OOO stats at cycle N\n";
     std::cout << "  --pipeline-view=FILE         Generate HTML pipeline visualization\n";
     std::cout << "  --pipeline-cycles=START-END  Limit pipeline view to cycle range\n";
     std::cout << "  --pipeline-max=N             Max instructions in pipeline view (default: 2000)\n";
@@ -158,6 +159,7 @@ int main(int argc, char* argv[]) {
     bool fromhostAddrSet = false;
     std::string isaString;
     std::string statsFile;
+    uint64_t statsWarmupCycles = 0;
     std::string pipelineViewFile;
     uint64_t pipelineStartCycle = 0;
     uint64_t pipelineEndCycle = UINT64_MAX;
@@ -231,6 +233,8 @@ int main(int argc, char* argv[]) {
             isaString = arg.substr(6);
         } else if (arg.find("--stats-file=") == 0) {
             statsFile = arg.substr(13);
+        } else if (arg.find("--stats-warmup-cycles=") == 0) {
+            statsWarmupCycles = std::stoull(arg.substr(22), nullptr, 0);
         } else if (arg.find("--pipeline-view=") == 0) {
             pipelineViewFile = arg.substr(16);
         } else if (arg.find("--pipeline-cycles=") == 0) {
@@ -359,6 +363,43 @@ int main(int argc, char* argv[]) {
         }
         
         bool executionSuccess = true;
+        auto printOooStats = [&](const std::string& title, const ICpuInterface::StatsList& stats) {
+            std::cout << "\n=== " << title << " ===\n";
+
+            uint64_t instructions = 0;
+            uint64_t cycles = 0;
+            for (const auto& entry : stats) {
+                if (entry.name == "instructions") {
+                    instructions = entry.value;
+                } else if (entry.name == "cycles") {
+                    cycles = entry.value;
+                }
+            }
+
+            std::cout << "\n=== Execution Stats ===\n";
+            std::cout << "Instructions: " << instructions << "\n";
+            std::cout << "Final PC: 0x" << std::hex << simulator.getCpu()->getPC() << std::dec << "\n";
+            std::cout << "Program State: " << (simulator.isHalted() ? "halted" : "running") << "\n";
+            std::cout << "Cycles: " << cycles << "\n";
+
+            std::cout << "\n=== Out-of-Order Performance Stats ===\n";
+            if (!stats.empty()) {
+                for (const auto& entry : stats) {
+                    std::cout << entry.name << ": " << entry.value;
+                    if (!entry.description.empty()) {
+                        std::cout << " (" << entry.description << ")";
+                    }
+                    std::cout << "\n";
+                }
+                if (cycles > 0) {
+                    double ipc = static_cast<double>(instructions) / static_cast<double>(cycles);
+                    std::cout << "IPC: " << std::fixed << std::setprecision(2) << ipc << "\n";
+                }
+            } else {
+                std::cout << "Warning: failed to get OOO CPU stats\n";
+            }
+        };
+        bool warmupTriggered = false;
 
         if (stepMode) {
             std::cout << "Step mode (press Enter to continue, input q to quit):\n";
@@ -386,7 +427,19 @@ int main(int argc, char* argv[]) {
         } else {
             std::cout << "Running program...\n";
             try {
-                simulator.run();
+                if (cpuType == CpuType::OUT_OF_ORDER && statsWarmupCycles > 0) {
+                    warmupTriggered = simulator.runWithWarmup(statsWarmupCycles, [&]() {
+                        const auto warmupStats = simulator.getCpu()->getStats();
+                        printOooStats(
+                            fmt::format("Warmup Statistics (cycles 0-{})", simulator.getCycleCount()),
+                            warmupStats);
+                        simulator.getCpu()->resetStats();
+                        std::cout << "\nWarmup statistics reset at cycle " << simulator.getCycleCount()
+                                  << ", continue collecting steady-state stats...\n";
+                    });
+                } else {
+                    simulator.run();
+                }
 
                 if (simulator.hasProgramExit()) {
                     int exitCode = simulator.getProgramExitCode();
@@ -428,33 +481,17 @@ int main(int argc, char* argv[]) {
             simulator.dumpState();
         }
         
-        simulator.printStatistics();
-        
-        // 如果使用乱序执行CPU，显示额外的性能统计
         if (cpuType == CpuType::OUT_OF_ORDER) {
-            std::cout << "\n=== Out-of-Order Performance Stats ===\n";
             auto stats = simulator.getCpu()->getStats();
-            if (!stats.empty()) {
-                uint64_t instructions = 0;
-                uint64_t cycles = 0;
-                for (const auto& entry : stats) {
-                    std::cout << entry.name << ": " << entry.value;
-                    if (!entry.description.empty()) {
-                        std::cout << " (" << entry.description << ")";
-                    }
-                    std::cout << "\n";
-                    if (entry.name == "instructions") {
-                        instructions = entry.value;
-                    } else if (entry.name == "cycles") {
-                        cycles = entry.value;
-                    }
+            if (statsWarmupCycles > 0) {
+                if (!warmupTriggered) {
+                    std::cout << "\nWarning: warmup cycle " << statsWarmupCycles
+                              << " was not reached before program stopped\n";
                 }
-                if (cycles > 0) {
-                    double ipc = static_cast<double>(instructions) / cycles;
-                    std::cout << "IPC: " << std::fixed << std::setprecision(2) << ipc << "\n";
-                }
+                printOooStats("Post-Warmup Statistics", stats);
             } else {
-                std::cout << "Warning: failed to get OOO CPU stats\n";
+                simulator.printStatistics();
+                printOooStats("Out-of-Order Performance Stats", stats);
             }
 
             if (!statsFile.empty()) {

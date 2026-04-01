@@ -4,6 +4,7 @@
 #include "core/memory.h"
 #include "system/elf_loader.h"
 #include "system/pipeline_tracer.h"
+#include <functional>
 #include <string>
 #include <memory>
 
@@ -38,11 +39,13 @@ public:
     // 执行控制
     void step();                    // 单步执行
     void run();                     // 运行到结束
+    bool runWithWarmup(uint64_t warmupCycles, const std::function<void()>& onWarmup);
     void reset();                   // 重置模拟器
     
     // 状态查询
     bool isHalted() const;
     uint64_t getInstructionCount() const;
+    uint64_t getCycleCount() const { return cycle_count_; }
     bool hasProgramExit() const;
     int getProgramExitCode() const;
     bool endedOnZeroInstruction() const;

@@ -15,6 +15,10 @@ class Memory;
  */
 class ElfLoader {
 public:
+    // baremetal benchmark/common crt 往往会预留较大的 stack/TLS 空间。
+    // 默认给 1 MiB，避免仅按 ELF 段大小估算时把运行时活动空间压得过紧。
+    static constexpr size_t kDefaultStackReserve = 0x100000;
+
     struct ProgramSegment {
         Address virtualAddr;    // 虚拟地址
         Address physicalAddr;   // 物理地址
@@ -67,7 +71,7 @@ public:
      */
     static size_t getRequiredMemorySize(const std::string& filename,
                                         size_t minSize,
-                                        size_t stackReserve = 0x10000);
+                                        size_t stackReserve = kDefaultStackReserve);
 
 private:
     // 统一的ELF文件头结构（字段使用64位表示）

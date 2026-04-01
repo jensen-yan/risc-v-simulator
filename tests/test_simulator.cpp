@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include "system/elf_loader.h"
 #include "system/simulator.h"
 
+#include <filesystem>
 #include <vector>
 
 namespace riscv {
@@ -87,6 +89,24 @@ TEST(SimulatorTest, RunWithWarmupTriggersCallbackOnceAndKeepsSteadyStateWindow) 
         << "post-warmup instructions 应只统计 reset 之后的窗口";
     EXPECT_EQ(simulator.getCpu()->getRegister(1), 128u)
         << "warmup 统计重置不应影响架构执行结果";
+}
+
+TEST(SimulatorTest, ElfAutoSizingUsesLargerDefaultStackReserveForBaremetalWorkloads) {
+    const auto repo_root = std::filesystem::path(__FILE__).parent_path().parent_path();
+    const auto elf_path = repo_root / "runtime" / "test_simple_printf.elf";
+    if (!std::filesystem::exists(elf_path)) {
+        GTEST_SKIP() << "缺少测试 ELF: " << elf_path;
+    }
+
+    const size_t with_small_reserve =
+        ElfLoader::getRequiredMemorySize(elf_path.string(), /*minSize=*/0, /*stackReserve=*/0x10000);
+    const size_t with_default_reserve =
+        ElfLoader::getRequiredMemorySize(elf_path.string(), /*minSize=*/0);
+
+    ASSERT_GE(with_default_reserve, with_small_reserve);
+    EXPECT_EQ(with_default_reserve - with_small_reserve,
+              ElfLoader::kDefaultStackReserve - static_cast<size_t>(0x10000))
+        << "默认 ELF 自动 sizing 应比旧的 64 KiB 预留提供更充足的 stack/TLS 空间";
 }
 
 } // namespace riscv

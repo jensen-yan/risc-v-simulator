@@ -28,6 +28,8 @@ void BranchPredictor::reset() {
     for (auto& entry : btb_) {
         entry = BtbEntry{};
     }
+    committed_ras_.fill(0);
+    speculative_ras_.fill(0);
     global_pht_.fill(kCounterWeakNotTaken);
     committed_local_history_table_.fill(0);
     speculative_local_history_table_.fill(0);
@@ -35,6 +37,8 @@ void BranchPredictor::reset() {
     chooser_.fill(kCounterWeakGlobal);
     committed_ghr_ = 0;
     speculative_ghr_ = 0;
+    committed_ras_size_ = 0;
+    speculative_ras_size_ = 0;
 }
 
 bool BranchPredictor::btbLookup(uint64_t pc, uint64_t& target) const {
@@ -77,6 +81,25 @@ uint16_t BranchPredictor::pushHistory(uint16_t history, bool taken, uint16_t mas
     return static_cast<uint16_t>(shifted | (taken ? 1U : 0U));
 }
 
+bool BranchPredictor::isLinkRegister(RegNum reg) {
+    return reg == 1 || reg == 5;
+}
+
+bool BranchPredictor::isReturnLikeJalr(const DecodedInstruction& decoded) {
+    return decoded.opcode == Opcode::JALR && decoded.rd == 0 && decoded.imm == 0 &&
+           isLinkRegister(decoded.rs1);
+}
+
+bool BranchPredictor::isCallLikeControl(const DecodedInstruction& decoded) {
+    if (decoded.opcode == Opcode::JAL) {
+        return isLinkRegister(decoded.rd);
+    }
+    if (decoded.opcode == Opcode::JALR) {
+        return isLinkRegister(decoded.rd);
+    }
+    return false;
+}
+
 std::optional<uint64_t> BranchPredictor::parseTracePc() {
     const char* trace_pc = std::getenv("RISCV_SIM_BP_TRACE_PC");
     if (trace_pc == nullptr || *trace_pc == '\0') {
@@ -94,6 +117,31 @@ std::optional<uint64_t> BranchPredictor::parseTracePc() {
 
 bool BranchPredictor::shouldTrace(uint64_t pc) const {
     return trace_pc_.has_value() && *trace_pc_ == pc;
+}
+
+bool BranchPredictor::rasPeek(const std::array<uint64_t, kRasEntries>& ras,
+                              size_t ras_size,
+                              uint64_t& target) {
+    if (ras_size == 0) {
+        return false;
+    }
+    target = ras[ras_size - 1];
+    return true;
+}
+
+void BranchPredictor::rasPush(std::array<uint64_t, kRasEntries>& ras, size_t& ras_size, uint64_t target) {
+    if (ras_size == kRasEntries) {
+        std::move(ras.begin() + 1, ras.end(), ras.begin());
+        ras[kRasEntries - 1] = target;
+        return;
+    }
+    ras[ras_size++] = target;
+}
+
+void BranchPredictor::rasPop(size_t& ras_size) {
+    if (ras_size > 0) {
+        --ras_size;
+    }
 }
 
 BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
@@ -191,14 +239,30 @@ BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
         }
         case Opcode::JAL: {
             pred.next_pc = pc + static_cast<uint64_t>(static_cast<int64_t>(decoded.imm));
+            if (isCallLikeControl(decoded)) {
+                rasPush(speculative_ras_, speculative_ras_size_, fallthrough);
+            }
             return pred;
         }
         case Opcode::JALR: {
-            pred.btb_used = true;
             uint64_t target = 0;
+            if (isReturnLikeJalr(decoded)) {
+                pred.ras_used = true;
+                pred.ras_hit = rasPeek(speculative_ras_, speculative_ras_size_, target);
+                if (pred.ras_hit) {
+                    pred.next_pc = target;
+                    rasPop(speculative_ras_size_);
+                    return pred;
+                }
+            }
+
+            pred.btb_used = true;
             pred.btb_hit = btbLookup(pc, target);
             if (pred.btb_hit) {
                 pred.next_pc = target;
+            }
+            if (isCallLikeControl(decoded)) {
+                rasPush(speculative_ras_, speculative_ras_size_, fallthrough);
             }
             return pred;
         }
@@ -313,8 +377,21 @@ void BranchPredictor::update(uint64_t pc,
             if (actual_taken) {
                 btbUpdate(pc, actual_target);
             }
+            if (isReturnLikeJalr(decoded)) {
+                rasPop(committed_ras_size_);
+            } else if (isCallLikeControl(decoded)) {
+                rasPush(committed_ras_,
+                        committed_ras_size_,
+                        pc + (decoded.is_compressed ? 2ULL : 4ULL));
+            }
             return;
         case Opcode::JAL:
+            if (actual_taken && isCallLikeControl(decoded)) {
+                rasPush(committed_ras_,
+                        committed_ras_size_,
+                        pc + (decoded.is_compressed ? 2ULL : 4ULL));
+            }
+            return;
         default:
             return;
     }
@@ -356,6 +433,8 @@ void BranchPredictor::on_pipeline_flush() {
     }
     speculative_ghr_ = committed_ghr_;
     speculative_local_history_table_ = committed_local_history_table_;
+    speculative_ras_ = committed_ras_;
+    speculative_ras_size_ = committed_ras_size_;
     if (trace_pc_.has_value() && DebugManager::getInstance().shouldLog("BRANCH")) {
         LOGT(BRANCH, "bp flush reset speculative history to committed_ghr=0x%x",
              static_cast<unsigned>(speculative_ghr_));

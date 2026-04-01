@@ -21,7 +21,8 @@
 - [x] 第三阶段：RS dispatch/execute/commit 双宽
 - [x] 第四阶段：优化 RS 双选与窗口容量
 - [ ] 第五阶段：继续压控制流 flush 与 load replay
-- [ ] 第六阶段：补 JALR 分类日志，再决定 RAS / indirect predictor 优先级
+- [x] 第六阶段：补 JALR 分类日志，再决定 RAS / indirect predictor 优先级
+- [x] 第七阶段：落 speculative RAS，并验证 return-like JALR 收益
 
 ## 当前状态
 
@@ -35,4 +36,7 @@
 - 当前条件分支准确率有回落：`560722/22445 -> 549992/33175`
 - 已补 JALR 分类统计与热点画像；CoreMark 中 `3705` 次 JALR miss 里有 `3665` 次是 return-like
 - JALR 根因也已明确：`fallthrough=46`，`wrong_target=3659`，下一步优先级偏向 RAS，而不是先做通用 indirect predictor
+- 已落 speculative RAS：fetch/predict 维护投机返回栈，flush/recover 回到 committed 栈，commit 继续做最终训练
+- steady-state CoreMark：`JALR miss 120 -> 3`，`IPC 1.5014 -> 1.5025`
+- 200k Dhrystone：`JALR miss 6174 -> 21`，`IPC 1.3839 -> 1.6121`
 - 分支侧下一步优先看 predictor recover/training 语义

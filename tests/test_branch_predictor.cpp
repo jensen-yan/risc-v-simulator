@@ -13,6 +13,25 @@ DecodedInstruction makeBranchInst(int32_t imm = 8) {
     return branch;
 }
 
+DecodedInstruction makeJalInst(RegNum rd, int32_t imm = 8, bool is_compressed = false) {
+    DecodedInstruction jal{};
+    jal.opcode = Opcode::JAL;
+    jal.rd = rd;
+    jal.imm = imm;
+    jal.is_compressed = is_compressed;
+    return jal;
+}
+
+DecodedInstruction makeJalrInst(RegNum rd, RegNum rs1, int32_t imm = 0, bool is_compressed = false) {
+    DecodedInstruction jalr{};
+    jalr.opcode = Opcode::JALR;
+    jalr.rd = rd;
+    jalr.rs1 = rs1;
+    jalr.imm = imm;
+    jalr.is_compressed = is_compressed;
+    return jalr;
+}
+
 BranchPredictor::BranchMeta makeBranchMeta(uint16_t ghr_before,
                                            uint16_t local_history_before,
                                            uint16_t local_history_index,
@@ -79,8 +98,7 @@ TEST(BranchPredictorTest, ConditionalPredictionCompatibility) {
 TEST(BranchPredictorTest, BtbHitAndTagCheck) {
     BranchPredictor predictor;
 
-    DecodedInstruction jalr{};
-    jalr.opcode = Opcode::JALR;
+    const DecodedInstruction jalr = makeJalrInst(/*rd=*/0, /*rs1=*/2, /*imm=*/0);
 
     const uint64_t pc = 0x200;
     const uint64_t fallthrough = pc + 4;
@@ -100,6 +118,62 @@ TEST(BranchPredictorTest, BtbHitAndTagCheck) {
     // 不同PC不应误命中
     auto other = predictor.predict(pc + 4, jalr, pc + 8);
     EXPECT_FALSE(other.btb_hit);
+}
+
+TEST(BranchPredictorTest, CommittedRasBecomesVisibleAfterPipelineFlush) {
+    BranchPredictor predictor;
+
+    const auto call = makeJalInst(/*rd=*/1);
+    const auto ret = makeJalrInst(/*rd=*/0, /*rs1=*/1, /*imm=*/0);
+    const uint64_t call_pc = 0x300;
+    const uint64_t ret_pc = 0x500;
+    const uint64_t ret_fallthrough = ret_pc + 4;
+
+    predictor.update(call_pc, call, /*actual_taken=*/true, /*actual_target=*/0x500);
+    predictor.on_pipeline_flush();
+
+    auto pred = predictor.predict(ret_pc, ret, ret_fallthrough);
+    EXPECT_TRUE(pred.ras_used);
+    EXPECT_TRUE(pred.ras_hit);
+    EXPECT_FALSE(pred.btb_used);
+    EXPECT_EQ(pred.next_pc, call_pc + 4);
+}
+
+TEST(BranchPredictorTest, CallPredictionPushesSpeculativeRasBeforeCommit) {
+    BranchPredictor predictor;
+
+    const auto call = makeJalInst(/*rd=*/1, /*imm=*/16);
+    const auto ret = makeJalrInst(/*rd=*/0, /*rs1=*/1, /*imm=*/0);
+    const uint64_t call_pc = 0x180;
+    const uint64_t ret_pc = 0x220;
+    const uint64_t call_fallthrough = call_pc + 4;
+    const uint64_t ret_fallthrough = ret_pc + 4;
+
+    const auto call_pred = predictor.predict(call_pc, call, call_fallthrough);
+    EXPECT_EQ(call_pred.next_pc, call_pc + 16);
+
+    const auto ret_pred = predictor.predict(ret_pc, ret, ret_fallthrough);
+    EXPECT_TRUE(ret_pred.ras_used);
+    EXPECT_TRUE(ret_pred.ras_hit);
+    EXPECT_FALSE(ret_pred.btb_used);
+    EXPECT_EQ(ret_pred.next_pc, call_fallthrough);
+}
+
+TEST(BranchPredictorTest, ReturnLikeJalrFallsBackToBtbWhenRasEmpty) {
+    BranchPredictor predictor;
+
+    const auto ret = makeJalrInst(/*rd=*/0, /*rs1=*/1, /*imm=*/0);
+    const uint64_t pc = 0x340;
+    const uint64_t fallthrough = pc + 4;
+
+    predictor.update(pc, ret, /*actual_taken=*/true, /*actual_target=*/0x880);
+
+    auto pred = predictor.predict(pc, ret, fallthrough);
+    EXPECT_TRUE(pred.ras_used);
+    EXPECT_FALSE(pred.ras_hit);
+    EXPECT_TRUE(pred.btb_used);
+    EXPECT_TRUE(pred.btb_hit);
+    EXPECT_EQ(pred.next_pc, 0x880u);
 }
 
 TEST(BranchPredictorTest, GShareUsesDifferentHistoryContexts) {

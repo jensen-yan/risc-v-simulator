@@ -119,11 +119,21 @@ void FetchStage::execute(CPUState& state) {
                     predicted_next_pc = pred.next_pc;
 
                     if (decoded.opcode == Opcode::JALR) {
-                        state.perf_counters.increment(PerfCounterId::PREDICTOR_BTB_LOOKUPS);
-                        if (pred.btb_hit) {
-                            state.perf_counters.increment(PerfCounterId::PREDICTOR_BTB_HITS);
-                        } else {
-                            state.perf_counters.increment(PerfCounterId::PREDICTOR_BTB_MISSES);
+                        if (pred.ras_used) {
+                            state.perf_counters.increment(PerfCounterId::PREDICTOR_RAS_LOOKUPS);
+                            if (pred.ras_hit) {
+                                state.perf_counters.increment(PerfCounterId::PREDICTOR_RAS_HITS);
+                            } else {
+                                state.perf_counters.increment(PerfCounterId::PREDICTOR_RAS_MISSES);
+                            }
+                        }
+                        if (pred.btb_used) {
+                            state.perf_counters.increment(PerfCounterId::PREDICTOR_BTB_LOOKUPS);
+                            if (pred.btb_hit) {
+                                state.perf_counters.increment(PerfCounterId::PREDICTOR_BTB_HITS);
+                            } else {
+                                state.perf_counters.increment(PerfCounterId::PREDICTOR_BTB_MISSES);
+                            }
                         }
                     } else if (decoded.opcode == Opcode::BRANCH) {
                         state.perf_counters.increment(PerfCounterId::PREDICTOR_BHT_LOOKUPS);

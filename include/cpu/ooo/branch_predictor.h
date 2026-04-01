@@ -15,6 +15,8 @@ namespace riscv {
 // - Commit调用update训练预测器；条件分支误预测时调用recover_after_branch_mispredict回滚GHR
 class BranchPredictor {
 public:
+    static constexpr size_t kRasEntries = 32;
+
     struct BranchMeta {
         bool valid = false;
         bool is_conditional_branch = false;
@@ -38,6 +40,8 @@ public:
         uint64_t next_pc = 0;
         bool btb_used = false;
         bool btb_hit = false;
+        bool ras_used = false;
+        bool ras_hit = false;
         bool bht_used = false;
         bool bht_pred_taken = false;
         BranchMeta branch_meta{};
@@ -85,6 +89,8 @@ private:
     };
 
     std::array<BtbEntry, kBtbEntries> btb_{};
+    std::array<uint64_t, kRasEntries> committed_ras_{};
+    std::array<uint64_t, kRasEntries> speculative_ras_{};
 
     enum class Mode {
         Tournament,
@@ -103,6 +109,8 @@ private:
 
     uint16_t committed_ghr_ = 0;
     uint16_t speculative_ghr_ = 0;
+    size_t committed_ras_size_ = 0;
+    size_t speculative_ras_size_ = 0;
 
     static constexpr size_t btbIndex(uint64_t pc) {
         return static_cast<size_t>((pc >> 1) & (kBtbEntries - 1));
@@ -127,9 +135,15 @@ private:
     static bool counterPredictTaken(uint8_t counter);
     static void counterUpdate(uint8_t& counter, bool taken);
     static uint16_t pushHistory(uint16_t history, bool taken, uint16_t mask);
+    static bool isLinkRegister(RegNum reg);
+    static bool isReturnLikeJalr(const DecodedInstruction& decoded);
+    static bool isCallLikeControl(const DecodedInstruction& decoded);
 
     bool btbLookup(uint64_t pc, uint64_t& target) const;
     void btbUpdate(uint64_t pc, uint64_t target);
+    static bool rasPeek(const std::array<uint64_t, kRasEntries>& ras, size_t ras_size, uint64_t& target);
+    static void rasPush(std::array<uint64_t, kRasEntries>& ras, size_t& ras_size, uint64_t target);
+    static void rasPop(size_t& ras_size);
     static std::optional<uint64_t> parseTracePc();
     bool shouldTrace(uint64_t pc) const;
 

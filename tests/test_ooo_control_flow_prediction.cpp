@@ -84,8 +84,8 @@ TEST(OutOfOrderControlFlowPredictionTest, JalrBtbTrainingAvoidsSecondMispredict)
     auto memory = std::make_shared<Memory>(8192);
     auto cpu = std::make_unique<OutOfOrderCPU>(memory);
 
-    // 0x0 : addi x1, x0, 0x20  (x1 = target)
-    // 0x4 : jalr x0, x1, 0     (indirect jump, BTB miss first time)
+    // 0x0 : addi x6, x0, 0x20  (x6 = target)
+    // 0x4 : jalr x0, x6, 0     (indirect jump, BTB miss first time)
     // 0x8 : addi x3, x0, 0x111 (fallthrough path; must be squashed)
     // 0xC : ecall              (fallthrough path; must be squashed)
     // 0x20: addi x2, x2, 1
@@ -95,8 +95,8 @@ TEST(OutOfOrderControlFlowPredictionTest, JalrBtbTrainingAvoidsSecondMispredict)
     // 0x30: nop
     // 0x34: nop
     // 0x38: ecall
-    memory->writeWord(0x0, createIType(Opcode::OP_IMM, /*rd=*/1, /*rs1=*/0, /*imm=*/0x20, Funct3::ADD_SUB));
-    memory->writeWord(0x4, createIType(Opcode::JALR, /*rd=*/0, /*rs1=*/1, /*imm=*/0, Funct3::ADD_SUB));
+    memory->writeWord(0x0, createIType(Opcode::OP_IMM, /*rd=*/6, /*rs1=*/0, /*imm=*/0x20, Funct3::ADD_SUB));
+    memory->writeWord(0x4, createIType(Opcode::JALR, /*rd=*/0, /*rs1=*/6, /*imm=*/0, Funct3::ADD_SUB));
     memory->writeWord(0x8, createIType(Opcode::OP_IMM, /*rd=*/3, /*rs1=*/0, /*imm=*/0x111, Funct3::ADD_SUB));
     memory->writeWord(0xC, 0x00000073); // ECALL
 
@@ -114,7 +114,9 @@ TEST(OutOfOrderControlFlowPredictionTest, JalrBtbTrainingAvoidsSecondMispredict)
     }
 
     EXPECT_TRUE(cpu->isHalted());
+    EXPECT_EQ(cpu->getRegister(6), 0x20u);
     EXPECT_EQ(cpu->getRegister(2), 2u);
+    EXPECT_EQ(cpu->getRegister(4), 2u);
     EXPECT_EQ(cpu->getRegister(3), 0u) << "JALR第一次miss的fallthrough路径不应被提交";
 
     const auto stats = cpu->getStats();
@@ -179,6 +181,7 @@ TEST(OutOfOrderControlFlowPredictionTest, DetailedStatsIncludeJalrRootCauseBreak
     EXPECT_EQ(statValueByName(stats, "cpu.predictor.jalr.return_like.mispredicts"), 1u);
     EXPECT_EQ(statValueByName(stats, "cpu.predictor.jalr.fallthrough.mispredicts"), 1u);
     EXPECT_EQ(statValueByName(stats, "cpu.predictor.jalr.wrong_target.mispredicts"), 0u);
+    EXPECT_GE(statValueByName(stats, "cpu.predictor.ras.lookups"), 1u);
 
     std::ostringstream oss;
     cpu->dumpDetailedStats(oss);
@@ -186,6 +189,50 @@ TEST(OutOfOrderControlFlowPredictionTest, DetailedStatsIncludeJalrRootCauseBreak
     EXPECT_NE(stats_text.find("cpu.jalr_profile.top.begin"), std::string::npos);
     EXPECT_NE(stats_text.find("predicted_fallthrough="), std::string::npos);
     EXPECT_NE(stats_text.find("return_like="), std::string::npos);
+}
+
+TEST(OutOfOrderControlFlowPredictionTest, RasFixesTwoCallsiteReturnTargetConflict) {
+    auto memory = std::make_shared<Memory>(8192);
+    auto cpu = std::make_unique<OutOfOrderCPU>(memory);
+
+    // 0x000: jal x1, +0x100   -> callsite A, return address 0x004
+    // 0x004: jal x0, +0x01C   -> skip callsite B once A returns
+    // 0x008: jal x1, +0x0F8   -> callsite B, return address 0x00C
+    // 0x00C: ecall
+    // 0x020: addi x3, x0, 1
+    // 0x024: jal x0, -0x01C   -> jump to callsite B
+    // 0x100: addi x2, x2, 1
+    // 0x104: nop
+    // 0x108: nop
+    // 0x10C: nop
+    // 0x110: nop
+    // 0x114: jalr x0, x1, 0   -> shared return site，给 committed-only RAS 留出提交窗口
+    memory->writeWord(0x000, createJType(Opcode::JAL, /*rd=*/1, /*imm=*/0x100));
+    memory->writeWord(0x004, createJType(Opcode::JAL, /*rd=*/0, /*imm=*/0x01C));
+    memory->writeWord(0x008, createJType(Opcode::JAL, /*rd=*/1, /*imm=*/0x0F8));
+    memory->writeWord(0x00C, 0x00000073); // ECALL
+    memory->writeWord(0x020, createIType(Opcode::OP_IMM, /*rd=*/3, /*rs1=*/0, /*imm=*/1, Funct3::ADD_SUB));
+    memory->writeWord(0x024, createJType(Opcode::JAL, /*rd=*/0, /*imm=*/-0x01C));
+    memory->writeWord(0x100, createIType(Opcode::OP_IMM, /*rd=*/2, /*rs1=*/2, /*imm=*/1, Funct3::ADD_SUB));
+    memory->writeWord(0x104, createIType(Opcode::OP_IMM, /*rd=*/0, /*rs1=*/0, /*imm=*/0, Funct3::ADD_SUB));
+    memory->writeWord(0x108, createIType(Opcode::OP_IMM, /*rd=*/0, /*rs1=*/0, /*imm=*/0, Funct3::ADD_SUB));
+    memory->writeWord(0x10C, createIType(Opcode::OP_IMM, /*rd=*/0, /*rs1=*/0, /*imm=*/0, Funct3::ADD_SUB));
+    memory->writeWord(0x110, createIType(Opcode::OP_IMM, /*rd=*/0, /*rs1=*/0, /*imm=*/0, Funct3::ADD_SUB));
+    memory->writeWord(0x114, createIType(Opcode::JALR, /*rd=*/0, /*rs1=*/1, /*imm=*/0, Funct3::ADD_SUB));
+
+    cpu->setPC(0x000);
+    for (int i = 0; i < 400 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted());
+    EXPECT_EQ(cpu->getRegister(2), 2u);
+    EXPECT_EQ(cpu->getRegister(3), 1u);
+
+    const auto stats = cpu->getStats();
+    EXPECT_LE(statValueByName(stats, "cpu.predictor.jalr.mispredicts"), 1u);
+    EXPECT_GE(statValueByName(stats, "cpu.predictor.ras.lookups"), 1u);
+    EXPECT_GE(statValueByName(stats, "cpu.predictor.ras.hits"), 1u);
 }
 
 } // namespace riscv

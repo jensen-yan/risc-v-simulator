@@ -22,11 +22,22 @@ struct StoreBufferEntry {
 // Store Buffer，用于实现 Store-to-Load Forwarding
 class StoreBuffer {
 public:
+    static const int MAX_ENTRIES = 8; // Store Buffer大小
+
     enum class LoadForwardingKind {
         NoMatch,
         FullMatch,
         PartialMatch,
         BlockedByOverlap,
+    };
+
+    struct LoadForwardingInfo {
+        LoadForwardingKind kind = LoadForwardingKind::NoMatch;
+        uint64_t value = 0;
+        uint8_t byte_mask = 0;
+        std::array<DynamicInstPtr, MAX_ENTRIES> contributing_stores{};
+        size_t contributing_count = 0;
+        DynamicInstPtr primary_store = nullptr;
     };
 
     StoreBuffer();
@@ -47,6 +58,9 @@ public:
                                                 uint64_t& result_value,
                                                 uint64_t current_instruction_id,
                                                 DynamicInstPtr* matched_store) const;
+    LoadForwardingInfo analyze_load_forwarding(uint64_t address,
+                                               uint8_t size,
+                                               uint64_t current_instruction_id) const;
 
     // 清除指定指令ID及之前的Store条目（当Store指令提交时调用）
     void retire_stores_before(uint64_t instruction_id);
@@ -61,7 +75,6 @@ public:
     size_t get_capacity() const { return MAX_ENTRIES; }
 
 private:
-    static const int MAX_ENTRIES = 8; // Store Buffer大小
     std::array<StoreBufferEntry, MAX_ENTRIES> entries;
     int next_allocate_index; // 下一个分配位置（循环使用）
     

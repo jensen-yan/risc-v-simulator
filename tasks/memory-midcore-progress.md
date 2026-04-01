@@ -29,4 +29,5 @@
 - 已验证“源操作数 ready 时提前物化地址”能显著减少 `rob_store_addr_unknown` 型 replay
 - `run_memory_learning.sh` 已提供 `lsu-foundation / stream / full` 三种固定入口
 - 新增 `lsu_overlap_mix`，专门覆盖 `partial forward` 与 `overlap replay` 两类 LSU 行为
-- 下一步优先看 `lsu_overlap_mix / stream_triad` 的 store hotspot 统计，再决定先补 store overlap 机制还是进入 L2 / prefetcher
+- 已实现“内存值 + store buffer 字节 merge”的部分重叠 load 解析，`lsu_overlap_mix` 上 `store_buffer_overlap replay` 已降到 `0`
+- 下一步优先看剩余的 `rob_store_overlap` 热点，再决定先补更早的 store 依赖消解还是进入 L2 / prefetcher

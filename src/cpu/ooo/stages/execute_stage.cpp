@@ -700,36 +700,35 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
     uint64_t addr = unit.load_address;
     uint8_t access_size = unit.load_size;
     auto& memory_info = unit.instruction->get_memory_info();
+    const uint8_t full_forward_mask =
+        static_cast<uint8_t>(access_size == 8 ? 0xFFu : ((1u << access_size) - 1u));
     
     if (!unit.dcache.request_sent) {
         // 尝试Store-to-Load Forwarding
-        uint64_t forwarded_value = 0;
-        DynamicInstPtr matched_store = nullptr;
-        const auto forwarding_kind = state.store_buffer->classify_load_forwarding(
-            addr, access_size, forwarded_value, unit.instruction->get_instruction_id(), &matched_store);
-        if (forwarding_kind == StoreBuffer::LoadForwardingKind::BlockedByOverlap) {
-            if (matched_store) {
-                matched_store->get_memory_info().caused_store_buffer_overlap_block_count++;
-            }
-            state.perf_counters.increment(PerfCounterId::LOADS_BLOCKED_BY_STORE);
-            return LoadExecutionResult::BlockedByStore;
-        }
+        const auto forwarding_info = state.store_buffer->analyze_load_forwarding(
+            addr, access_size, unit.instruction->get_instruction_id());
+        const auto forwarding_kind = forwarding_info.kind;
+        const uint64_t forwarded_value = forwarding_info.value;
+        const bool needs_memory_merge =
+            forwarding_kind == StoreBuffer::LoadForwardingKind::PartialMatch &&
+            forwarding_info.byte_mask != 0 &&
+            forwarding_info.byte_mask != full_forward_mask;
 
         if (forwarding_kind == StoreBuffer::LoadForwardingKind::FullMatch ||
-            forwarding_kind == StoreBuffer::LoadForwardingKind::PartialMatch) {
+            (forwarding_kind == StoreBuffer::LoadForwardingKind::PartialMatch && !needs_memory_merge)) {
             memory_info.store_forwarded = true;
             state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
             if (forwarding_kind == StoreBuffer::LoadForwardingKind::FullMatch) {
                 state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED_FULL_MATCH);
                 memory_info.load_final_source = DynamicInst::MemoryInfo::LoadFinalSource::ForwardedFull;
-                if (matched_store) {
-                    matched_store->get_memory_info().caused_forwarded_full_count++;
+                for (size_t idx = 0; idx < forwarding_info.contributing_count; ++idx) {
+                    forwarding_info.contributing_stores[idx]->get_memory_info().caused_forwarded_full_count++;
                 }
             } else {
                 state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED_PARTIAL_MATCH);
                 memory_info.load_final_source = DynamicInst::MemoryInfo::LoadFinalSource::ForwardedPartial;
-                if (matched_store) {
-                    matched_store->get_memory_info().caused_forwarded_partial_count++;
+                for (size_t idx = 0; idx < forwarding_info.contributing_count; ++idx) {
+                    forwarding_info.contributing_stores[idx]->get_memory_info().caused_forwarded_partial_count++;
                 }
             }
             if (inst.opcode == Opcode::LOAD_FP) {
@@ -793,7 +792,9 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
         }
 
         memory_info.store_forwarded = false;
-        memory_info.load_final_source = DynamicInst::MemoryInfo::LoadFinalSource::FromMemory;
+        memory_info.load_final_source =
+            needs_memory_merge ? DynamicInst::MemoryInfo::LoadFinalSource::ForwardedPartial
+                               : DynamicInst::MemoryInfo::LoadFinalSource::FromMemory;
         try {
             uint64_t raw_value = 0;
             CacheAccessResult cache_result{};
@@ -828,6 +829,32 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
             }
 
             record_dcache_access_result(state, CacheAccessType::Read, cache_result);
+
+            if (needs_memory_merge) {
+                for (uint8_t byte_index = 0; byte_index < access_size; ++byte_index) {
+                    const uint8_t bit = static_cast<uint8_t>(1u << byte_index);
+                    if ((forwarding_info.byte_mask & bit) == 0) {
+                        continue;
+                    }
+                    const uint64_t byte_mask = 0xFFull << (byte_index * 8);
+                    raw_value &= ~byte_mask;
+                    raw_value |= forwarded_value & byte_mask;
+                }
+                memory_info.store_forwarded = true;
+                state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
+                state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED_PARTIAL_MATCH);
+                for (size_t idx = 0; idx < forwarding_info.contributing_count; ++idx) {
+                    forwarding_info.contributing_stores[idx]
+                        ->get_memory_info()
+                        .caused_forwarded_partial_count++;
+                }
+            } else if (forwarding_kind == StoreBuffer::LoadForwardingKind::BlockedByOverlap) {
+                if (forwarding_info.primary_store) {
+                    forwarding_info.primary_store->get_memory_info().caused_store_buffer_overlap_block_count++;
+                }
+                state.perf_counters.increment(PerfCounterId::LOADS_BLOCKED_BY_STORE);
+                return LoadExecutionResult::BlockedByStore;
+            }
 
             if (inst.opcode == Opcode::LOAD_FP) {
                 if (access_size == 4) {

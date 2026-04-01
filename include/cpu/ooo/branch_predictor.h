@@ -68,8 +68,10 @@ private:
     static constexpr size_t kShortGhrBits = 6;
     static constexpr size_t kGlobalPhtEntries = 1ULL << kGhrBits;   // 4096
     static constexpr size_t kLocalHistoryEntries = 1024;
-    static constexpr size_t kLocalHistoryBits = 6;
-    static constexpr size_t kLocalPhtEntries = 1ULL << kLocalHistoryBits; // 64
+    // CoreMark 热点分支常见 8T+1N 这类周期模式，local history 至少要覆盖 8 bit
+    // 才能把循环内 taken 相位和退出 not-taken 相位区分开。
+    static constexpr size_t kLocalHistoryBits = 8;
+    static constexpr size_t kLocalPhtEntries = 1ULL << kLocalHistoryBits; // 256
     static constexpr size_t kChooserEntries = 1ULL << kGhrBits;      // 4096
 
     static constexpr uint16_t kGhrMask = static_cast<uint16_t>((1ULL << kGhrBits) - 1ULL);

@@ -254,4 +254,38 @@ TEST(BranchPredictorTest, RecoverAndFlushResetSpeculativeHistory) {
     EXPECT_EQ(after_flush.branch_meta.ghr_before, 1u);
 }
 
+TEST(BranchPredictorTest, LocalHistoryLearnsEightTakenThenExitPattern) {
+    BranchPredictor predictor;
+    const DecodedInstruction branch = makeBranchInst();
+    const uint64_t pc = 0x280;
+    const uint64_t fallthrough = pc + 4;
+    const uint64_t taken_target = pc + 8;
+
+    auto executeBranch = [&](bool actual_taken) {
+        const auto pred = predictor.predict(pc, branch, fallthrough);
+        predictor.update(pc, branch, actual_taken, actual_taken ? taken_target : fallthrough, &pred.branch_meta);
+        if (pred.bht_pred_taken != actual_taken) {
+            predictor.recover_after_branch_mispredict(pc, actual_taken, &pred.branch_meta);
+        }
+        return pred;
+    };
+
+    // 训练多个周期的 8T + 1N 模式，让 local history 为退出相位建立独立项。
+    for (int round = 0; round < 6; ++round) {
+        for (int i = 0; i < 8; ++i) {
+            executeBranch(true);
+        }
+        executeBranch(false);
+    }
+
+    for (int i = 0; i < 8; ++i) {
+        executeBranch(true);
+    }
+
+    const auto exit_pred = predictor.predict(pc, branch, fallthrough);
+    EXPECT_EQ(exit_pred.branch_meta.local_history_before, 0xFFu);
+    EXPECT_FALSE(exit_pred.branch_meta.local_pred_taken)
+        << "8-bit local history 应能把 8T + 1N 的退出相位学成 not-taken";
+}
+
 } // namespace riscv

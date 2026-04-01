@@ -1,7 +1,7 @@
 #include "cpu/ooo/register_rename.h"
 #include "common/debug_types.h"
 #include <cassert>
-#include <set> // Added for std::set
+#include <set>
 
 namespace riscv {
 
@@ -42,6 +42,18 @@ void RegisterRenameUnit::initialize_free_list() {
     // 物理寄存器32-127是可分配的
     for (int i = NUM_LOGICAL_REGS; i < NUM_PHYSICAL_REGS; ++i) {
         free_list.push(i);
+    }
+}
+
+void RegisterRenameUnit::rebuild_free_list_excluding(const std::set<PhysRegNum>& reserved_regs) {
+    while (!free_list.empty()) {
+        free_list.pop();
+    }
+
+    for (int i = NUM_LOGICAL_REGS; i < NUM_PHYSICAL_REGS; ++i) {
+        if (reserved_regs.find(static_cast<PhysRegNum>(i)) == reserved_regs.end()) {
+            free_list.push(static_cast<PhysRegNum>(i));
+        }
     }
 }
 
@@ -202,16 +214,64 @@ void RegisterRenameUnit::flush_pipeline() {
     }
     
     // 重新初始化空闲列表，排除已提交的寄存器
+    rebuild_free_list_excluding(committed_regs);
+    
+    LOGT(RENAME, "flush pipeline: restore rename table to committed architectural state");
+}
+
+RegisterRenameUnit::Checkpoint RegisterRenameUnit::capture_checkpoint() const {
+    Checkpoint checkpoint;
+    checkpoint.rename_table = rename_table;
+    checkpoint.free_list = free_list;
+    return checkpoint;
+}
+
+void RegisterRenameUnit::restore_checkpoint(const Checkpoint& checkpoint) {
+    rename_table = checkpoint.rename_table;
+
+    std::set<PhysRegNum> live_regs;
+    for (const auto& entry : rename_table) {
+        if (entry.valid) {
+            live_regs.insert(entry.physical_reg);
+        }
+    }
+    for (const auto reg : arch_map) {
+        live_regs.insert(reg);
+    }
+
     while (!free_list.empty()) {
         free_list.pop();
     }
     for (int i = NUM_LOGICAL_REGS; i < NUM_PHYSICAL_REGS; ++i) {
-        if (committed_regs.find(i) == committed_regs.end()) {
+        if (live_regs.find(i) == live_regs.end()) {
             free_list.push(i);
         }
     }
-    
-    LOGT(RENAME, "flush pipeline: restore rename table to committed architectural state");
+
+    LOGT(RENAME, "restore speculative rename checkpoint and rebuild free list");
+}
+
+void RegisterRenameUnit::restore_checkpoint(const Checkpoint& checkpoint,
+                                            const std::vector<PhysRegNum>& live_physical_regs) {
+    rename_table = checkpoint.rename_table;
+
+    std::set<PhysRegNum> live_regs;
+    for (const auto reg : arch_map) {
+        live_regs.insert(reg);
+    }
+    for (const auto& entry : rename_table) {
+        if (entry.valid) {
+            live_regs.insert(entry.physical_reg);
+        }
+    }
+    for (const auto reg : live_physical_regs) {
+        if (reg != 0) {
+            live_regs.insert(reg);
+        }
+    }
+
+    rebuild_free_list_excluding(live_regs);
+    LOGT(RENAME, "restore speculative rename checkpoint and rebuild free list from surviving live regs");
 }
 
 void RegisterRenameUnit::commit_instruction(RegNum logical_reg, PhysRegNum physical_reg) {

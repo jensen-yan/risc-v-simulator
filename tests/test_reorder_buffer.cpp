@@ -203,6 +203,23 @@ TEST_F(ReorderBufferTest, PipelineFlush) {
     EXPECT_FALSE(rob.has_pending_exception()) << "刷新后不应该有异常";
 }
 
+TEST_F(ReorderBufferTest, PartialFlushOnlyDropsYoungerEntries) {
+    std::vector<DynamicInstPtr> allocated;
+    for (int i = 0; i < 4; ++i) {
+        auto inst = createInstruction(InstructionType::R_TYPE, i + 1, 2, 3);
+        auto dynamic_inst = rob.allocate_entry(inst, 0x1000 + i * 4, getNextInstructionId());
+        ASSERT_NE(dynamic_inst, nullptr);
+        allocated.push_back(dynamic_inst);
+    }
+
+    const size_t flushed = rob.flush_after_entry(allocated[1]->get_rob_entry());
+    EXPECT_EQ(flushed, 2u) << "partial flush 应仅清掉目标指令之后的 younger ROB 表项";
+    EXPECT_TRUE(rob.is_entry_valid(allocated[0]->get_rob_entry()));
+    EXPECT_TRUE(rob.is_entry_valid(allocated[1]->get_rob_entry()));
+    EXPECT_FALSE(rob.is_entry_valid(allocated[2]->get_rob_entry()));
+    EXPECT_FALSE(rob.is_entry_valid(allocated[3]->get_rob_entry()));
+}
+
 // 测试8：ROB状态查询
 TEST_F(ReorderBufferTest, StateQuery) {
     // 分配一个表项

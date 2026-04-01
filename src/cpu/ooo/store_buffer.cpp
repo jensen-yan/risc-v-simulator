@@ -97,6 +97,25 @@ void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
     }
 }
 
+void StoreBuffer::flush_after(uint64_t instruction_id) {
+    int flushed_count = 0;
+    for (auto& entry : entries) {
+        if (entry.valid && entry.instruction &&
+            entry.instruction->get_instruction_id() > instruction_id) {
+            LOGT(EXECUTE, "store buffer flush younger: inst=%" PRId64 ", addr=0x%" PRIx64,
+                 entry.instruction->get_instruction_id(), entry.address);
+            entry.valid = false;
+            entry.instruction = nullptr;
+            flushed_count++;
+        }
+    }
+
+    if (flushed_count > 0) {
+        LOGT(EXECUTE, "store buffer flushed %d younger entries after inst=%" PRId64,
+             flushed_count, instruction_id);
+    }
+}
+
 void StoreBuffer::flush() {
     LOGT(EXECUTE, "store buffer flush: clear all entries");
     

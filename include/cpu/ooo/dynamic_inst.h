@@ -143,6 +143,7 @@ private:
     bool has_predicted_next_pc_;              // 是否记录了预测next PC
     bool has_branch_predict_meta_;            // 是否记录了条件分支预测元数据
     BranchPredictor::BranchMeta branch_predict_meta_; // 条件分支预测元数据
+    bool control_recovered_early_;            // 是否已在执行阶段完成控制流早恢复
 
     // ========== 扩展信息（可选，支持未来功能） ==========
     std::optional<ExecutionInfo> exec_info_;  // 执行相关扩展信息
@@ -288,6 +289,9 @@ public:
     }
     bool has_branch_predict_meta() const { return has_branch_predict_meta_; }
     const BranchPredictor::BranchMeta& get_branch_predict_meta() const { return branch_predict_meta_; }
+    void mark_control_recovered_early() { control_recovered_early_ = true; }
+    void clear_control_recovered_early() { control_recovered_early_ = false; }
+    bool is_control_recovered_early() const { return control_recovered_early_; }
 
     // ========== 扩展信息接口 ==========
     ExecutionInfo& get_execution_info() { 

@@ -226,6 +226,16 @@ void ReservationStation::flush_pipeline() {
     initialize_execution_units();
 }
 
+void ReservationStation::flush_younger_than(uint64_t instruction_id) {
+    for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
+        if (rs_entries[i] && rs_entries[i]->get_instruction_id() > instruction_id) {
+            LOGT(RS, "flush younger rs[%d], inst=%" PRId64,
+                 i, rs_entries[i]->get_instruction_id());
+            rs_entries[i] = nullptr;
+        }
+    }
+}
+
 bool ReservationStation::has_free_entry() const {
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
         if (rs_entries[i] == nullptr) {

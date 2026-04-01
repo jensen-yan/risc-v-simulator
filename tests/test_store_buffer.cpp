@@ -206,6 +206,22 @@ TEST_F(StoreBufferTest, FlushBuffer) {
     EXPECT_FALSE(store_buffer->forward_load(address, size, load_result));
 }
 
+TEST_F(StoreBufferTest, FlushAfterDropsOnlyYoungerStores) {
+    const uint32_t pc = 0x80000000;
+    auto older = createTestDynamicInst(1, pc);
+    auto younger = createTestDynamicInst(2, pc);
+
+    store_buffer->add_store(older, 0x1000, 0x11111111, 4);
+    store_buffer->add_store(younger, 0x1004, 0x22222222, 4);
+
+    store_buffer->flush_after(1);
+
+    uint64_t load_result = 0;
+    EXPECT_TRUE(store_buffer->forward_load(0x1000, 4, load_result));
+    EXPECT_EQ(load_result, 0x11111111u);
+    EXPECT_FALSE(store_buffer->forward_load(0x1004, 4, load_result));
+}
+
 // 测试多次写入同一地址
 TEST_F(StoreBufferTest, MultipleWritesToSameAddress) {
     uint32_t address = 0x1000;

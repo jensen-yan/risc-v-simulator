@@ -3,6 +3,7 @@
 #include "core/memory.h"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 
 namespace riscv {
@@ -280,8 +281,17 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
 }
 
 std::vector<uint64_t> BlockingCache::enumerateLineAddresses(uint64_t address, uint8_t size) const {
+    if (size == 0) {
+        throw SimulatorException("cache access size must be non-zero");
+    }
+
+    const uint64_t size_minus_one = static_cast<uint64_t>(size) - 1;
+    if (address > std::numeric_limits<uint64_t>::max() - size_minus_one) {
+        throw SimulatorException("cache access wraps address space");
+    }
+
     const uint64_t start_line = address / config_.line_size_bytes;
-    const uint64_t end_line = (address + static_cast<uint64_t>(size) - 1) / config_.line_size_bytes;
+    const uint64_t end_line = (address + size_minus_one) / config_.line_size_bytes;
 
     std::vector<uint64_t> line_addresses;
     line_addresses.reserve(static_cast<size_t>(end_line - start_line + 1));

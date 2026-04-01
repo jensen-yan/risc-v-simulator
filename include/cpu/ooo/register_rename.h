@@ -1,8 +1,9 @@
 #pragma once
 
 #include "cpu/ooo/ooo_types.h"
-#include <vector>
 #include <queue>
+#include <set>
+#include <vector>
 
 namespace riscv {
 
@@ -68,6 +69,11 @@ public:
         uint64_t src1_value;
         uint64_t src2_value;
     };
+
+    struct Checkpoint {
+        std::vector<RenameEntry> rename_table;
+        std::queue<PhysRegNum> free_list;
+    };
     
     // 对指令进行重命名
     RenameResult rename_instruction(const DecodedInstruction& instruction);
@@ -86,6 +92,11 @@ public:
     
     // 刷新流水线（分支预测错误时）
     void flush_pipeline();
+
+    // 捕获/恢复投机检查点（用于控制流早恢复）
+    Checkpoint capture_checkpoint() const;
+    void restore_checkpoint(const Checkpoint& checkpoint);
+    void restore_checkpoint(const Checkpoint& checkpoint, const std::vector<PhysRegNum>& live_physical_regs);
     
     // 提交指令（更新架构状态）
     void commit_instruction(RegNum logical_reg, PhysRegNum physical_reg);
@@ -119,6 +130,8 @@ private:
     
     // 初始化空闲列表
     void initialize_free_list();
+
+    void rebuild_free_list_excluding(const std::set<PhysRegNum>& reserved_regs);
 };
 
 } // namespace riscv

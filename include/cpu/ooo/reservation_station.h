@@ -81,6 +81,7 @@ public:
     
     // 刷新保留站（分支预测错误时）
     void flush_pipeline();
+    void flush_younger_than(uint64_t instruction_id);
     
     // 检查是否有空闲保留站表项
     bool has_free_entry() const;

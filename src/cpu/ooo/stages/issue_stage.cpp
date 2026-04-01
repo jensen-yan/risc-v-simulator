@@ -5,6 +5,38 @@
 
 namespace riscv {
 
+namespace {
+
+constexpr uint8_t kFenceIFunct3 = 0b001;
+
+bool isSerializingControlInstruction(const DecodedInstruction& decoded_info) {
+    return (decoded_info.opcode == Opcode::SYSTEM &&
+            InstructionExecutor::isTrapLikeSystemInstruction(decoded_info)) ||
+           (decoded_info.opcode == Opcode::MISC_MEM &&
+            static_cast<uint8_t>(decoded_info.funct3) == kFenceIFunct3);
+}
+
+bool hasOlderInflightSerializingInstruction(const CPUState& state, uint64_t instruction_id) {
+    for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
+        const auto rob_entry = static_cast<ROBEntry>(i);
+        if (!state.reorder_buffer->is_entry_valid(rob_entry)) {
+            continue;
+        }
+
+        auto entry = state.reorder_buffer->get_entry(rob_entry);
+        if (!entry || entry->is_retired() || entry->get_instruction_id() >= instruction_id) {
+            continue;
+        }
+
+        if (isSerializingControlInstruction(entry->get_decoded_info())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
 IssueStage::IssueStage() {
     // 构造函数：初始化发射阶段
 }
@@ -52,12 +84,30 @@ void IssueStage::execute(CPUState& state) {
         }
 
         const auto& decoded_info = dispatchable_entry->get_decoded_info();
+        const bool is_serializing_control = isSerializingControlInstruction(decoded_info);
+
+        if (hasOlderInflightSerializingInstruction(state, dispatchable_entry->get_instruction_id())) {
+            if (issued_this_cycle == 0) {
+                LOGT(ISSUE, "older serializing control instruction blocks younger issue");
+                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE);
+            }
+            break;
+        }
+
         if (decoded_info.opcode == Opcode::SYSTEM &&
             InstructionExecutor::isCsrInstruction(decoded_info) &&
             head_entry != dispatchable_entry->get_rob_entry()) {
             if (issued_this_cycle == 0) {
                 LOGT(ISSUE, "csr instruction waits for ROB head commit");
                 state.recordPipelineStall(PerfCounterId::STALL_ISSUE_CSR_HEAD_BLOCKED);
+            }
+            break;
+        }
+
+        if (is_serializing_control && head_entry != dispatchable_entry->get_rob_entry()) {
+            if (issued_this_cycle == 0) {
+                LOGT(ISSUE, "serializing control instruction waits for ROB head commit");
+                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE);
             }
             break;
         }
@@ -175,7 +225,17 @@ void IssueStage::execute(CPUState& state) {
         state.perf_counters.increment(PerfCounterId::ISSUED_INSTRUCTIONS);
         dispatchable_entry->set_issue_cycle(state.cycle_count);
         dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
+        if (decoded_info.opcode == Opcode::BRANCH || decoded_info.opcode == Opcode::JALR) {
+            state.rename_checkpoints[dispatchable_entry->get_instruction_id()] =
+                state.register_rename->capture_checkpoint();
+        }
         issued_this_cycle++;
+
+        if (is_serializing_control) {
+            LOGT(ISSUE, "serializing control inst=%" PRId64 " issued, stop younger issue",
+                 dispatchable_entry->get_instruction_id());
+            break;
+        }
     }
 
     state.perf_counters.increment(PerfCounterId::ISSUE_UTILIZED_SLOTS, issued_this_cycle);

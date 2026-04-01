@@ -62,6 +62,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.reservation_valid = false;
     state.reservation_addr = 0;
     state.global_instruction_id = 0;
+    state.rename_checkpoints.clear();
 
     state.arch_registers.fill(0);
     state.arch_fp_registers.fill(0);
@@ -319,8 +320,9 @@ void OutOfOrderCPU::flush_pipeline() {
     // 刷新ROB
     cpu_state_.reorder_buffer->flush_pipeline();
     
-    // 重新初始化寄存器重命名
-    cpu_state_.register_rename = std::make_unique<RegisterRenameUnit>();
+    // 保留已提交架构状态，仅清除推测性重命名状态
+    cpu_state_.register_rename->flush_pipeline();
+    cpu_state_.rename_checkpoints.clear();
     
     // 清空CDB队列
     while (!cpu_state_.cdb_queue.empty()) {

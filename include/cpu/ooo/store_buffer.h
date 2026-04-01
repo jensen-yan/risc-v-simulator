@@ -39,6 +39,7 @@ public:
     
     // 清除指定指令ID及之前的Store条目（当Store指令提交时调用）
     void retire_stores_before(uint64_t instruction_id);
+    void flush_after(uint64_t instruction_id);
     
     // 清空所有条目（流水线刷新时调用）
     void flush();

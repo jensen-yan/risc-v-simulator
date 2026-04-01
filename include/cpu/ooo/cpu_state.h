@@ -205,6 +205,7 @@ struct CPUState {
     std::unique_ptr<ReservationStation> reservation_station;
     std::unique_ptr<ReorderBuffer> reorder_buffer;
     std::unique_ptr<StoreBuffer> store_buffer;  // Store Buffer用于Store-to-Load Forwarding
+    std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint> rename_checkpoints;
 
     // 分支预测器（Fetch使用；Commit更新；flush时保留状态）
     std::unique_ptr<BranchPredictor> branch_predictor;

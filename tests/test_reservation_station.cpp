@@ -234,6 +234,23 @@ TEST_F(ReservationStationTest, ExecutionUnitBusy) {
     EXPECT_TRUE(dispatch3.success) << "释放执行单元后应该可以调度";
 }
 
+TEST_F(ReservationStationTest, FlushYoungerThanKeepsOlderEntries) {
+    auto inst1 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 1, 2, 3);
+    auto inst2 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 4, 5, 6);
+
+    auto older = createDynamicInst(inst1, 32, 33, 34, true, true, 0x1000, 1);
+    auto younger = createDynamicInst(inst2, 35, 36, 37, true, true, 0x1004, 2);
+
+    ASSERT_TRUE(rs.issue_instruction(older).success);
+    ASSERT_TRUE(rs.issue_instruction(younger).success);
+
+    rs.flush_younger_than(older->get_instruction_id());
+
+    EXPECT_EQ(rs.get_occupied_entry_count(), 1u);
+    EXPECT_TRUE(rs.dispatch_instruction().success) << "older 指令应保留在保留站中";
+    EXPECT_FALSE(rs.dispatch_instruction().success) << "younger 指令应被冲刷";
+}
+
 // 测试7：流水线刷新
 TEST_F(ReservationStationTest, PipelineFlush) {
     // 发射一些指令

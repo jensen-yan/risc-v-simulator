@@ -92,7 +92,7 @@ public:
     void flush_pipeline();
     
     // 刷新ROB到指定表项（部分刷新）
-    void flush_after_entry(ROBEntry rob_entry);
+    size_t flush_after_entry(ROBEntry rob_entry);
     
     // 检查是否有空闲表项
     bool has_free_entry() const;

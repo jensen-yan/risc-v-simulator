@@ -325,6 +325,7 @@ void CommitStage::execute(CPUState& state) {
         // Store Buffer清理：提交指令时，清除该指令及之前的Store条目
         // 这确保Store指令提交到内存后，相应的Store Buffer条目被清除
         state.store_buffer->retire_stores_before(committed_inst->get_instruction_id());
+        state.rename_checkpoints.erase(committed_inst->get_instruction_id());
 
         // ====== 控制流：commit仅在预测错时redirect/flush ======
         const bool is_control_flow =
@@ -449,13 +450,14 @@ void CommitStage::execute(CPUState& state) {
                 }
                 state.branch_predictor->update(instruction_pc, decoded_info, actual_taken, actual_next_pc, branch_meta);
 
-                if (!correct && decoded_info.opcode == Opcode::BRANCH) {
+                if (!correct && decoded_info.opcode == Opcode::BRANCH &&
+                    !committed_inst->is_control_recovered_early()) {
                     state.branch_predictor->recover_after_branch_mispredict(instruction_pc, actual_taken, branch_meta);
                     state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_RECOVERIES);
                 }
             }
 
-            if (!correct) {
+            if (!correct && !committed_inst->is_control_recovered_early()) {
                 need_redirect_flush = true;
                 redirect_pc = actual_next_pc;
                 flush_reason = (decoded_info.opcode == Opcode::BRANCH)
@@ -467,6 +469,11 @@ void CommitStage::execute(CPUState& state) {
                 LOGT(COMMIT,
                      "inst=%" PRId64 " control-flow mispredict: pc=0x%" PRIx64
                      " predicted_next=0x%" PRIx64 " actual_next=0x%" PRIx64 " -> redirect+flush",
+                     committed_inst->get_instruction_id(), instruction_pc, predicted_next_pc, actual_next_pc);
+            } else if (!correct) {
+                LOGT(COMMIT,
+                     "inst=%" PRId64 " control-flow mispredict already recovered early: pc=0x%" PRIx64
+                     " predicted_next=0x%" PRIx64 " actual_next=0x%" PRIx64,
                      committed_inst->get_instruction_id(), instruction_pc, predicted_next_pc, actual_next_pc);
             } else {
                 LOGT(COMMIT,
@@ -697,6 +704,7 @@ void CommitStage::flush_pipeline_after_commit(CPUState& state, FlushReason reaso
     // 4. 关键修复：调用flush_pipeline方法而不是重新创建对象
     // 这样可以保留已提交的架构状态，只清除推测性重命名
     state.register_rename->flush_pipeline();
+    state.rename_checkpoints.clear();
     
     // 5. 清空CDB队列（安全，因为当前指令已提交）
     while (!state.cdb_queue.empty()) {

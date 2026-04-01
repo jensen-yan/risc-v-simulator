@@ -44,6 +44,16 @@ private:
     
     // 执行单元完成时的公共处理逻辑
     void complete_execution_unit(ExecutionUnit& unit, ExecutionUnitType unit_type, size_t unit_index, CPUState& state);
+    bool try_recover_control_mispredict_early(ExecutionUnit& unit,
+                                              ExecutionUnitType unit_type,
+                                              size_t unit_index,
+                                              CPUState& state);
+    size_t flush_younger_cdb_entries(CPUState& state, uint64_t instruction_id);
+    bool flush_younger_execution_units(CPUState& state,
+                                       uint64_t instruction_id,
+                                       ExecutionUnitType current_unit_type,
+                                       size_t current_unit_index);
+    void erase_younger_rename_checkpoints(CPUState& state, uint64_t instruction_id);
 
     // 记录load replay分布桶
     void record_load_replay_bucket(const DynamicInstPtr& instruction, CPUState& state);

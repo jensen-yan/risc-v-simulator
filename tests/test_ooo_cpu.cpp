@@ -67,6 +67,16 @@ protected:
         return (imm_high << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (imm_low << 7) | opcode;
     }
 
+    uint32_t createBTypeInstruction(int16_t imm, uint8_t rs2, uint8_t rs1, uint8_t funct3) {
+        const uint32_t imm13 = static_cast<uint16_t>(imm) & 0x1FFFu;
+        const uint32_t bit12 = (imm13 >> 12) & 0x1u;
+        const uint32_t bit11 = (imm13 >> 11) & 0x1u;
+        const uint32_t bits10_5 = (imm13 >> 5) & 0x3Fu;
+        const uint32_t bits4_1 = (imm13 >> 1) & 0xFu;
+        return (bit12 << 31) | (bits10_5 << 25) | (rs2 << 20) | (rs1 << 15) |
+               (funct3 << 12) | (bits4_1 << 8) | (bit11 << 7) | 0x63;
+    }
+
     // 辅助函数：创建SYSTEM指令（CSR/ECALL/EBREAK等）
     uint32_t createSystemInstruction(uint16_t imm12, uint8_t rs1, uint8_t funct3, uint8_t rd) {
         return (static_cast<uint32_t>(imm12) << 20) |
@@ -78,6 +88,10 @@ protected:
     // 辅助函数：创建ECALL指令
     uint32_t createECallInstruction() {
         return 0x00000073;  // ECALL指令的机器码
+    }
+
+    uint32_t createEBreakInstruction() {
+        return 0x00100073;  // EBREAK指令的机器码
     }
 };
 
@@ -354,6 +368,61 @@ TEST_F(OutOfOrderCPUTest, SameCycleIssueRenameTracksYoungerRawDependency) {
         << "older 指令尚未执行完成时，younger RAW 源操作数应保持未就绪";
 }
 
+TEST_F(OutOfOrderCPUTest, SerializingSystemInstructionBlocksYoungerIssue) {
+    // ADDI  x1, x0, 6
+    // ADDI  x2, x0, 7
+    // MUL   x3, x1, x2
+    // EBREAK
+    // ADDI  x4, x0, 99
+    writeInstruction(0x0, createITypeInstruction(6, 0, 0x0, 1, 0x13));
+    writeInstruction(0x4, createITypeInstruction(7, 0, 0x0, 2, 0x13));
+    writeInstruction(0x8, createRTypeInstruction(0x01, 2, 1, 0x0, 3, 0x33));
+    writeInstruction(0xC, createEBreakInstruction());
+    writeInstruction(0x10, createITypeInstruction(99, 0, 0x0, 4, 0x13));
+
+    auto& state = const_cast<CPUState&>(cpu->getCPUState());
+    state.l1i_cache.reset();
+    state.l1d_cache.reset();
+
+    cpu->setPC(0x0);
+
+    bool saw_ebreak_and_younger = false;
+    bool verified_younger_blocked = false;
+    for (int i = 0; i < 20 && !cpu->isHalted(); ++i) {
+        cpu->step();
+
+        DynamicInstPtr ebreak_inst;
+        DynamicInstPtr younger_inst;
+        for (int rob_index = 0; rob_index < ReorderBuffer::MAX_ROB_ENTRIES; ++rob_index) {
+            if (!state.reorder_buffer->is_entry_valid(rob_index)) {
+                continue;
+            }
+            auto inst = state.reorder_buffer->get_entry(rob_index);
+            if (!inst) {
+                continue;
+            }
+            if (inst->get_pc() == 0xC) {
+                ebreak_inst = inst;
+            } else if (inst->get_pc() == 0x10) {
+                younger_inst = inst;
+            }
+        }
+
+        if (!ebreak_inst || !younger_inst) {
+            continue;
+        }
+
+        saw_ebreak_and_younger = true;
+        EXPECT_FALSE(younger_inst->is_issued() || younger_inst->is_executing() || younger_inst->is_completed())
+            << "EBREAK 之后的 younger 指令不应越过序列化边界发射";
+        verified_younger_blocked = true;
+        break;
+    }
+
+    EXPECT_TRUE(saw_ebreak_and_younger) << "测试应观察到 EBREAK 与其后的 younger 指令同时在 ROB 中";
+    EXPECT_TRUE(verified_younger_blocked) << "需要验证 younger 指令在 issue 阶段被阻塞";
+}
+
 TEST_F(OutOfOrderCPUTest, ExecuteStageDispatchesTwoInstructionsPerCycleWhenUnitsAllow) {
     writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
     writeInstruction(0x4, createITypeInstruction(2, 0, 0x0, 2, 0x13));
@@ -504,6 +573,53 @@ TEST_F(OutOfOrderCPUTest, HostCommLoadWaitsForOlderTohostStoreToCommit) {
 
     EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
     EXPECT_EQ(cpu->getRegister(15), 1u) << "fromhost load 应等待更老的 tohost store 生效后再读取";
+}
+
+TEST_F(OutOfOrderCPUTest, BranchMispredictRecoversEarlyAndFlushesWrongPath) {
+    // BEQ  x0, x0, +12     ; 初始预测不跳，实际跳到0xC
+    // ADDI x2, x0, 99      ; wrong path，必须被提前冲刷
+    // ADDI x5, x0, 42      ; wrong path，必须被提前冲刷
+    // ADDI x3, x0, 7       ; correct path
+    // ADDI x17, x0, 93     ; sys_exit
+    // ECALL
+    writeInstruction(0x0, createBTypeInstruction(12, 0, 0, 0x0));
+    writeInstruction(0x4, createITypeInstruction(99, 0, 0x0, 2, 0x13));
+    writeInstruction(0x8, createITypeInstruction(42, 0, 0x0, 5, 0x13));
+    writeInstruction(0xC, createITypeInstruction(7, 0, 0x0, 3, 0x13));
+    writeInstruction(0x10, createITypeInstruction(93, 0, 0x0, 17, 0x13));
+    writeInstruction(0x14, createECallInstruction());
+
+    auto& state = const_cast<CPUState&>(cpu->getCPUState());
+    state.l1i_cache.reset();
+    state.l1d_cache.reset();
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 5; ++i) {
+        cpu->step();
+    }
+
+    bool has_wrong_path_pc = false;
+    for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
+        if (!state.reorder_buffer->is_entry_valid(i)) {
+            continue;
+        }
+        auto entry = state.reorder_buffer->get_entry(i);
+        if (entry && (entry->get_pc() == 0x4 || entry->get_pc() == 0x8)) {
+            has_wrong_path_pc = true;
+            break;
+        }
+    }
+
+    EXPECT_FALSE(has_wrong_path_pc) << "分支在 execute 发现误预测后，应提前冲刷 wrong-path ROB 表项";
+
+    for (int i = 0; i < 120 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
+    EXPECT_EQ(cpu->getRegister(2), 0u) << "wrong-path 指令不应提交";
+    EXPECT_EQ(cpu->getRegister(5), 0u) << "第二条 wrong-path 指令不应提交";
+    EXPECT_EQ(cpu->getRegister(3), 7u) << "correct-path 指令应正常提交";
 }
 
 // 测试6：CPU状态重置

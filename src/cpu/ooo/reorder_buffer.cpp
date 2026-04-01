@@ -171,7 +171,6 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
         
         // 释放表项
         rob_entries[head_index] = nullptr;
-        free_entries.push(head_index);
         head_ptr = next_index(head_ptr);
         entry_count--;
         
@@ -191,7 +190,6 @@ ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {
     
     // 释放表项
     rob_entries[head_index] = nullptr;
-    free_entries.push(head_index);
     head_ptr = next_index(head_ptr);
     entry_count--;
     
@@ -222,7 +220,7 @@ void ReorderBuffer::flush_pipeline() {
     initialize_rob();
 }
 
-void ReorderBuffer::flush_after_entry(ROBEntry rob_entry) {
+size_t ReorderBuffer::flush_after_entry(ROBEntry rob_entry) {
     int target_index = entry_to_index(rob_entry);
     int flushed = 0;
     
@@ -232,7 +230,6 @@ void ReorderBuffer::flush_after_entry(ROBEntry rob_entry) {
     while (start_index != tail_ptr) {
         if (rob_entries[start_index]) {
             rob_entries[start_index] = nullptr;
-            free_entries.push(start_index);
             flushed++;
         }
         start_index = next_index(start_index);
@@ -244,6 +241,7 @@ void ReorderBuffer::flush_after_entry(ROBEntry rob_entry) {
     flushed_count += flushed;
     
     LOGT(ROB, "partial flush after rob[%d], flushed=%d", rob_entry, flushed);
+    return static_cast<size_t>(flushed);
 }
 
 bool ReorderBuffer::has_free_entry() const {
@@ -436,12 +434,12 @@ bool ReorderBuffer::is_head_instruction(uint64_t current_instruction_id) const {
 
 // ========== 私有方法实现 ==========
 ROBEntry ReorderBuffer::allocate_rob_entry() {
-    if (free_entries.empty()) {
+    if (is_full()) {
         return 0;  // 错误情况，调用者应该先检查 is_full()
     }
-    
-    ROBEntry entry = free_entries.front();
-    free_entries.pop();
+
+    const ROBEntry entry = index_to_entry(tail_ptr);
+    assert(rob_entries[tail_ptr] == nullptr && "tail_ptr should always point to the next free ROB slot");
     
     LOGT(ROB, "[ALLOC_DEBUG] allocate entry=%d, head=%d, tail=%d->%d",
             entry, head_ptr, tail_ptr, next_index(tail_ptr));
@@ -456,7 +454,6 @@ void ReorderBuffer::release_entry(ROBEntry rob_entry) {
     int index = entry_to_index(rob_entry);
     if (is_valid_index(index)) {
         rob_entries[index] = nullptr;
-        free_entries.push(rob_entry);
     }
 }
 

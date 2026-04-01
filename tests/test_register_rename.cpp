@@ -166,6 +166,77 @@ TEST_F(RegisterRenameTest, PipelineFlush) {
         << "流水线刷新后应该释放投机分配的寄存器";
 }
 
+TEST_F(RegisterRenameTest, CheckpointRestoreRollsBackYoungerRenameState) {
+    auto older = createInstruction(InstructionType::R_TYPE, 1, 0, 0);
+    auto older_result = rename_unit.rename_instruction(older);
+    ASSERT_TRUE(older_result.success);
+
+    const auto checkpoint = rename_unit.capture_checkpoint();
+    const size_t free_before_younger = rename_unit.get_free_register_count();
+
+    auto younger = createInstruction(InstructionType::R_TYPE, 2, 1, 0);
+    auto younger_result = rename_unit.rename_instruction(younger);
+    ASSERT_TRUE(younger_result.success);
+    EXPECT_LT(rename_unit.get_free_register_count(), free_before_younger);
+
+    rename_unit.restore_checkpoint(checkpoint);
+    EXPECT_EQ(rename_unit.get_free_register_count(), free_before_younger)
+        << "恢复 checkpoint 后，younger 指令占用的物理寄存器应被回收";
+
+    auto after_restore = createInstruction(InstructionType::R_TYPE, 3, 1, 2);
+    auto after_restore_result = rename_unit.rename_instruction(after_restore);
+    ASSERT_TRUE(after_restore_result.success);
+    EXPECT_EQ(after_restore_result.src1_reg, older_result.dest_reg)
+        << "older 指令的 rename 映射应在恢复后保留";
+    EXPECT_EQ(after_restore_result.src2_reg, 2)
+        << "被回滚的 younger 映射不应残留在 rename table 中";
+}
+
+TEST_F(RegisterRenameTest, CheckpointRestoreRecoversRenameMapAndFreeList) {
+    auto first_writer = createInstruction(InstructionType::R_TYPE, 1, 2, 3);
+    auto first_result = rename_unit.rename_instruction(first_writer);
+    ASSERT_TRUE(first_result.success);
+
+    const auto checkpoint = rename_unit.capture_checkpoint();
+    const size_t free_before_speculation = rename_unit.get_free_register_count();
+
+    auto speculative_writer = createInstruction(InstructionType::R_TYPE, 1, 4, 5);
+    auto speculative_result = rename_unit.rename_instruction(speculative_writer);
+    ASSERT_TRUE(speculative_result.success);
+    ASSERT_NE(speculative_result.dest_reg, first_result.dest_reg);
+
+    rename_unit.restore_checkpoint(checkpoint);
+    EXPECT_EQ(rename_unit.get_free_register_count(), free_before_speculation)
+        << "恢复 checkpoint 后，空闲物理寄存器数量应回到分支发射时状态";
+
+    auto consumer = createInstruction(InstructionType::R_TYPE, 6, 1, 7);
+    auto consumer_result = rename_unit.rename_instruction(consumer);
+    ASSERT_TRUE(consumer_result.success);
+    EXPECT_EQ(consumer_result.src1_reg, first_result.dest_reg)
+        << "恢复 checkpoint 后，x1 应重新映射到较老路径的物理寄存器";
+}
+
+TEST_F(RegisterRenameTest, CheckpointRestoreKeepsRegistersFreedByOlderCommitAvailable) {
+    auto older = createInstruction(InstructionType::R_TYPE, 1, 2, 3);
+    auto older_result = rename_unit.rename_instruction(older);
+    ASSERT_TRUE(older_result.success);
+
+    const auto checkpoint = rename_unit.capture_checkpoint();
+
+    rename_unit.update_physical_register(older_result.dest_reg, 0x55, 1);
+    rename_unit.commit_instruction(1, older_result.dest_reg);
+    const size_t free_after_older_commit = rename_unit.get_free_register_count();
+
+    auto younger = createInstruction(InstructionType::R_TYPE, 2, 4, 5);
+    auto younger_result = rename_unit.rename_instruction(younger);
+    ASSERT_TRUE(younger_result.success);
+    EXPECT_LT(rename_unit.get_free_register_count(), free_after_older_commit);
+
+    rename_unit.restore_checkpoint(checkpoint);
+    EXPECT_EQ(rename_unit.get_free_register_count(), free_after_older_commit)
+        << "恢复 checkpoint 时，不应把 older 指令提交后释放出来的物理寄存器重新吃掉";
+}
+
 // 测试6：指令提交
 TEST_F(RegisterRenameTest, InstructionCommit) {
     // 重命名指令

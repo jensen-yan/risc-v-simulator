@@ -3,6 +3,7 @@
 #include "core/memory.h"
 #include "cpu/ooo/cache/blocking_cache.h"
 
+#include <limits>
 #include <memory>
 
 namespace riscv {
@@ -191,6 +192,15 @@ TEST(BlockingCacheTest, FetchInstructionSameLineMissCanRecoverSecondHalf) {
     EXPECT_EQ(first.latency_cycles, 21);
     EXPECT_TRUE(cache.hasMissInFlight());
     EXPECT_EQ(instruction, 0xABCD0013u);
+}
+
+TEST(BlockingCacheTest, AccessWrappingAddressSpaceThrowsSimulatorException) {
+    auto memory = std::make_shared<Memory>(4096);
+    BlockingCache cache(makeDefaultConfig());
+
+    EXPECT_THROW(
+        static_cast<void>(cache.access(memory, std::numeric_limits<uint64_t>::max(), 8, CacheAccessType::Write)),
+        SimulatorException);
 }
 
 } // namespace riscv

@@ -14,81 +14,109 @@ ExecuteStage::ExecuteStage() {
 void ExecuteStage::execute(CPUState& state) {
     // 首先更新正在执行的指令的状态
     update_execution_units(state);
-    
-    // 尝试从保留站调度指令到执行单元
-    auto dispatch_result = state.reservation_station->dispatch_instruction();
-    if (dispatch_result.success) {
-        LOGT(EXECUTE, "dispatch inst=%" PRId64 " from rs[%d] to execution unit",
-            dispatch_result.instruction->get_instruction_id(), dispatch_result.rs_entry);
+
+    state.perf_counters.increment(PerfCounterId::DISPATCH_SLOTS, OOOPipelineConfig::DISPATCH_WIDTH);
+
+    size_t dispatched_this_cycle = 0;
+    for (size_t slot = 0; slot < OOOPipelineConfig::DISPATCH_WIDTH; ++slot) {
+        auto dispatch_result = state.reservation_station->dispatch_instruction();
+        if (!dispatch_result.success) {
+            if (dispatched_this_cycle == 0) {
+                LOGT(EXECUTE, "no ready instruction in reservation station");
+                state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
+
+                const size_t rs_occupied = state.reservation_station->get_occupied_entry_count();
+                if (rs_occupied == 0) {
+                    state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
+                } else {
+                    const size_t rs_ready = state.reservation_station->get_ready_entry_count();
+                    if (rs_ready == 0) {
+                        state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
+                    } else {
+                        state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
+                    }
+                }
+            }
+            break;
+        }
+
+        LOGT(EXECUTE, "dispatch slot=%zu inst=%" PRId64 " from rs[%d] to execution unit",
+             slot, dispatch_result.instruction->get_instruction_id(), dispatch_result.rs_entry);
 
         const auto& decoded_info = dispatch_result.instruction->get_decoded_info();
         if (decoded_info.opcode == Opcode::AMO &&
             state.reorder_buffer->has_earlier_store_uncommitted(dispatch_result.instruction->get_instruction_id())) {
-            // AMO必须等待更老Store/AMO提交，避免读取到尚未对内存生效的旧值。
             dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
             state.reservation_station->release_execution_unit(dispatch_result.unit_type, dispatch_result.unit_id);
-            state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
+            if (dispatched_this_cycle == 0) {
+                state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
+            }
             LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay dispatch",
-                dispatch_result.instruction->get_instruction_id());
-            return;
+                 dispatch_result.instruction->get_instruction_id());
+            break;
         }
-        
-        ExecutionUnit* unit = get_available_unit(dispatch_result.unit_type, state);
-        if (unit) {
-            unit->busy = true;
-            unit->instruction = dispatch_result.instruction;
-            unit->has_exception = false;
-            unit->dcache.reset();
-            
-            const char* unit_type_str = "";
-            
-            // 使用预解析的执行周期数，无需重复判断指令类型
-            unit->remaining_cycles = decoded_info.execution_cycles;
-            
-            // 根据执行单元类型设置调试信息
-            switch (dispatch_result.unit_type) {
-                case ExecutionUnitType::ALU:
-                    unit_type_str = "ALU";
-                    break;
-                case ExecutionUnitType::BRANCH:
-                    unit_type_str = "BRANCH";
-                    break;
-                case ExecutionUnitType::LOAD:
-                    unit_type_str = "LOAD";
-                    break;
-                case ExecutionUnitType::STORE:
-                    unit_type_str = "STORE";
-                    break;
+
+        ExecutionUnit* unit = nullptr;
+        switch (dispatch_result.unit_type) {
+            case ExecutionUnitType::ALU:
+                unit = &state.alu_units[dispatch_result.unit_id];
+                break;
+            case ExecutionUnitType::BRANCH:
+                unit = &state.branch_units[dispatch_result.unit_id];
+                break;
+            case ExecutionUnitType::LOAD:
+                unit = &state.load_units[dispatch_result.unit_id];
+                break;
+            case ExecutionUnitType::STORE:
+                unit = &state.store_units[dispatch_result.unit_id];
+                break;
+        }
+
+        if (!unit || unit->busy) {
+            dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
+            state.reservation_station->release_execution_unit(dispatch_result.unit_type, dispatch_result.unit_id);
+            if (dispatched_this_cycle == 0) {
+                LOGT(EXECUTE, "no available execution unit");
+                state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_UNIT);
             }
-            
-            LOGT(EXECUTE, "inst=%" PRId64 " start on %s, cycles=%d",
-                dispatch_result.instruction->get_instruction_id(), unit_type_str, unit->remaining_cycles);
-
-            state.perf_counters.increment(PerfCounterId::DISPATCHED_INSTRUCTIONS);
-            dispatch_result.instruction->set_execute_cycle(state.cycle_count);
-
-            // 开始执行指令语义
-            OOOExecuteSemantics::executeInstruction(*unit, dispatch_result.instruction, state);
-        } else {
-            LOGT(EXECUTE, "no available execution unit");
-            state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_UNIT);
+            break;
         }
-    } else {
-        LOGT(EXECUTE, "no ready instruction in reservation station");
-        state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
 
-        const size_t rs_occupied = state.reservation_station->get_occupied_entry_count();
-        if (rs_occupied == 0) {
-            state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
-        } else {
-            const size_t rs_ready = state.reservation_station->get_ready_entry_count();
-            if (rs_ready == 0) {
-                state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
-            } else {
-                state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
-            }
+        unit->busy = true;
+        unit->instruction = dispatch_result.instruction;
+        unit->has_exception = false;
+        unit->dcache.reset();
+        unit->remaining_cycles = decoded_info.execution_cycles;
+
+        const char* unit_type_str = "";
+        switch (dispatch_result.unit_type) {
+            case ExecutionUnitType::ALU:
+                unit_type_str = "ALU";
+                break;
+            case ExecutionUnitType::BRANCH:
+                unit_type_str = "BRANCH";
+                break;
+            case ExecutionUnitType::LOAD:
+                unit_type_str = "LOAD";
+                break;
+            case ExecutionUnitType::STORE:
+                unit_type_str = "STORE";
+                break;
         }
+
+        LOGT(EXECUTE, "inst=%" PRId64 " start on %s%d, cycles=%d",
+             dispatch_result.instruction->get_instruction_id(),
+             unit_type_str,
+             dispatch_result.unit_id,
+             unit->remaining_cycles);
+
+        state.perf_counters.increment(PerfCounterId::DISPATCHED_INSTRUCTIONS);
+        dispatch_result.instruction->set_execute_cycle(state.cycle_count);
+        OOOExecuteSemantics::executeInstruction(*unit, dispatch_result.instruction, state);
+        dispatched_this_cycle++;
     }
+
+    state.perf_counters.increment(PerfCounterId::DISPATCH_UTILIZED_SLOTS, dispatched_this_cycle);
 }
 
 void ExecuteStage::update_execution_units(CPUState& state) {

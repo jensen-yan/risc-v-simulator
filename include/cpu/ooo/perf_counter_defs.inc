@@ -10,8 +10,12 @@ PERF_COUNTER_DEF(ISSUED_INSTRUCTIONS, "cpu.issue.issued", "Instructions issued i
 PERF_COUNTER_DEF(ISSUE_SLOTS, "cpu.issue.slots", "Total issue stage slots available")
 PERF_COUNTER_DEF(ISSUE_UTILIZED_SLOTS, "cpu.issue.utilized_slots", "Issue slots that successfully issued an instruction")
 PERF_COUNTER_DEF(DISPATCHED_INSTRUCTIONS, "cpu.execute.dispatched", "Instructions dispatched to execution units")
+PERF_COUNTER_DEF(DISPATCH_SLOTS, "cpu.execute.dispatch_slots", "Total execute-dispatch slots available")
+PERF_COUNTER_DEF(DISPATCH_UTILIZED_SLOTS, "cpu.execute.dispatch_utilized_slots", "Execute-dispatch slots that successfully dispatched an instruction")
 PERF_COUNTER_DEF(CDB_ENQUEUED, "cpu.execute.cdb_enqueued", "Execution results enqueued to CDB")
 PERF_COUNTER_DEF(WRITEBACKS, "cpu.writeback.count", "CDB entries consumed in writeback stage")
+PERF_COUNTER_DEF(COMMIT_SLOTS, "cpu.commit.slots", "Total commit stage slots available")
+PERF_COUNTER_DEF(COMMIT_UTILIZED_SLOTS, "cpu.commit.utilized_slots", "Commit slots that successfully retired an instruction")
 
 PERF_COUNTER_DEF(BRANCH_INSTRUCTIONS, "cpu.branch.count", "Conditional branch instructions executed")
 PERF_COUNTER_DEF(BRANCH_MISPREDICTS, "cpu.branch.conditional_mispredicts", "Conditional branch misprediction count")

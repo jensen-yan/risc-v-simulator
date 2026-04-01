@@ -53,6 +53,8 @@ CommitStage::CommitStage() {
 }
 
 void CommitStage::execute(CPUState& state) {
+    state.perf_counters.increment(PerfCounterId::COMMIT_SLOTS, OOOPipelineConfig::COMMIT_WIDTH);
+
     // 添加ROB状态调试信息
     size_t free_entries = state.reorder_buffer->get_free_entry_count();
     size_t used_entries = ReorderBuffer::MAX_ROB_ENTRIES - free_entries;
@@ -101,7 +103,9 @@ void CommitStage::execute(CPUState& state) {
     }
     
     // 尝试提交指令
-    while (state.reorder_buffer->can_commit()) {
+    size_t committed_this_cycle = 0;
+    while (state.reorder_buffer->can_commit() &&
+           committed_this_cycle < OOOPipelineConfig::COMMIT_WIDTH) {
         auto commit_result = state.reorder_buffer->commit_instruction();
         if (!commit_result.success) {
             LOGW(COMMIT, "commit failed: %s", commit_result.error_message.c_str());
@@ -167,6 +171,8 @@ void CommitStage::execute(CPUState& state) {
             flush_summary.has_redirect_pc = true;
             flush_summary.redirect_pc = state.pc;
             syncBasicPerfCounters(state);
+            state.perf_counters.increment(PerfCounterId::COMMIT_UTILIZED_SLOTS);
+            committed_this_cycle++;
 
             if (state.pipeline_tracer) {
                 state.pipeline_tracer->recordCommittedInstruction(committed_inst, flush_summary);
@@ -313,6 +319,8 @@ void CommitStage::execute(CPUState& state) {
         
         state.instruction_count++;
         state.perf_counters.increment(PerfCounterId::INSTRUCTIONS_RETIRED);
+        state.perf_counters.increment(PerfCounterId::COMMIT_UTILIZED_SLOTS);
+        committed_this_cycle++;
         
         // Store Buffer清理：提交指令时，清除该指令及之前的Store条目
         // 这确保Store指令提交到内存后，相应的Store Buffer条目被清除

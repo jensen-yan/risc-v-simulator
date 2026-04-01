@@ -12,6 +12,7 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
+    volatile uint32_t* wide_words = (volatile uint32_t*)wide_slots;
     volatile uint32_t* overlap_words = (volatile uint32_t*)overlap_slots;
 
     for (int i = 0; i < K_SLOTS; ++i) {
@@ -29,7 +30,7 @@ int main(int argc, char** argv) {
         const uint32_t new_low = (uint32_t)(i * 17U + 3U);
 
         wide_slots[idx] = wide_value;
-        expected_partial += (uint32_t)wide_value;
+        expected_partial += (uint32_t)(wide_value >> 32);
 
         overlap_words[idx * 2] = new_low;
         expected_overlap += (old_overlap_value & 0xffffffff00000000ULL) | (uint64_t)new_low;
@@ -46,7 +47,7 @@ int main(int argc, char** argv) {
         const uint32_t new_low = (uint32_t)(i * 17U + 3U);
 
         wide_slots[idx] = wide_value;
-        checksum_partial += (uint32_t)wide_slots[idx];
+        checksum_partial += wide_words[idx * 2 + 1];
 
         overlap_words[idx * 2] = new_low;
         checksum_overlap += overlap_slots[idx];

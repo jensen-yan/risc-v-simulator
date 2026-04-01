@@ -47,6 +47,7 @@ public:
 
     StatsList getStats() const override { return {}; }
     void resetStats() override {}
+    void dumpDetailedStats(std::ostream& os) const override { (void)os; }
 };
 
 /**
@@ -96,6 +97,7 @@ public:
 
     StatsList getStats() const override { return cpu_->getStats(); }
     void resetStats() override { cpu_->resetStats(); }
+    void dumpDetailedStats(std::ostream& os) const override { cpu_->dumpDetailedStats(os); }
 
     bool dumpDetailedStatsToFile(const std::string& path) const override {
         return cpu_->dumpStatsToFile(path);

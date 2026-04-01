@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/types.h"
+#include <iosfwd>
 #include <memory>
 #include <vector>
 
@@ -72,6 +73,7 @@ public:
     // 性能统计（默认返回空）
     virtual StatsList getStats() const { return {}; }
     virtual void resetStats() {}
+    virtual void dumpDetailedStats(std::ostream& os) const { (void)os; }
 
     // 导出详细统计到文件（默认不支持）
     virtual bool dumpDetailedStatsToFile(const std::string& path) const {

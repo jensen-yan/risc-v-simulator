@@ -85,7 +85,7 @@ public:
     // 性能统计
     StatsList getStats() const override;
     void resetStats() override;
-    void dumpDetailedStats(std::ostream& os) const;
+    void dumpDetailedStats(std::ostream& os) const override;
     bool dumpStatsToFile(const std::string& path) const;
     
     // 调试功能

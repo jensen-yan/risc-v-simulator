@@ -2,6 +2,7 @@
 #include "system/elf_loader.h"
 #include "common/debug_types.h"
 #include <cctype>
+#include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <string>
@@ -363,9 +364,10 @@ int main(int argc, char* argv[]) {
         }
         
         bool executionSuccess = true;
-        auto printOooStats = [&](const std::string& title, const ICpuInterface::StatsList& stats) {
-            std::cout << "\n=== " << title << " ===\n";
-
+        auto writeOooStats = [&](std::ostream& os,
+                                 const std::string& title,
+                                 const ICpuInterface::StatsList& stats) {
+            os << "\n=== " << title << " ===\n";
             uint64_t instructions = 0;
             uint64_t cycles = 0;
             for (const auto& entry : stats) {
@@ -376,30 +378,28 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            std::cout << "\n=== Execution Stats ===\n";
-            std::cout << "Instructions: " << instructions << "\n";
-            std::cout << "Final PC: 0x" << std::hex << simulator.getCpu()->getPC() << std::dec << "\n";
-            std::cout << "Program State: " << (simulator.isHalted() ? "halted" : "running") << "\n";
-            std::cout << "Cycles: " << cycles << "\n";
+            os << "\n=== Execution Stats ===\n";
+            os << "Instructions: " << instructions << "\n";
+            os << "Final PC: 0x" << std::hex << simulator.getCpu()->getPC() << std::dec << "\n";
+            os << "Program State: " << (simulator.isHalted() ? "halted" : "running") << "\n";
+            os << "Cycles: " << cycles << "\n";
 
-            std::cout << "\n=== Out-of-Order Performance Stats ===\n";
+            os << "\n=== Out-of-Order Performance Stats ===\n";
             if (!stats.empty()) {
-                for (const auto& entry : stats) {
-                    std::cout << entry.name << ": " << entry.value;
-                    if (!entry.description.empty()) {
-                        std::cout << " (" << entry.description << ")";
-                    }
-                    std::cout << "\n";
-                }
-                if (cycles > 0) {
-                    double ipc = static_cast<double>(instructions) / static_cast<double>(cycles);
-                    std::cout << "IPC: " << std::fixed << std::setprecision(2) << ipc << "\n";
-                }
+                simulator.getCpu()->dumpDetailedStats(os);
             } else {
-                std::cout << "Warning: failed to get OOO CPU stats\n";
+                os << "Warning: failed to get OOO CPU stats\n";
             }
         };
         bool warmupTriggered = false;
+        std::ofstream statsStream;
+        if (!statsFile.empty()) {
+            statsStream.open(statsFile);
+            if (!statsStream.is_open()) {
+                std::cerr << "Error: failed to open stats file: " << statsFile << "\n";
+                return 1;
+            }
+        }
 
         if (stepMode) {
             std::cout << "Step mode (press Enter to continue, input q to quit):\n";
@@ -430,12 +430,13 @@ int main(int argc, char* argv[]) {
                 if (cpuType == CpuType::OUT_OF_ORDER && statsWarmupCycles > 0) {
                     warmupTriggered = simulator.runWithWarmup(statsWarmupCycles, [&]() {
                         const auto warmupStats = simulator.getCpu()->getStats();
-                        printOooStats(
-                            fmt::format("Warmup Statistics (cycles 0-{})", simulator.getCycleCount()),
-                            warmupStats);
+                        if (statsStream.is_open()) {
+                            writeOooStats(
+                                statsStream,
+                                fmt::format("Warmup Statistics (cycles 0-{})", simulator.getCycleCount()),
+                                warmupStats);
+                        }
                         simulator.getCpu()->resetStats();
-                        std::cout << "\nWarmup statistics reset at cycle " << simulator.getCycleCount()
-                                  << ", continue collecting steady-state stats...\n";
                     });
                 } else {
                     simulator.run();
@@ -488,19 +489,19 @@ int main(int argc, char* argv[]) {
                     std::cout << "\nWarning: warmup cycle " << statsWarmupCycles
                               << " was not reached before program stopped\n";
                 }
-                printOooStats("Post-Warmup Statistics", stats);
-            } else {
-                simulator.printStatistics();
-                printOooStats("Out-of-Order Performance Stats", stats);
+                if (statsStream.is_open()) {
+                    writeOooStats(statsStream, "Post-Warmup Statistics", stats);
+                }
+            } else if (statsStream.is_open()) {
+                writeOooStats(statsStream, "Out-of-Order Performance Stats", stats);
             }
 
-            if (!statsFile.empty()) {
-                if (simulator.getCpu()->dumpDetailedStatsToFile(statsFile)) {
-                    std::cout << "Detailed OOO stats dumped to: " << statsFile << "\n";
-                } else {
-                    std::cout << "Warning: failed to dump OOO stats to file: " << statsFile << "\n";
-                }
+            if (statsStream.is_open()) {
+                statsStream.flush();
+                std::cout << "OOO stats dumped to: " << statsFile << "\n";
             }
+        } else if (!stepMode) {
+            simulator.printStatistics();
         }
 
         // 生成流水线可视化

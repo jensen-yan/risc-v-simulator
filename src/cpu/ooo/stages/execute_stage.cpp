@@ -47,29 +47,28 @@ void ExecuteStage::execute(CPUState& state) {
 
     state.perf_counters.increment(PerfCounterId::DISPATCH_SLOTS, OOOPipelineConfig::DISPATCH_WIDTH);
 
-    size_t dispatched_this_cycle = 0;
-    for (size_t slot = 0; slot < OOOPipelineConfig::DISPATCH_WIDTH; ++slot) {
-        auto dispatch_result = state.reservation_station->dispatch_instruction();
-        if (!dispatch_result.success) {
-            if (dispatched_this_cycle == 0) {
-                LOGT(EXECUTE, "no ready instruction in reservation station");
-                state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
+    const auto dispatch_results =
+        state.reservation_station->dispatch_instructions(OOOPipelineConfig::DISPATCH_WIDTH);
+    if (dispatch_results.empty()) {
+        LOGT(EXECUTE, "no ready instruction in reservation station");
+        state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
 
-                const size_t rs_occupied = state.reservation_station->get_occupied_entry_count();
-                if (rs_occupied == 0) {
-                    state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
-                } else {
-                    const size_t rs_ready = state.reservation_station->get_ready_entry_count();
-                    if (rs_ready == 0) {
-                        state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
-                    } else {
-                        state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
-                    }
-                }
+        const size_t rs_occupied = state.reservation_station->get_occupied_entry_count();
+        if (rs_occupied == 0) {
+            state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
+        } else {
+            const size_t rs_ready = state.reservation_station->get_ready_entry_count();
+            if (rs_ready == 0) {
+                state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
+            } else {
+                state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
             }
-            break;
         }
+    }
 
+    size_t dispatched_this_cycle = 0;
+    for (size_t slot = 0; slot < dispatch_results.size(); ++slot) {
+        auto dispatch_result = dispatch_results[slot];
         LOGT(EXECUTE, "dispatch slot=%zu inst=%" PRId64 " from rs[%d] to execution unit",
              slot, dispatch_result.instruction->get_instruction_id(), dispatch_result.rs_entry);
 
@@ -78,12 +77,10 @@ void ExecuteStage::execute(CPUState& state) {
             state.reorder_buffer->has_earlier_store_uncommitted(dispatch_result.instruction->get_instruction_id())) {
             dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
             state.reservation_station->release_execution_unit(dispatch_result.unit_type, dispatch_result.unit_id);
-            if (dispatched_this_cycle == 0) {
-                state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
-            }
+            state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
             LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay dispatch",
                  dispatch_result.instruction->get_instruction_id());
-            break;
+            continue;
         }
 
         ExecutionUnit* unit = nullptr;
@@ -105,11 +102,9 @@ void ExecuteStage::execute(CPUState& state) {
         if (!unit || unit->busy) {
             dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
             state.reservation_station->release_execution_unit(dispatch_result.unit_type, dispatch_result.unit_id);
-            if (dispatched_this_cycle == 0) {
-                LOGT(EXECUTE, "no available execution unit");
-                state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_UNIT);
-            }
-            break;
+            LOGT(EXECUTE, "no available execution unit");
+            state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_UNIT);
+            continue;
         }
 
         unit->busy = true;
@@ -216,7 +211,8 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 }
 
                 // 在Load指令完成前，再次检查Store依赖
-                bool should_wait = state.reorder_buffer->has_earlier_store_pending(unit.instruction->get_instruction_id());
+                bool should_wait = state.reorder_buffer->has_earlier_store_hazard(
+                    unit.instruction->get_instruction_id(), unit.load_address, unit.load_size);
                 
                 if (should_wait) {
                     // 关键修复：不要长期占用唯一LOAD单元，否则会阻塞更老的LOAD并形成死锁。

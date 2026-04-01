@@ -25,7 +25,7 @@ using ReorderBufferEntry = DynamicInst;
 class ReorderBuffer {
 public:
     // 配置参数
-    static const int MAX_ROB_ENTRIES = 32;       // ROB最大容量
+    static const int MAX_ROB_ENTRIES = 64;       // ROB最大容量
 
 private:
     // ROB表项存储（使用循环队列）
@@ -140,6 +140,11 @@ public:
     
     // 检查是否有更早的未完成Store指令（用于Load-Store依赖检查）
     bool has_earlier_store_pending(uint64_t current_instruction_id) const;
+
+    // 检查给定load是否会与更早的未完成Store形成真实hazard
+    bool has_earlier_store_hazard(uint64_t current_instruction_id,
+                                  uint64_t load_address,
+                                  uint8_t load_size) const;
 
     // 检查是否有更早的未提交Store/AMO指令（用于AMO顺序约束）
     bool has_earlier_store_uncommitted(uint64_t current_instruction_id) const;

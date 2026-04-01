@@ -95,7 +95,7 @@ PERF_COUNTER_DEF(ROB_OCCUPANCY_TOTAL, "cpu.rob.occupancy_total", "Accumulated RO
 PERF_COUNTER_DEF(ROB_OCCUPANCY_BIN_0_8, "cpu.rob.occupancy_bin_0_8", "ROB occupancy samples with 0~8 used entries")
 PERF_COUNTER_DEF(ROB_OCCUPANCY_BIN_9_16, "cpu.rob.occupancy_bin_9_16", "ROB occupancy samples with 9~16 used entries")
 PERF_COUNTER_DEF(ROB_OCCUPANCY_BIN_17_24, "cpu.rob.occupancy_bin_17_24", "ROB occupancy samples with 17~24 used entries")
-PERF_COUNTER_DEF(ROB_OCCUPANCY_BIN_25_32, "cpu.rob.occupancy_bin_25_32", "ROB occupancy samples with 25~32 used entries")
+PERF_COUNTER_DEF(ROB_OCCUPANCY_BIN_25_32, "cpu.rob.occupancy_bin_25_32", "ROB occupancy samples with 25 or more used entries")
 PERF_COUNTER_DEF(ROB_FLUSHED_ENTRIES, "cpu.rob.flushed_entries", "Total ROB entries flushed due to pipeline flushes")
 PERF_COUNTER_DEF(ROB_FLUSHED_ENTRIES_BRANCH_MISPREDICT, "cpu.rob.flushed_entries.branch_mispredict", "ROB entries flushed due to conditional branch mispredict recovery")
 PERF_COUNTER_DEF(ROB_FLUSHED_ENTRIES_UNCONDITIONAL_REDIRECT, "cpu.rob.flushed_entries.unconditional_redirect", "ROB entries flushed due to committed unconditional redirects (JAL/JALR)")

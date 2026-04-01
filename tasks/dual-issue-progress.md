@@ -25,4 +25,5 @@
 
 - 双发射主链已打通，完整 CoreMark 可自然结束并输出 stats
 - 已修复 host-comm MMIO 乱序导致的 DiffTest/CoreMark 收尾回归
-- 下一步聚焦 RS 双选策略和槽位利用率
+- RS 双选与窗口扩容已落地，CoreMark steady-state IPC 提升到 `1.471`
+- 完整 CoreMark IPC 提升到 `1.247`，下一步优先压控制流 flush 和 load replay

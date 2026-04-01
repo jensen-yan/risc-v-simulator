@@ -62,11 +62,12 @@ TEST_F(ReorderBufferTest, BasicAllocation) {
 // 测试2：ROB容量测试
 TEST_F(ReorderBufferTest, CapacityTest) {
     std::vector<DynamicInstPtr> allocated_instructions;
+    const size_t initial_free = rob.get_free_entry_count();
     
     // 尝试分配超过容量的表项
-    for (int i = 0; i < 40; ++i) {
+    for (size_t i = 0; i < initial_free + 8; ++i) {
         auto inst = createInstruction(InstructionType::R_TYPE, i % 32, 2, 3);
-        auto dynamic_inst = rob.allocate_entry(inst, 0x1000 + i * 4, getNextInstructionId());
+        auto dynamic_inst = rob.allocate_entry(inst, 0x1000 + static_cast<uint32_t>(i) * 4, getNextInstructionId());
         
         if (dynamic_inst) {
             allocated_instructions.push_back(dynamic_inst);
@@ -256,6 +257,58 @@ TEST_F(ReorderBufferTest, Statistics) {
     EXPECT_EQ(committed_after, committed_before + 2) << "提交计数应该增加2";
     EXPECT_GT(flushed_after, flushed_before) << "刷新计数应该增加";
     EXPECT_EQ(exceptions_after, exceptions_before) << "异常计数不应该增加";
+}
+
+TEST_F(ReorderBufferTest, KnownNonOverlappingOlderStoreDoesNotBlockLoadHazardCheck) {
+    DecodedInstruction store_inst = createInstruction(InstructionType::S_TYPE, 0, 1, 2);
+    store_inst.opcode = Opcode::STORE;
+    store_inst.memory_access_size = 4;
+    auto older_store = rob.allocate_entry(store_inst, 0x1000, getNextInstructionId());
+    ASSERT_TRUE(older_store != nullptr);
+
+    auto& store_memory = older_store->get_memory_info();
+    store_memory.is_memory_op = true;
+    store_memory.is_store = true;
+    store_memory.address_ready = true;
+    store_memory.memory_address = 0x200;
+    store_memory.memory_size = 4;
+
+    DecodedInstruction load_inst = createInstruction(InstructionType::I_TYPE, 3, 4, 0);
+    load_inst.opcode = Opcode::LOAD;
+    load_inst.memory_access_size = 4;
+    auto younger_load = rob.allocate_entry(load_inst, 0x1004, getNextInstructionId());
+    ASSERT_TRUE(younger_load != nullptr);
+
+    EXPECT_FALSE(rob.has_earlier_store_hazard(younger_load->get_instruction_id(), 0x240, 4))
+        << "已知地址且不重叠的更老store不应阻塞load";
+}
+
+TEST_F(ReorderBufferTest, UnknownOrOverlappingOlderStoreStillBlocksLoadHazardCheck) {
+    DecodedInstruction store_inst = createInstruction(InstructionType::S_TYPE, 0, 1, 2);
+    store_inst.opcode = Opcode::STORE;
+    store_inst.memory_access_size = 4;
+    auto older_store = rob.allocate_entry(store_inst, 0x1000, getNextInstructionId());
+    ASSERT_TRUE(older_store != nullptr);
+
+    auto& store_memory = older_store->get_memory_info();
+    store_memory.is_memory_op = true;
+    store_memory.is_store = true;
+
+    DecodedInstruction load_inst = createInstruction(InstructionType::I_TYPE, 3, 4, 0);
+    load_inst.opcode = Opcode::LOAD;
+    load_inst.memory_access_size = 4;
+    auto younger_load = rob.allocate_entry(load_inst, 0x1004, getNextInstructionId());
+    ASSERT_TRUE(younger_load != nullptr);
+
+    EXPECT_TRUE(rob.has_earlier_store_hazard(younger_load->get_instruction_id(), 0x240, 4))
+        << "地址未知的更老store仍应保守阻塞load";
+
+    store_memory.address_ready = true;
+    store_memory.memory_address = 0x240;
+    store_memory.memory_size = 4;
+
+    EXPECT_TRUE(rob.has_earlier_store_hazard(younger_load->get_instruction_id(), 0x240, 4))
+        << "地址重叠的更老store应阻塞load";
 }
 
 // 测试10：复杂场景

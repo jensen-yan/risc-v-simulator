@@ -76,11 +76,14 @@ protected:
 // 测试2：保留站容量测试
 TEST_F(ReservationStationTest, CapacityTest) {
     std::vector<ReservationStation::IssueResult> results;
+    const size_t initial_free = rs.get_free_entry_count();
     
     // 填满保留站
-    for (int i = 0; i < 20; ++i) {  // 尝试发射超过容量的指令
+    for (size_t i = 0; i < initial_free + 8; ++i) {  // 尝试发射超过容量的指令
         auto inst = createInstruction(InstructionType::R_TYPE, Opcode::OP, i % 32, 2, 3);
-        auto dynamic_inst = createDynamicInst(inst, 32 + i, 33, 34 + i, true, true, 0x1000 + i * 4, i + 1);
+        auto dynamic_inst = createDynamicInst(
+            inst, 32 + static_cast<int>(i), 33, 34 + static_cast<int>(i),
+            true, true, 0x1000 + static_cast<uint32_t>(i) * 4, static_cast<int>(i) + 1);
         
         auto result = rs.issue_instruction(dynamic_inst);
         results.push_back(result);
@@ -326,6 +329,49 @@ TEST_F(ReservationStationTest, SkipBusyUnitAndDispatchOtherReadyInstruction) {
     EXPECT_EQ(second_dispatch.unit_type, ExecutionUnitType::STORE);
     EXPECT_EQ(second_dispatch.instruction->get_instruction_id(),
               ready_store_inst->get_instruction_id());
+}
+
+TEST_F(ReservationStationTest, BatchDispatchUsesTwoAvailableAluSlots) {
+    auto inst1 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 1, 2, 3);
+    auto dyn1 = createDynamicInst(inst1, 32, 33, 34, true, true, 0x1000, 1);
+    auto inst2 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 4, 5, 6);
+    auto dyn2 = createDynamicInst(inst2, 35, 36, 37, true, true, 0x1004, 2);
+
+    EXPECT_TRUE(rs.issue_instruction(dyn1).success);
+    EXPECT_TRUE(rs.issue_instruction(dyn2).success);
+
+    const auto results = rs.dispatch_instructions(2);
+    ASSERT_EQ(results.size(), 2u) << "同拍应能挑出两条 ALU 指令";
+    EXPECT_EQ(results[0].instruction->get_instruction_id(), dyn1->get_instruction_id());
+    EXPECT_EQ(results[1].instruction->get_instruction_id(), dyn2->get_instruction_id());
+    EXPECT_NE(results[0].unit_id, results[1].unit_id) << "两条 ALU 指令应占用不同 ALU 单元";
+}
+
+TEST_F(ReservationStationTest, BatchDispatchSkipsBlockedOlderCandidateForSecondSlot) {
+    auto busy_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
+    auto busy_load_inst = createDynamicInst(busy_load, 32, 0, 40, true, true, 0x1000, 1);
+    EXPECT_TRUE(rs.issue_instruction(busy_load_inst).success);
+    auto first_dispatch = rs.dispatch_instruction();
+    ASSERT_TRUE(first_dispatch.success);
+    ASSERT_EQ(first_dispatch.unit_type, ExecutionUnitType::LOAD);
+
+    auto blocked_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 3, 4, 0);
+    auto blocked_load_inst = createDynamicInst(blocked_load, 41, 0, 42, true, true, 0x1004, 2);
+    auto alu_inst = createInstruction(InstructionType::R_TYPE, Opcode::OP, 5, 6, 7);
+    auto alu_dyn = createDynamicInst(alu_inst, 43, 44, 45, true, true, 0x1008, 3);
+    auto store_inst = createInstruction(InstructionType::S_TYPE, Opcode::STORE, 0, 8, 9);
+    auto store_dyn = createDynamicInst(store_inst, 46, 47, 0, true, true, 0x100C, 4);
+
+    EXPECT_TRUE(rs.issue_instruction(blocked_load_inst).success);
+    EXPECT_TRUE(rs.issue_instruction(alu_dyn).success);
+    EXPECT_TRUE(rs.issue_instruction(store_dyn).success);
+
+    const auto results = rs.dispatch_instructions(2);
+    ASSERT_EQ(results.size(), 2u) << "应跳过被占用 LOAD 单元挡住的更老候选，继续填满两个槽";
+    EXPECT_EQ(results[0].instruction->get_instruction_id(), alu_dyn->get_instruction_id());
+    EXPECT_EQ(results[1].instruction->get_instruction_id(), store_dyn->get_instruction_id());
+    EXPECT_EQ(results[0].unit_type, ExecutionUnitType::ALU);
+    EXPECT_EQ(results[1].unit_type, ExecutionUnitType::STORE);
 }
 
 } // namespace riscv

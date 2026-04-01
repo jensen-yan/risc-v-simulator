@@ -23,7 +23,7 @@ using ReservationStationEntry = DynamicInst;
 class ReservationStation {
 private:
     // 配置参数
-    static const int MAX_RS_ENTRIES = 16;        // 保留站最大容量
+    static const int MAX_RS_ENTRIES = 32;        // 保留站最大容量
     static const int MAX_ALU_UNITS = 2;          // ALU执行单元数量
     static const int MAX_BRANCH_UNITS = 1;       // 分支执行单元数量
     static const int MAX_LOAD_UNITS = 1;         // 加载执行单元数量
@@ -69,6 +69,9 @@ public:
     
     // 尝试调度一条准备好的指令
     DispatchResult dispatch_instruction();
+
+    // 同拍批量调度多条准备好的指令，保持程序顺序并跳过资源冲突候选
+    std::vector<DispatchResult> dispatch_instructions(size_t limit);
     
     // 更新操作数（来自CDB）
     void update_operands(const CommonDataBusEntry& cdb_entry);
@@ -126,6 +129,13 @@ private:
     
     // 选择优先级最高的准备好的指令
     RSEntry select_ready_instruction() const;
+
+    // 在给定可用执行单元快照下，选择一条准备好的指令
+    RSEntry select_ready_instruction_with_availability(const std::vector<bool>& alu_available,
+                                                       const std::vector<bool>& branch_available,
+                                                       const std::vector<bool>& load_available,
+                                                       const std::vector<bool>& store_available,
+                                                       const std::vector<bool>& selected_entries) const;
     
     // 计算指令优先级（越小优先级越高）
     int calculate_priority(DynamicInstPtr instruction) const;

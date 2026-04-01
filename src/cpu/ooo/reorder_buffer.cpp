@@ -7,6 +7,16 @@
 
 namespace riscv {
 
+namespace {
+
+bool rangesOverlap(uint64_t lhs_addr, uint64_t lhs_size, uint64_t rhs_addr, uint64_t rhs_size) {
+    const uint64_t lhs_end = lhs_addr + lhs_size - 1;
+    const uint64_t rhs_end = rhs_addr + rhs_size - 1;
+    return lhs_addr <= rhs_end && rhs_addr <= lhs_end;
+}
+
+}  // namespace
+
 // 定义静态常量
 const int ReorderBuffer::MAX_ROB_ENTRIES;
 
@@ -348,6 +358,52 @@ bool ReorderBuffer::has_earlier_store_pending(uint64_t current_instruction_id) c
             }
         }
     }
+    return false;
+}
+
+bool ReorderBuffer::has_earlier_store_hazard(uint64_t current_instruction_id,
+                                             uint64_t load_address,
+                                             uint8_t load_size) const {
+    if (load_size == 0) {
+        return false;
+    }
+
+    for (int i = 0; i < entry_count; ++i) {
+        int index = (head_ptr + i) % MAX_ROB_ENTRIES;
+        if (!rob_entries[index]) {
+            continue;
+        }
+
+        DynamicInstPtr inst = rob_entries[index];
+        if (inst->get_instruction_id() >= current_instruction_id) {
+            break;
+        }
+
+        const auto opcode = inst->get_decoded_info().opcode;
+        const bool is_store = inst->is_store_instruction();
+        const bool is_amo = (opcode == Opcode::AMO);
+        if (!is_store && !is_amo) {
+            continue;
+        }
+
+        if (inst->is_completed()) {
+            continue;
+        }
+
+        if (is_amo) {
+            return true;
+        }
+
+        const auto& memory_info = inst->get_memory_info();
+        if (!memory_info.address_ready || memory_info.memory_size == 0) {
+            return true;
+        }
+
+        if (rangesOverlap(load_address, load_size, memory_info.memory_address, memory_info.memory_size)) {
+            return true;
+        }
+    }
+
     return false;
 }
 

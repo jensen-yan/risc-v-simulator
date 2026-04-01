@@ -68,7 +68,7 @@ struct OOOPipelineConfig {
     static constexpr size_t ISSUE_WIDTH = 2;
     static constexpr size_t DISPATCH_WIDTH = 2;
     static constexpr size_t COMMIT_WIDTH = 2;
-    static constexpr size_t FETCH_BUFFER_SIZE = 8;
+    static constexpr size_t FETCH_BUFFER_SIZE = 16;
 };
 
 

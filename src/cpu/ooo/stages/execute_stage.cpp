@@ -213,7 +213,8 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                          "inst=%" PRId64 " LOAD%zu waits for ROB head before host-comm access",
                          blocked_inst->get_instruction_id(), i);
                     blocked_inst->get_memory_info().replay_count++;
-                    record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_HOST_COMM);
+                    record_load_replay_reason(
+                        blocked_inst, state, PerfCounterId::LOAD_REPLAYS_HOST_COMM);
                     continue;
                 }
 
@@ -233,13 +234,16 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     blocked_inst->get_memory_info().replay_count++;
                     switch (hazard_kind) {
                         case ReorderBuffer::StoreHazardKind::Amo:
-                            record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_AMO);
+                            record_load_replay_reason(
+                                blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_AMO);
                             break;
                         case ReorderBuffer::StoreHazardKind::AddressUnknown:
-                            record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN);
+                            record_load_replay_reason(
+                                blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN);
                             break;
                         case ReorderBuffer::StoreHazardKind::Overlap:
-                            record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP);
+                            record_load_replay_reason(
+                                blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP);
                             break;
                         case ReorderBuffer::StoreHazardKind::None:
                             break;
@@ -258,7 +262,8 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
                     blocked_inst->get_memory_info().replay_count++;
-                    record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP);
+                    record_load_replay_reason(
+                        blocked_inst, state, PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP);
                     continue;
                 }
                 if (load_result == LoadExecutionResult::WaitingForCache) {
@@ -572,9 +577,36 @@ void ExecuteStage::record_load_replay_bucket(const DynamicInstPtr& instruction, 
     }
 }
 
-void ExecuteStage::record_load_replay_reason(CPUState& state, PerfCounterId reason_counter_id) {
+void ExecuteStage::record_load_replay_reason(const DynamicInstPtr& instruction,
+                                             CPUState& state,
+                                             PerfCounterId reason_counter_id) {
     state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
     state.perf_counters.increment(reason_counter_id);
+
+    if (!instruction) {
+        return;
+    }
+
+    auto& memory_info = instruction->get_memory_info();
+    switch (reason_counter_id) {
+        case PerfCounterId::LOAD_REPLAYS_HOST_COMM:
+            memory_info.replay_host_comm_count++;
+            break;
+        case PerfCounterId::LOAD_REPLAYS_ROB_STORE_AMO:
+            memory_info.replay_rob_store_amo_count++;
+            break;
+        case PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN:
+            memory_info.replay_rob_store_addr_unknown_count++;
+            break;
+        case PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP:
+            memory_info.replay_rob_store_overlap_count++;
+            break;
+        case PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP:
+            memory_info.replay_store_buffer_overlap_count++;
+            break;
+        default:
+            break;
+    }
 }
 
 void ExecuteStage::flush() {
@@ -676,8 +708,10 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
             state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
             if (forwarding_kind == StoreBuffer::LoadForwardingKind::FullMatch) {
                 state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED_FULL_MATCH);
+                memory_info.load_final_source = DynamicInst::MemoryInfo::LoadFinalSource::ForwardedFull;
             } else {
                 state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED_PARTIAL_MATCH);
+                memory_info.load_final_source = DynamicInst::MemoryInfo::LoadFinalSource::ForwardedPartial;
             }
             if (inst.opcode == Opcode::LOAD_FP) {
                 // FLW 需要nan-box到64位浮点寄存器；FLD 直接写入64位
@@ -740,6 +774,7 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
         }
 
         memory_info.store_forwarded = false;
+        memory_info.load_final_source = DynamicInst::MemoryInfo::LoadFinalSource::FromMemory;
         try {
             uint64_t raw_value = 0;
             CacheAccessResult cache_result{};

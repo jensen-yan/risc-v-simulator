@@ -318,6 +318,22 @@ void DynamicInst::setup_execution_requirements() {
     exec_info_->remaining_cycles = exec_info_->execution_cycles;
 }
 
+void DynamicInst::refresh_memory_info_if_operands_ready() {
+    if (!memory_info_ || !memory_info_->is_memory_op || !src1_ready_) {
+        return;
+    }
+
+    auto& memory_info = *memory_info_;
+    memory_info.memory_address =
+        src1_value_ + static_cast<uint64_t>(static_cast<int64_t>(decoded_info_.imm));
+    memory_info.memory_size = decoded_info_.memory_access_size;
+    memory_info.address_ready = true;
+
+    if (memory_info.is_store && src2_ready_) {
+        memory_info.memory_value = src2_value_;
+    }
+}
+
 // ========== 工厂函数实现 ==========
 DynamicInstPtr create_dynamic_inst(const DecodedInstruction& decoded_info, 
                                   uint64_t pc, uint64_t instruction_id) {

@@ -2,6 +2,7 @@
 #include "cpu/ooo/ooo_cpu.h"
 #include "core/memory.h"
 #include <memory>
+#include <sstream>
 #include "common/debug_types.h"
 
 namespace riscv {
@@ -573,6 +574,57 @@ TEST_F(OutOfOrderCPUTest, HostCommLoadWaitsForOlderTohostStoreToCommit) {
 
     EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
     EXPECT_EQ(cpu->getRegister(15), 1u) << "fromhost load 应等待更老的 tohost store 生效后再读取";
+}
+
+TEST_F(OutOfOrderCPUTest, DetailedStatsIncludeLoadReplayAndForwardingProfile) {
+    writeInstruction(0x0, createITypeInstruction(0x100, 0, 0x0, 1, 0x13));  // addi x1, x0, 0x100
+    writeInstruction(0x4, createITypeInstruction(0x78, 0, 0x0, 2, 0x13));    // addi x2, x0, 0x78
+    writeInstruction(0x8, createSTypeInstruction(0, 2, 1, 0x2, 0x23));       // sw x2, 0(x1)
+    writeInstruction(0xC, createITypeInstruction(0, 1, 0x2, 3, 0x03));       // lw x3, 0(x1)
+    writeInstruction(0x10, createECallInstruction());
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 400 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted());
+    ASSERT_EQ(cpu->getRegister(3), 0x78u);
+
+    std::ostringstream oss;
+    cpu->dumpDetailedStats(oss);
+    const std::string stats_text = oss.str();
+    EXPECT_NE(stats_text.find("cpu.load_profile.top.begin"), std::string::npos);
+    EXPECT_NE(stats_text.find("replay_total="), std::string::npos);
+    EXPECT_NE(stats_text.find("forwarded_full="), std::string::npos);
+}
+
+TEST_F(OutOfOrderCPUTest, ReadyStoreAddressAvoidsUnknownStoreReplayForDependentLoad) {
+    writeInstruction(0x0, createITypeInstruction(0x100, 0, 0x0, 1, 0x13));  // addi x1, x0, 0x100
+    writeInstruction(0x4, createITypeInstruction(0x78, 0, 0x0, 2, 0x13));    // addi x2, x0, 0x78
+    writeInstruction(0x8, createSTypeInstruction(0, 2, 1, 0x2, 0x23));       // sw x2, 0(x1)
+    writeInstruction(0xC, createITypeInstruction(0, 1, 0x2, 3, 0x03));       // lw x3, 0(x1)
+    writeInstruction(0x10, createECallInstruction());
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 400 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted());
+    ASSERT_EQ(cpu->getRegister(3), 0x78u);
+
+    auto statValueByName = [](const ICpuInterface::StatsList& stats, const std::string& name) {
+        for (const auto& entry : stats) {
+            if (entry.name == name) {
+                return entry.value;
+            }
+        }
+        return uint64_t{0};
+    };
+
+    const auto stats = cpu->getStats();
+    EXPECT_EQ(statValueByName(stats, "cpu.memory.load_replays.rob_store_addr_unknown"), 0u);
 }
 
 TEST_F(OutOfOrderCPUTest, BranchMispredictRecoversEarlyAndFlushesWrongPath) {

@@ -186,6 +186,20 @@ struct JalrProfileEntry {
     uint64_t other = 0;
 };
 
+struct LoadProfileEntry {
+    uint64_t executions = 0;
+    uint64_t replayed_loads = 0;
+    uint64_t replay_total = 0;
+    uint64_t replay_host_comm = 0;
+    uint64_t replay_rob_store_amo = 0;
+    uint64_t replay_rob_store_addr_unknown = 0;
+    uint64_t replay_rob_store_overlap = 0;
+    uint64_t replay_store_buffer_overlap = 0;
+    uint64_t forwarded_full = 0;
+    uint64_t forwarded_partial = 0;
+    uint64_t from_memory = 0;
+};
+
 struct CPUState {
     // 基本CPU状态
     uint64_t pc;                    // 程序计数器（取指PC）
@@ -243,6 +257,7 @@ struct CPUState {
     uint64_t pipeline_stalls;      // 流水线停顿次数
     std::unordered_map<uint64_t, BranchProfileEntry> branch_profiles;
     std::unordered_map<uint64_t, JalrProfileEntry> jalr_profiles;
+    std::unordered_map<uint64_t, LoadProfileEntry> load_profiles;
 
     // A扩展 LR/SC 预留状态
     bool reservation_valid;        // LR 预留是否有效

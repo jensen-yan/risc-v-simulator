@@ -65,6 +65,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.rename_checkpoints.clear();
     state.branch_profiles.clear();
     state.jalr_profiles.clear();
+    state.load_profiles.clear();
 
     state.arch_registers.fill(0);
     state.arch_fp_registers.fill(0);
@@ -224,6 +225,7 @@ void OutOfOrderCPU::resetStats() {
     cpu_state_.perf_counters.reset();
     cpu_state_.branch_profiles.clear();
     cpu_state_.jalr_profiles.clear();
+    cpu_state_.load_profiles.clear();
 }
 
 uint64_t OutOfOrderCPU::get_physical_register_value(PhysRegNum reg) const {
@@ -573,6 +575,37 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " other=" << prof.other << "\n";
         }
         os << "cpu.jalr_profile.top.end\n";
+    }
+
+    if (!cpu_state_.load_profiles.empty()) {
+        std::vector<std::pair<uint64_t, LoadProfileEntry>> entries(
+            cpu_state_.load_profiles.begin(), cpu_state_.load_profiles.end());
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            if (a.second.replay_total != b.second.replay_total) {
+                return a.second.replay_total > b.second.replay_total;
+            }
+            return a.second.executions > b.second.executions;
+        });
+
+        os << "cpu.load_profile.top.begin\n";
+        const size_t limit = std::min<size_t>(10, entries.size());
+        for (size_t i = 0; i < limit; ++i) {
+            const auto& [pc, prof] = entries[i];
+            os << "cpu.load_profile.top[" << i << "].pc 0x"
+               << std::hex << pc << std::dec
+               << " exec=" << prof.executions
+               << " replayed_loads=" << prof.replayed_loads
+               << " replay_total=" << prof.replay_total
+               << " replay_host_comm=" << prof.replay_host_comm
+               << " replay_rob_store_amo=" << prof.replay_rob_store_amo
+               << " replay_rob_store_addr_unknown=" << prof.replay_rob_store_addr_unknown
+               << " replay_rob_store_overlap=" << prof.replay_rob_store_overlap
+               << " replay_store_buffer_overlap=" << prof.replay_store_buffer_overlap
+               << " forwarded_full=" << prof.forwarded_full
+               << " forwarded_partial=" << prof.forwarded_partial
+               << " from_memory=" << prof.from_memory << "\n";
+        }
+        os << "cpu.load_profile.top.end\n";
     }
 
     os << "----------- End Simulation Statistics -----------\n";

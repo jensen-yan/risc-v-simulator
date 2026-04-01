@@ -65,6 +65,13 @@ public:
 
     // 内存访问相关信息（可选）
     struct MemoryInfo {
+        enum class LoadFinalSource {
+            None,
+            FromMemory,
+            ForwardedFull,
+            ForwardedPartial,
+        };
+
         bool is_memory_op;                     // 是否为内存操作
         bool is_load;                          // 是否为加载指令
         bool is_store;                         // 是否为存储指令
@@ -74,10 +81,19 @@ public:
         bool address_ready;                    // 地址是否准备好
         bool store_forwarded;                  // 是否通过Store-to-Load转发
         uint32_t replay_count;                 // Load replay次数（用于分布统计）
+        uint32_t replay_host_comm_count;       // host-comm 串行化导致的 replay 次数
+        uint32_t replay_rob_store_amo_count;   // 更老 AMO 导致的 replay 次数
+        uint32_t replay_rob_store_addr_unknown_count; // 更老 store 地址未知导致的 replay 次数
+        uint32_t replay_rob_store_overlap_count;      // ROB 中重叠更老 store 导致的 replay 次数
+        uint32_t replay_store_buffer_overlap_count;   // store buffer 中重叠但不可转发导致的 replay 次数
+        LoadFinalSource load_final_source;     // load 最终从哪里取到数据
         
         MemoryInfo() : is_memory_op(false), is_load(false), is_store(false),
                       memory_address(0), memory_value(0), memory_size(0),
-                      address_ready(false), store_forwarded(false), replay_count(0) {}
+                      address_ready(false), store_forwarded(false), replay_count(0),
+                      replay_host_comm_count(0), replay_rob_store_amo_count(0),
+                      replay_rob_store_addr_unknown_count(0), replay_rob_store_overlap_count(0),
+                      replay_store_buffer_overlap_count(0), load_final_source(LoadFinalSource::None) {}
     };
 
     struct FpExecuteInfo {
@@ -203,11 +219,17 @@ public:
     
     void set_src1_ready(bool ready, uint64_t value = 0) { 
         src1_ready_ = ready; 
-        if (ready) src1_value_ = value; 
+        if (ready) {
+            src1_value_ = value;
+            refresh_memory_info_if_operands_ready();
+        }
     }
     void set_src2_ready(bool ready, uint64_t value = 0) { 
         src2_ready_ = ready; 
-        if (ready) src2_value_ = value; 
+        if (ready) {
+            src2_value_ = value;
+            refresh_memory_info_if_operands_ready();
+        }
     }
 
     // ========== 执行结果接口 ==========
@@ -377,6 +399,7 @@ private:
     void initialize_from_decoded_instruction();
     void extract_register_info();
     void setup_execution_requirements();
+    void refresh_memory_info_if_operands_ready();
 };
 
 // 类型别名

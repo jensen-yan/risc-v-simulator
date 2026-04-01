@@ -57,7 +57,9 @@ private:
 
     // 记录load replay分布桶
     void record_load_replay_bucket(const DynamicInstPtr& instruction, CPUState& state);
-    void record_load_replay_reason(CPUState& state, PerfCounterId reason_counter_id);
+    void record_load_replay_reason(const DynamicInstPtr& instruction,
+                                   CPUState& state,
+                                   PerfCounterId reason_counter_id);
 };
 
 } // namespace riscv 

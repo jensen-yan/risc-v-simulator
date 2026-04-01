@@ -347,6 +347,35 @@ void CommitStage::execute(CPUState& state) {
         state.store_buffer->retire_stores_before(committed_inst->get_instruction_id());
         state.rename_checkpoints.erase(committed_inst->get_instruction_id());
 
+        if (committed_inst->is_load_instruction()) {
+            const auto& memory_info = committed_inst->get_memory_info();
+            auto& profile = state.load_profiles[committed_inst->get_pc()];
+            profile.executions++;
+            profile.replay_total += memory_info.replay_count;
+            if (memory_info.replay_count != 0) {
+                profile.replayed_loads++;
+            }
+            profile.replay_host_comm += memory_info.replay_host_comm_count;
+            profile.replay_rob_store_amo += memory_info.replay_rob_store_amo_count;
+            profile.replay_rob_store_addr_unknown += memory_info.replay_rob_store_addr_unknown_count;
+            profile.replay_rob_store_overlap += memory_info.replay_rob_store_overlap_count;
+            profile.replay_store_buffer_overlap += memory_info.replay_store_buffer_overlap_count;
+
+            switch (memory_info.load_final_source) {
+                case DynamicInst::MemoryInfo::LoadFinalSource::ForwardedFull:
+                    profile.forwarded_full++;
+                    break;
+                case DynamicInst::MemoryInfo::LoadFinalSource::ForwardedPartial:
+                    profile.forwarded_partial++;
+                    break;
+                case DynamicInst::MemoryInfo::LoadFinalSource::FromMemory:
+                    profile.from_memory++;
+                    break;
+                case DynamicInst::MemoryInfo::LoadFinalSource::None:
+                    break;
+            }
+        }
+
         // ====== 控制流：commit仅在预测错时redirect/flush ======
         const bool is_control_flow =
             (decoded_info.opcode == Opcode::BRANCH ||

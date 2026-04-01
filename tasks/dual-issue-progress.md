@@ -15,11 +15,12 @@
 
 - [x] 梳理现有 OOO 单宽约束与风险点
 - [x] 确定分阶段实现方案
-- [ ] 第一阶段：统一宽度配置 + fetch/decode 双宽
+- [x] 第一阶段：统一宽度配置 + fetch/decode 双宽
 - [ ] 第二阶段：issue/rename 双宽
 - [ ] 第三阶段：RS dispatch/execute/commit 双宽
 
 ## 当前状态
 
 - 当前实现仍是单宽 front-end，后端只有部分执行单元是多路
-- 第一阶段正在进行：先把前端真正扩成 2-wide
+- 第一阶段已完成并提交
+- 第二阶段进行中：把 oldest-first 的 issue/rename 扩成 2-wide

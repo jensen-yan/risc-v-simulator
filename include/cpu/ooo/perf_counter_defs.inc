@@ -7,6 +7,8 @@ PERF_COUNTER_DEF(DECODED_INSTRUCTIONS, "cpu.decode.decoded", "Instructions decod
 PERF_COUNTER_DEF(DECODE_SLOTS, "cpu.decode.slots", "Total decode stage slots available")
 PERF_COUNTER_DEF(DECODE_UTILIZED_SLOTS, "cpu.decode.utilized_slots", "Decode slots that successfully decoded an instruction")
 PERF_COUNTER_DEF(ISSUED_INSTRUCTIONS, "cpu.issue.issued", "Instructions issued into reservation station")
+PERF_COUNTER_DEF(ISSUE_SLOTS, "cpu.issue.slots", "Total issue stage slots available")
+PERF_COUNTER_DEF(ISSUE_UTILIZED_SLOTS, "cpu.issue.utilized_slots", "Issue slots that successfully issued an instruction")
 PERF_COUNTER_DEF(DISPATCHED_INSTRUCTIONS, "cpu.execute.dispatched", "Instructions dispatched to execution units")
 PERF_COUNTER_DEF(CDB_ENQUEUED, "cpu.execute.cdb_enqueued", "Execution results enqueued to CDB")
 PERF_COUNTER_DEF(WRITEBACKS, "cpu.writeback.count", "CDB entries consumed in writeback stage")

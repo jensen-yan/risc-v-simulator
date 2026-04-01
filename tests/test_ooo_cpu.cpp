@@ -285,6 +285,67 @@ TEST_F(OutOfOrderCPUTest, DecodeStageDecodesTwoInstructionsPerCycleWhenResources
     EXPECT_EQ(findStat("cpu.decode.slots"), 4u);
 }
 
+TEST_F(OutOfOrderCPUTest, IssueStageIssuesTwoInstructionsPerCycleWhenResourcesAllow) {
+    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
+    writeInstruction(0x4, createITypeInstruction(2, 0, 0x0, 2, 0x13));
+    writeInstruction(0x8, createITypeInstruction(3, 0, 0x0, 3, 0x13));
+    writeInstruction(0xC, createITypeInstruction(4, 0, 0x0, 4, 0x13));
+    writeInstruction(0x10, createECallInstruction());
+
+    auto& state = const_cast<CPUState&>(cpu->getCPUState());
+    state.l1i_cache.reset();
+    state.l1d_cache.reset();
+
+    cpu->setPC(0x0);
+    cpu->step();
+    cpu->step();
+    cpu->step();
+
+    ASSERT_NE(state.reservation_station, nullptr);
+    EXPECT_EQ(state.reservation_station->get_occupied_entry_count(), 2u)
+        << "第三拍应将两条最老指令送入保留站";
+
+    auto findStat = [&](const std::string& name) -> uint64_t {
+        for (const auto& entry : cpu->getStats()) {
+            if (entry.name == name) {
+                return entry.value;
+            }
+        }
+        return 0;
+    };
+
+    EXPECT_EQ(findStat("cpu.issue.issued"), 2u);
+    EXPECT_EQ(findStat("cpu.issue.utilized_slots"), 2u);
+    EXPECT_EQ(findStat("cpu.issue.slots"), 6u);
+}
+
+TEST_F(OutOfOrderCPUTest, SameCycleIssueRenameTracksYoungerRawDependency) {
+    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
+    writeInstruction(0x4, createRTypeInstruction(0x00, 0, 1, 0x0, 2, 0x33));
+    writeInstruction(0x8, createECallInstruction());
+
+    auto& state = const_cast<CPUState&>(cpu->getCPUState());
+    state.l1i_cache.reset();
+    state.l1d_cache.reset();
+
+    cpu->setPC(0x0);
+    cpu->step();
+    cpu->step();
+    cpu->step();
+
+    auto first = state.reorder_buffer->get_entry(0);
+    auto second = state.reorder_buffer->get_entry(1);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_EQ(first->get_status(), DynamicInst::Status::ISSUED);
+    ASSERT_EQ(second->get_status(), DynamicInst::Status::ISSUED);
+    EXPECT_NE(first->get_physical_dest(), 0u);
+    EXPECT_EQ(second->get_physical_src1(), first->get_physical_dest())
+        << "同周期 younger 指令应观察到 older 指令更新后的 rename 映射";
+    EXPECT_FALSE(second->is_src1_ready())
+        << "older 指令尚未执行完成时，younger RAW 源操作数应保持未就绪";
+}
+
 TEST_F(OutOfOrderCPUTest, MExtensionMulInstruction) {
     // ADDI x1, x0, 6
     // ADDI x2, x0, 7

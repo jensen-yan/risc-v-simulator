@@ -66,6 +66,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.branch_profiles.clear();
     state.jalr_profiles.clear();
     state.load_profiles.clear();
+    state.store_profiles.clear();
 
     state.arch_registers.fill(0);
     state.arch_fp_registers.fill(0);
@@ -226,6 +227,7 @@ void OutOfOrderCPU::resetStats() {
     cpu_state_.branch_profiles.clear();
     cpu_state_.jalr_profiles.clear();
     cpu_state_.load_profiles.clear();
+    cpu_state_.store_profiles.clear();
 }
 
 uint64_t OutOfOrderCPU::get_physical_register_value(PhysRegNum reg) const {
@@ -606,6 +608,40 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " from_memory=" << prof.from_memory << "\n";
         }
         os << "cpu.load_profile.top.end\n";
+    }
+
+    if (!cpu_state_.store_profiles.empty()) {
+        std::vector<std::pair<uint64_t, StoreProfileEntry>> entries(
+            cpu_state_.store_profiles.begin(), cpu_state_.store_profiles.end());
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            const uint64_t a_events = a.second.forwarded_full + a.second.forwarded_partial +
+                                      a.second.blocked_rob_addr_unknown +
+                                      a.second.blocked_rob_overlap +
+                                      a.second.blocked_store_buffer_overlap;
+            const uint64_t b_events = b.second.forwarded_full + b.second.forwarded_partial +
+                                      b.second.blocked_rob_addr_unknown +
+                                      b.second.blocked_rob_overlap +
+                                      b.second.blocked_store_buffer_overlap;
+            if (a_events != b_events) {
+                return a_events > b_events;
+            }
+            return a.second.executions > b.second.executions;
+        });
+
+        os << "cpu.store_profile.top.begin\n";
+        const size_t limit = std::min<size_t>(10, entries.size());
+        for (size_t i = 0; i < limit; ++i) {
+            const auto& [pc, prof] = entries[i];
+            os << "cpu.store_profile.top[" << i << "].pc 0x"
+               << std::hex << pc << std::dec
+               << " exec=" << prof.executions
+               << " forwarded_full=" << prof.forwarded_full
+               << " forwarded_partial=" << prof.forwarded_partial
+               << " blocked_rob_addr_unknown=" << prof.blocked_rob_addr_unknown
+               << " blocked_rob_overlap=" << prof.blocked_rob_overlap
+               << " blocked_store_buffer_overlap=" << prof.blocked_store_buffer_overlap << "\n";
+        }
+        os << "cpu.store_profile.top.end\n";
     }
 
     os << "----------- End Simulation Statistics -----------\n";

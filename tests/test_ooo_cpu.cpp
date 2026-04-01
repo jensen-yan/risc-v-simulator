@@ -599,6 +599,28 @@ TEST_F(OutOfOrderCPUTest, DetailedStatsIncludeLoadReplayAndForwardingProfile) {
     EXPECT_NE(stats_text.find("forwarded_full="), std::string::npos);
 }
 
+TEST_F(OutOfOrderCPUTest, DetailedStatsIncludeStoreForwardingAndBlockingProfile) {
+    writeInstruction(0x0, createITypeInstruction(0x100, 0, 0x0, 1, 0x13));   // addi x1, x0, 0x100
+    writeInstruction(0x4, createITypeInstruction(0x1234, 0, 0x0, 2, 0x13));  // addi x2, x0, 0x1234
+    writeInstruction(0x8, createSTypeInstruction(0, 2, 1, 0x2, 0x23));       // sw x2, 0(x1)
+    writeInstruction(0xC, createITypeInstruction(0, 1, 0x2, 3, 0x03));       // lw x3, 0(x1)
+    writeInstruction(0x10, createECallInstruction());
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 400 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted());
+
+    std::ostringstream oss;
+    cpu->dumpDetailedStats(oss);
+    const std::string stats_text = oss.str();
+    EXPECT_NE(stats_text.find("cpu.store_profile.top.begin"), std::string::npos);
+    EXPECT_NE(stats_text.find("forwarded_full="), std::string::npos);
+    EXPECT_NE(stats_text.find("blocked_store_buffer_overlap="), std::string::npos);
+}
+
 TEST_F(OutOfOrderCPUTest, ReadyStoreAddressAvoidsUnknownStoreReplayForDependentLoad) {
     writeInstruction(0x0, createITypeInstruction(0x100, 0, 0x0, 1, 0x13));  // addi x1, x0, 0x100
     writeInstruction(0x4, createITypeInstruction(0x78, 0, 0x0, 2, 0x13));    // addi x2, x0, 0x78

@@ -86,6 +86,11 @@ public:
         uint32_t replay_rob_store_addr_unknown_count; // 更老 store 地址未知导致的 replay 次数
         uint32_t replay_rob_store_overlap_count;      // ROB 中重叠更老 store 导致的 replay 次数
         uint32_t replay_store_buffer_overlap_count;   // store buffer 中重叠但不可转发导致的 replay 次数
+        uint32_t caused_forwarded_full_count;  // 作为更老 store 命中的 full forwarding 次数
+        uint32_t caused_forwarded_partial_count; // 作为更老 store 命中的 partial forwarding 次数
+        uint32_t caused_rob_addr_unknown_block_count; // 作为更老 store 导致地址未知阻塞的次数
+        uint32_t caused_rob_overlap_block_count;      // 作为更老 store 导致 ROB overlap 阻塞的次数
+        uint32_t caused_store_buffer_overlap_block_count; // 作为更老 store 导致 store buffer overlap 阻塞的次数
         LoadFinalSource load_final_source;     // load 最终从哪里取到数据
         
         MemoryInfo() : is_memory_op(false), is_load(false), is_store(false),
@@ -93,7 +98,10 @@ public:
                       address_ready(false), store_forwarded(false), replay_count(0),
                       replay_host_comm_count(0), replay_rob_store_amo_count(0),
                       replay_rob_store_addr_unknown_count(0), replay_rob_store_overlap_count(0),
-                      replay_store_buffer_overlap_count(0), load_final_source(LoadFinalSource::None) {}
+                      replay_store_buffer_overlap_count(0), caused_forwarded_full_count(0),
+                      caused_forwarded_partial_count(0), caused_rob_addr_unknown_block_count(0),
+                      caused_rob_overlap_block_count(0), caused_store_buffer_overlap_block_count(0),
+                      load_final_source(LoadFinalSource::None) {}
     };
 
     struct FpExecuteInfo {

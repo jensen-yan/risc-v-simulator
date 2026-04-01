@@ -42,6 +42,11 @@ public:
                                                 uint8_t size,
                                                 uint64_t& result_value,
                                                 uint64_t current_instruction_id) const;
+    LoadForwardingKind classify_load_forwarding(uint64_t address,
+                                                uint8_t size,
+                                                uint64_t& result_value,
+                                                uint64_t current_instruction_id,
+                                                DynamicInstPtr* matched_store) const;
 
     // 清除指定指令ID及之前的Store条目（当Store指令提交时调用）
     void retire_stores_before(uint64_t instruction_id);

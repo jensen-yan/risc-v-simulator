@@ -376,6 +376,18 @@ void CommitStage::execute(CPUState& state) {
             }
         }
 
+        if (committed_inst->is_store_instruction()) {
+            const auto& memory_info = committed_inst->get_memory_info();
+            auto& profile = state.store_profiles[committed_inst->get_pc()];
+            profile.executions++;
+            profile.forwarded_full += memory_info.caused_forwarded_full_count;
+            profile.forwarded_partial += memory_info.caused_forwarded_partial_count;
+            profile.blocked_rob_addr_unknown += memory_info.caused_rob_addr_unknown_block_count;
+            profile.blocked_rob_overlap += memory_info.caused_rob_overlap_block_count;
+            profile.blocked_store_buffer_overlap +=
+                memory_info.caused_store_buffer_overlap_block_count;
+        }
+
         // ====== 控制流：commit仅在预测错时redirect/flush ======
         const bool is_control_flow =
             (decoded_info.opcode == Opcode::BRANCH ||

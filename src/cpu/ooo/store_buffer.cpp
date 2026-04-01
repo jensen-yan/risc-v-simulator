@@ -44,6 +44,18 @@ StoreBuffer::LoadForwardingKind StoreBuffer::classify_load_forwarding(uint64_t a
                                                                       uint8_t size,
                                                                       uint64_t& result_value,
                                                                       uint64_t current_instruction_id) const {
+    return classify_load_forwarding(address, size, result_value, current_instruction_id, nullptr);
+}
+
+StoreBuffer::LoadForwardingKind StoreBuffer::classify_load_forwarding(uint64_t address,
+                                                                      uint8_t size,
+                                                                      uint64_t& result_value,
+                                                                      uint64_t current_instruction_id,
+                                                                      DynamicInstPtr* matched_store) const {
+    if (matched_store) {
+        *matched_store = nullptr;
+    }
+
     // 从最新的Store开始向前搜索（最近的Store优先）
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         // 从最近分配的位置开始向前搜索
@@ -62,6 +74,9 @@ StoreBuffer::LoadForwardingKind StoreBuffer::classify_load_forwarding(uint64_t a
             // 如果完全匹配，可以直接转发
             if (entry.address == address && entry.size == size) {
                 result_value = entry.value;
+                if (matched_store) {
+                    *matched_store = entry.instruction;
+                }
                 LOGT(EXECUTE, "store-to-load forwarding full match: addr=0x%" PRIx64 ", size=%d, value=0x%" PRIx64 " (inst=%" PRId64 ")",
                         address, size, result_value, entry.instruction->get_instruction_id());
                 return LoadForwardingKind::FullMatch;
@@ -70,11 +85,17 @@ StoreBuffer::LoadForwardingKind StoreBuffer::classify_load_forwarding(uint64_t a
             // 部分重叠的情况 - 需要提取正确的数据
             if (can_extract_load_data(entry, address, size)) {
                 result_value = extract_load_data(entry, address, size);
+                if (matched_store) {
+                    *matched_store = entry.instruction;
+                }
                 LOGT(EXECUTE, "store-to-load forwarding partial match: load_addr=0x%" PRIx64 ", load_size=%d, store_addr=0x%" PRIx64 ", store_size=%d, value=0x%" PRIx64 " (inst=%" PRId64 ")",
                         address, size, entry.address, entry.size, result_value, entry.instruction->get_instruction_id());
                 return LoadForwardingKind::PartialMatch;
             } else {
                 // 有重叠但无法转发（如部分字节写入）- 这种情况下Load必须等待Store提交到内存
+                if (matched_store) {
+                    *matched_store = entry.instruction;
+                }
                 LOGT(EXECUTE, "store-to-load overlap but cannot forward: load_addr=0x%" PRIx64 ", load_size=%d, store_addr=0x%" PRIx64 ", store_size=%d (inst=%" PRId64 ")",
                         address, size, entry.address, entry.size, entry.instruction->get_instruction_id());
                 return LoadForwardingKind::BlockedByOverlap;

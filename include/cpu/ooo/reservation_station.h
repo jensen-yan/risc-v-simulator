@@ -23,7 +23,7 @@ using ReservationStationEntry = DynamicInst;
 class ReservationStation {
 private:
     // 配置参数
-    static const int MAX_RS_ENTRIES = 32;        // 保留站最大容量
+    static const int MAX_RS_ENTRIES = 48;        // 保留站最大容量
     static const int MAX_ALU_UNITS = 2;          // ALU执行单元数量
     static const int MAX_BRANCH_UNITS = 1;       // 分支执行单元数量
     static const int MAX_LOAD_UNITS = 1;         // 加载执行单元数量

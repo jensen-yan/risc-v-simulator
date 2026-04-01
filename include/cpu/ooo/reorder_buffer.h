@@ -25,7 +25,7 @@ using ReorderBufferEntry = DynamicInst;
 class ReorderBuffer {
 public:
     // 配置参数
-    static const int MAX_ROB_ENTRIES = 64;       // ROB最大容量
+    static const int MAX_ROB_ENTRIES = 96;       // ROB最大容量
 
 private:
     // ROB表项存储（使用循环队列）

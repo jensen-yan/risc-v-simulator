@@ -92,6 +92,9 @@ public:
     void dumpState() const override;
     void dumpPipelineState() const;
     
+    // 流水线可视化
+    void setPipelineTracer(PipelineTracer* tracer) override { cpu_state_.pipeline_tracer = tracer; }
+
     // DiffTest控制接口
     void setDiffTest(class DiffTest* difftest) override;  // 由Simulator设置DiffTest引用
     void enableDiffTest(bool enable);

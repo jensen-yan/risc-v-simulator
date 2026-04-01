@@ -45,7 +45,23 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 
 # 导出详细 OOO 统计（gem5 风格文本）
 ./risc-v-sim --ooo --stats-file=stats.txt -e ./riscv-tests/isa/rv32ui-p-add
+
+# 流水线可视化（生成 HTML 时序图 + 文本 trace）
+./risc-v-sim -e --ooo -m 2164260864 --pipeline-view=pipeline.html ./riscv-tests/benchmarks/dhrystone.riscv
+# 限制周期范围和最大指令数
+./risc-v-sim -e --ooo --pipeline-view=pipeline.html --pipeline-cycles=100-500 --pipeline-max=1000 program.elf
 ```
+
+### 流水线可视化
+
+`--pipeline-view=FILE` 会在模拟结束后生成 HTML 流水线时序图（同时生成同名 `.txt` 文本版）。
+
+- 每条已提交指令一行，横轴为周期，用色块标注 F(Fetch)/D(Decode)/I(Issue)/E(Execute)/W(Writeback)/C(Commit) 各阶段
+- 分支误预测指令标红，可从 instruction ID gap 看出 flush 规模
+- HTML 支持鼠标滚轮横滚、中键/Alt+左键拖拽平移
+- 文本版适合终端查看和程序化分析
+
+> 注意：当前仅记录已提交（committed）指令，被 flush 的推测指令不会出现在 trace 中。
 
 ## 项目结构
 

@@ -13,6 +13,7 @@
 #include "cpu/ooo/branch_predictor.h"
 #include "cpu/ooo/cache/blocking_cache.h"
 #include "system/syscall_handler.h"
+#include "system/pipeline_tracer.h"
 #include "common/cpu_interface.h"
 #include <array>
 #include <memory>
@@ -31,10 +32,11 @@ struct FetchedInstruction {
     uint64_t predicted_next_pc;
     bool has_branch_meta;
     BranchPredictor::BranchMeta branch_meta;
+    uint64_t fetch_cycle;  // 取指周期（用于流水线可视化）
 
     FetchedInstruction()
         : pc(0), instruction(0), is_compressed(false), predicted_next_pc(0),
-          has_branch_meta(false), branch_meta{} {}
+          has_branch_meta(false), branch_meta{}, fetch_cycle(0) {}
 };
 
 /**
@@ -217,6 +219,9 @@ struct CPUState {
     bool reservation_valid;        // LR 预留是否有效
     uint64_t reservation_addr;     // LR 预留地址
     
+    // 流水线可视化
+    PipelineTracer* pipeline_tracer = nullptr;
+
     // 调试支持
     uint64_t global_instruction_id;  // 全局指令序号
     

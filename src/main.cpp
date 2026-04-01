@@ -86,6 +86,9 @@ void printUsage(const char* programName) {
     std::cout << "  --fromhost-addr=ADDR         Override fromhost address (hex/dec)\n";
     std::cout << "  --isa=ISA                    Override enabled ISA extensions (e.g. RV64I_Zicsr)\n";
     std::cout << "  --stats-file=FILE            Dump detailed OOO stats to FILE\n";
+    std::cout << "  --pipeline-view=FILE         Generate HTML pipeline visualization\n";
+    std::cout << "  --pipeline-cycles=START-END  Limit pipeline view to cycle range\n";
+    std::cout << "  --pipeline-max=N             Max instructions in pipeline view (default: 2000)\n";
     std::cout << "  +signature=FILE              Spike-compatible signature file option\n";
     std::cout << "  +signature-granularity=N     Spike-compatible granularity option\n";
     std::cout << "\n";
@@ -155,6 +158,10 @@ int main(int argc, char* argv[]) {
     bool fromhostAddrSet = false;
     std::string isaString;
     std::string statsFile;
+    std::string pipelineViewFile;
+    uint64_t pipelineStartCycle = 0;
+    uint64_t pipelineEndCycle = UINT64_MAX;
+    size_t pipelineMaxInstructions = 2000;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -224,6 +231,20 @@ int main(int argc, char* argv[]) {
             isaString = arg.substr(6);
         } else if (arg.find("--stats-file=") == 0) {
             statsFile = arg.substr(13);
+        } else if (arg.find("--pipeline-view=") == 0) {
+            pipelineViewFile = arg.substr(16);
+        } else if (arg.find("--pipeline-cycles=") == 0) {
+            std::string range = arg.substr(18);
+            size_t dashPos = range.find('-');
+            if (dashPos != std::string::npos) {
+                pipelineStartCycle = std::stoull(range.substr(0, dashPos));
+                std::string endStr = range.substr(dashPos + 1);
+                if (!endStr.empty() && endStr != "end") {
+                    pipelineEndCycle = std::stoull(endStr);
+                }
+            }
+        } else if (arg.find("--pipeline-max=") == 0) {
+            pipelineMaxInstructions = std::stoull(arg.substr(15));
         } else if (filename.empty()) {
             filename = arg;
         }
@@ -253,7 +274,7 @@ int main(int argc, char* argv[]) {
         if (!isaString.empty()) {
             simulator.setEnabledExtensions(parseEnabledExtensions(isaString));
         }
-        
+
         // 配置调试系统
         if (debugMode) {
             auto& debugManager = DebugManager::getInstance();
@@ -326,6 +347,12 @@ int main(int argc, char* argv[]) {
             // TODO: 添加简单的测试程序
         }
         
+        // 启用流水线可视化（在程序加载后，确保 reset 不会清掉 tracer）
+        if (!pipelineViewFile.empty()) {
+            simulator.enablePipelineTracer(pipelineViewFile, pipelineStartCycle, pipelineEndCycle, pipelineMaxInstructions);
+            std::cout << "Pipeline view enabled, output: " << pipelineViewFile << "\n";
+        }
+
         if (debugMode) {
             std::cout << "Initial state:\n";
             simulator.dumpState();
@@ -436,6 +463,15 @@ int main(int argc, char* argv[]) {
                 } else {
                     std::cout << "Warning: failed to dump OOO stats to file: " << statsFile << "\n";
                 }
+            }
+        }
+
+        // 生成流水线可视化
+        if (!pipelineViewFile.empty()) {
+            if (simulator.writePipelineView()) {
+                std::cout << "Pipeline view generated: " << pipelineViewFile << "\n";
+            } else {
+                std::cerr << "Warning: failed to generate pipeline view\n";
             }
         }
 

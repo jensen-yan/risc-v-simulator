@@ -3,4 +3,5 @@ target_sources(risc-v-sim-lib PRIVATE
     elf_loader.cpp
     syscall_handler.cpp
     difftest.cpp
+    pipeline_tracer.cpp
 )

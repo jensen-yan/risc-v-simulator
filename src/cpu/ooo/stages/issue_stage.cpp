@@ -99,6 +99,7 @@ void IssueStage::execute(CPUState& state) {
             LOGT(ISSUE, "issued fp-int inst=%" PRId64 " to rs[%d]",
                  dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
             state.perf_counters.increment(PerfCounterId::ISSUED_INSTRUCTIONS);
+            dispatchable_entry->set_issue_cycle(state.cycle_count);
             dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
             return;
         } else {
@@ -124,6 +125,7 @@ void IssueStage::execute(CPUState& state) {
             LOGT(ISSUE, "issued fp inst=%" PRId64 " to rs[%d]",
                  dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
             state.perf_counters.increment(PerfCounterId::ISSUED_INSTRUCTIONS);
+            dispatchable_entry->set_issue_cycle(state.cycle_count);
             dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
             return;
         }
@@ -160,6 +162,7 @@ void IssueStage::execute(CPUState& state) {
     state.perf_counters.increment(PerfCounterId::ISSUED_INSTRUCTIONS);
     
     // 更新指令状态，标记为已发射到保留站
+    dispatchable_entry->set_issue_cycle(state.cycle_count);
     dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
 }
 

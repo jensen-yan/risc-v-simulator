@@ -363,4 +363,40 @@ bool Simulator::loadElfProgram(const std::string& filename) {
     }
 }
 
+void Simulator::enablePipelineTracer(const std::string& output_path,
+                                     uint64_t start_cycle,
+                                     uint64_t end_cycle,
+                                     size_t max_instructions) {
+    if (cpuType_ != CpuType::OUT_OF_ORDER) {
+        LOGW(SYSTEM, "pipeline tracer only available for OOO CPU");
+        return;
+    }
+
+    PipelineTracer::Config config;
+    config.start_cycle = start_cycle;
+    config.end_cycle = end_cycle;
+    config.max_instructions = max_instructions;
+
+    pipeline_tracer_ = std::make_unique<PipelineTracer>(config);
+    pipeline_view_path_ = output_path;
+
+    // cpu_ 实际上是 OutOfOrderCpuAdapter 包装了 OutOfOrderCPU
+    // 通过 ICpuInterface 的 setPipelineTracer 方法设置
+    cpu_->setPipelineTracer(pipeline_tracer_.get());
+}
+
+bool Simulator::writePipelineView() const {
+    if (!pipeline_tracer_ || pipeline_view_path_.empty()) return false;
+    // 同时生成 .txt 文本版
+    std::string txt_path = pipeline_view_path_;
+    auto dot = txt_path.rfind('.');
+    if (dot != std::string::npos) {
+        txt_path = txt_path.substr(0, dot) + ".txt";
+    } else {
+        txt_path += ".txt";
+    }
+    pipeline_tracer_->generateText(txt_path);
+    return pipeline_tracer_->generateHTML(pipeline_view_path_);
+}
+
 } // namespace riscv

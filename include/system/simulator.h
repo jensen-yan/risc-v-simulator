@@ -3,6 +3,7 @@
 #include "common/cpu_interface.h"
 #include "core/memory.h"
 #include "system/elf_loader.h"
+#include "system/pipeline_tracer.h"
 #include <string>
 #include <memory>
 
@@ -49,6 +50,13 @@ public:
     bool isHaltedByCycleLimit() const { return halted_by_cycle_limit_; }
     void setMaxInOrderInstructions(uint64_t limit) { max_in_order_instructions_ = limit; }
     void setMaxOutOfOrderCycles(uint64_t limit) { max_out_of_order_cycles_ = limit; }
+
+    // 流水线可视化
+    void enablePipelineTracer(const std::string& output_path,
+                              uint64_t start_cycle = 0,
+                              uint64_t end_cycle = UINT64_MAX,
+                              size_t max_instructions = 2000);
+    bool writePipelineView() const;
     uint64_t getMaxInOrderInstructions() const { return max_in_order_instructions_; }
     uint64_t getMaxOutOfOrderCycles() const { return max_out_of_order_cycles_; }
     
@@ -86,6 +94,10 @@ private:
     
     // DiffTest组件（仅乱序CPU模式下使用）
     std::unique_ptr<DiffTest> difftest_;
+
+    // 流水线可视化
+    std::unique_ptr<PipelineTracer> pipeline_tracer_;
+    std::string pipeline_view_path_;
 
     bool halted_by_instruction_limit_ = false;
     bool halted_by_cycle_limit_ = false;

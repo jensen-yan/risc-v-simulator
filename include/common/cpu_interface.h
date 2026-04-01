@@ -8,6 +8,7 @@ namespace riscv {
 
 // 前向声明
 class Memory;
+class PipelineTracer;
 
 /**
  * CPU抽象接口
@@ -64,6 +65,9 @@ public:
     virtual void setDiffTest(class DiffTest* difftest) {} // 设置DiffTest引用
     virtual void performDiffTestWithCommittedPC(uint64_t committed_pc) {}
     virtual bool isDiffTestEnabled() const { return false; }
+
+    // 流水线可视化（默认空实现）
+    virtual void setPipelineTracer(PipelineTracer* tracer) { (void)tracer; }
 
     // 性能统计（默认返回空）
     virtual StatsList getStats() const { return {}; }

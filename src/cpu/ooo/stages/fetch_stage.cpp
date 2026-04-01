@@ -144,6 +144,9 @@ void FetchStage::execute(CPUState& state) {
                 (fetched.is_compressed ? "compressed" : "normal"),
                 fetched.predicted_next_pc);
             
+            // 记录取指周期（在FetchedInstruction上暂存，decode阶段会传递给DynamicInst）
+            fetched.fetch_cycle = state.cycle_count;
+
             state.fetch_buffer.push(fetched);
             state.perf_counters.increment(PerfCounterId::FETCHED_INSTRUCTIONS);
             

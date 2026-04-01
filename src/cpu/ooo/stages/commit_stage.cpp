@@ -110,22 +110,67 @@ void CommitStage::execute(CPUState& state) {
         
         const auto& committed_inst = commit_result.instruction;
         const auto& decoded_info = committed_inst->get_decoded_info();
-        
+        auto make_flush_summary = [&](FlushReason reason) {
+            PipelineTracer::FlushSummary summary;
+            summary.triggered = true;
+            switch (reason) {
+                case FlushReason::BranchMispredict:
+                    summary.reason = "branch_mispredict";
+                    break;
+                case FlushReason::UnconditionalRedirect:
+                    summary.reason = "unconditional_redirect";
+                    break;
+                case FlushReason::Trap:
+                    summary.reason = "trap";
+                    break;
+                case FlushReason::Mret:
+                    summary.reason = "mret";
+                    break;
+                case FlushReason::FenceI:
+                    summary.reason = "fencei";
+                    break;
+                case FlushReason::Exception:
+                    summary.reason = "exception";
+                    break;
+                case FlushReason::Other:
+                default:
+                    summary.reason = "other";
+                    break;
+            }
+            summary.flushed_rob_entries =
+                static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES - state.reorder_buffer->get_free_entry_count());
+            summary.fetch_buffer_dropped = state.fetch_buffer.size();
+            return summary;
+        };
+        PipelineTracer::FlushSummary flush_summary;
+
+        committed_inst->set_retire_cycle(state.cycle_count);
+
         // 检查是否有异常
         if (committed_inst->has_exception()) {
+            if (state.pipeline_tracer) {
+                state.pipeline_tracer->recordCommittedInstruction(committed_inst);
+            }
             LOGE(COMMIT, "commit exceptional instruction: %s", committed_inst->get_exception_message().c_str());
             handle_exception(state, committed_inst->get_exception_message(), committed_inst->get_pc());
             break;
         }
 
         if (committed_inst->has_trap()) {
+            flush_summary = make_flush_summary(FlushReason::Trap);
             state.instruction_count++;
             state.perf_counters.increment(PerfCounterId::INSTRUCTIONS_RETIRED);
             enter_machine_trap(state,
                                committed_inst->get_pc(),
                                committed_inst->get_trap_cause(),
                                committed_inst->get_trap_tval());
+            flush_summary.has_redirect_pc = true;
+            flush_summary.redirect_pc = state.pc;
             syncBasicPerfCounters(state);
+
+            if (state.pipeline_tracer) {
+                state.pipeline_tracer->recordCommittedInstruction(committed_inst, flush_summary);
+            }
 
             if (state.cpu_interface && state.cpu_interface->isDiffTestEnabled()) {
                 LOGT(DIFFTEST, "inst=%" PRId64 " [COMMIT_TRACK] commit count=%" PRId64,
@@ -375,6 +420,9 @@ void CommitStage::execute(CPUState& state) {
                 flush_reason = (decoded_info.opcode == Opcode::BRANCH)
                                    ? FlushReason::BranchMispredict
                                    : FlushReason::UnconditionalRedirect;
+                flush_summary = make_flush_summary(flush_reason);
+                flush_summary.has_redirect_pc = true;
+                flush_summary.redirect_pc = redirect_pc;
                 LOGT(COMMIT,
                      "inst=%" PRId64 " control-flow mispredict: pc=0x%" PRIx64
                      " predicted_next=0x%" PRIx64 " actual_next=0x%" PRIx64 " -> redirect+flush",
@@ -402,17 +450,40 @@ void CommitStage::execute(CPUState& state) {
                      csr_result.read_value, csr_result.write_value);
             } else if (InstructionExecutor::isSystemCall(sys_inst)) {
                 // ECALL
+                const bool enters_trap = csr::machineTrapVectorBase(state.csr_registers) != 0;
+                if (enters_trap) {
+                    flush_summary = make_flush_summary(FlushReason::Trap);
+                }
                 should_stop_commit = handle_ecall(state, committed_inst->get_pc());
+                if (enters_trap && should_stop_commit) {
+                    flush_summary.has_redirect_pc = true;
+                    flush_summary.redirect_pc = state.pc;
+                }
             } else if (InstructionExecutor::isBreakpoint(sys_inst)) {
                 // EBREAK
+                flush_summary = make_flush_summary(FlushReason::Trap);
                 should_stop_commit = handle_ebreak(state, committed_inst->get_pc());
+                if (should_stop_commit) {
+                    flush_summary.has_redirect_pc = true;
+                    flush_summary.redirect_pc = state.pc;
+                }
             } else if (InstructionExecutor::isMachineReturn(sys_inst)) {
                 // MRET
+                flush_summary = make_flush_summary(FlushReason::Mret);
                 should_stop_commit = handle_mret(state);
+                if (should_stop_commit) {
+                    flush_summary.has_redirect_pc = true;
+                    flush_summary.redirect_pc = state.pc;
+                }
             }
         } else if (decoded_info.opcode == Opcode::MISC_MEM &&
                    static_cast<uint8_t>(decoded_info.funct3) == kFenceIFunct3) {
+            flush_summary = make_flush_summary(FlushReason::FenceI);
             should_stop_commit = handle_fencei(state, committed_inst->get_pc(), decoded_info.is_compressed);
+            if (should_stop_commit) {
+                flush_summary.has_redirect_pc = true;
+                flush_summary.redirect_pc = state.pc;
+            }
         }
 
         // 提交后同步基础性能计数器，保证CSR读值与顺序核一致。
@@ -424,6 +495,10 @@ void CommitStage::execute(CPUState& state) {
                 committed_inst->get_instruction_id(), state.instruction_count);
             state.cpu_interface->performDiffTestWithCommittedPC(committed_inst->get_pc());
             LOGT(COMMIT, "run difftest comparison");
+        }
+
+        if (state.pipeline_tracer) {
+            state.pipeline_tracer->recordCommittedInstruction(committed_inst, flush_summary);
         }
 
         if (need_redirect_flush) {

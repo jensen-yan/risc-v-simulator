@@ -65,7 +65,8 @@ void ExecuteStage::execute(CPUState& state) {
                 dispatch_result.instruction->get_instruction_id(), unit_type_str, unit->remaining_cycles);
 
             state.perf_counters.increment(PerfCounterId::DISPATCHED_INSTRUCTIONS);
-            
+            dispatch_result.instruction->set_execute_cycle(state.cycle_count);
+
             // 开始执行指令语义
             OOOExecuteSemantics::executeInstruction(*unit, dispatch_result.instruction, state);
         } else {
@@ -254,6 +255,8 @@ ExecutionUnit* ExecuteStage::get_available_unit(ExecutionUnitType type, CPUState
 }
 
 void ExecuteStage::complete_execution_unit(ExecutionUnit& unit, ExecutionUnitType unit_type, size_t unit_index, CPUState& state) {
+    unit.instruction->set_complete_cycle(state.cycle_count);
+
     if (unit.has_exception) {
         unit.instruction->set_exception(unit.exception_msg);
     } else {

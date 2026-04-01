@@ -99,6 +99,8 @@ public:
         return cpu_->dumpStatsToFile(path);
     }
     
+    void setPipelineTracer(PipelineTracer* tracer) override { cpu_->setPipelineTracer(tracer); }
+
     // 乱序执行CPU特有的功能
     OutOfOrderCPU* getOooCpu() { return cpu_.get(); }
 };

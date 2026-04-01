@@ -221,6 +221,70 @@ TEST_F(OutOfOrderCPUTest, ResetStatsClearsCountersButPreservesArchitecturalState
     }
 }
 
+TEST_F(OutOfOrderCPUTest, FetchStageFetchesTwoSequentialInstructionsPerCycle) {
+    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
+    writeInstruction(0x4, createITypeInstruction(2, 0, 0x0, 2, 0x13));
+    writeInstruction(0x8, createITypeInstruction(3, 0, 0x0, 3, 0x13));
+    writeInstruction(0xC, createECallInstruction());
+
+    auto& state = const_cast<CPUState&>(cpu->getCPUState());
+    state.l1i_cache.reset();
+    state.l1d_cache.reset();
+
+    cpu->setPC(0x0);
+    cpu->step();
+
+    EXPECT_EQ(state.fetch_buffer.size(), 2u) << "第一拍应取两条顺序指令";
+    EXPECT_EQ(cpu->getPC(), 0x8u) << "两条32位顺序指令后，下一取指PC应前进8字节";
+
+    auto findStat = [&](const std::string& name) -> uint64_t {
+        for (const auto& entry : cpu->getStats()) {
+            if (entry.name == name) {
+                return entry.value;
+            }
+        }
+        return 0;
+    };
+
+    EXPECT_EQ(findStat("cpu.fetch.fetched"), 2u);
+    EXPECT_EQ(findStat("cpu.fetch.utilized_slots"), 2u);
+    EXPECT_EQ(findStat("cpu.fetch.slots"), 2u);
+}
+
+TEST_F(OutOfOrderCPUTest, DecodeStageDecodesTwoInstructionsPerCycleWhenResourcesAllow) {
+    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
+    writeInstruction(0x4, createITypeInstruction(2, 0, 0x0, 2, 0x13));
+    writeInstruction(0x8, createITypeInstruction(3, 0, 0x0, 3, 0x13));
+    writeInstruction(0xC, createITypeInstruction(4, 0, 0x0, 4, 0x13));
+    writeInstruction(0x10, createECallInstruction());
+
+    auto& state = const_cast<CPUState&>(cpu->getCPUState());
+    state.l1i_cache.reset();
+    state.l1d_cache.reset();
+
+    cpu->setPC(0x0);
+    cpu->step();
+    cpu->step();
+
+    ASSERT_NE(state.reorder_buffer, nullptr);
+    EXPECT_EQ(state.reorder_buffer->get_free_entry_count(),
+              static_cast<size_t>(ReorderBuffer::MAX_ROB_ENTRIES - 2))
+        << "第二拍应完成两条指令译码并分配到ROB";
+
+    auto findStat = [&](const std::string& name) -> uint64_t {
+        for (const auto& entry : cpu->getStats()) {
+            if (entry.name == name) {
+                return entry.value;
+            }
+        }
+        return 0;
+    };
+
+    EXPECT_EQ(findStat("cpu.decode.decoded"), 2u);
+    EXPECT_EQ(findStat("cpu.decode.utilized_slots"), 2u);
+    EXPECT_EQ(findStat("cpu.decode.slots"), 4u);
+}
+
 TEST_F(OutOfOrderCPUTest, MExtensionMulInstruction) {
     // ADDI x1, x0, 6
     // ADDI x2, x0, 7

@@ -62,5 +62,14 @@ struct OOOStatistics {
                      rs_full_stalls(0), rename_stalls(0) {}
 };
 
+struct OOOPipelineConfig {
+    static constexpr size_t FETCH_WIDTH = 2;
+    static constexpr size_t DECODE_WIDTH = 2;
+    static constexpr size_t ISSUE_WIDTH = 2;
+    static constexpr size_t DISPATCH_WIDTH = 2;
+    static constexpr size_t COMMIT_WIDTH = 2;
+    static constexpr size_t FETCH_BUFFER_SIZE = 8;
+};
+
 
 } // namespace riscv

@@ -21,7 +21,7 @@ public:
     const char* get_stage_name() const override { return "FETCH"; }
 
 private:
-    static constexpr size_t MAX_FETCH_BUFFER_SIZE = 4;  // 取指缓冲区最大大小
+    static constexpr size_t MAX_FETCH_BUFFER_SIZE = OOOPipelineConfig::FETCH_BUFFER_SIZE;
 };
 
 } // namespace riscv 

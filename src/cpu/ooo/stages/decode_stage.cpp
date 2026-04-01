@@ -11,64 +11,62 @@ DecodeStage::DecodeStage() {
 }
 
 void DecodeStage::execute(CPUState& state) {
-    // 如果取指缓冲区为空，无法译码
+    state.perf_counters.increment(PerfCounterId::DECODE_SLOTS, OOOPipelineConfig::DECODE_WIDTH);
+
     if (state.fetch_buffer.empty()) {
         LOGT(DECODE, "fetch buffer empty, skip decode");
         return;
     }
-    
-    // 如果ROB已满，无法译码
-    if (!state.reorder_buffer->has_free_entry()) {
-        LOGT(DECODE, "rob full, decode stalled");
-        state.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
-        return;
-    }
-    
-    // 取出一条指令进行译码
-    FetchedInstruction fetched = state.fetch_buffer.front();
-    state.fetch_buffer.pop();
-    
-    // 分配全局指令序号
-    uint64_t instruction_id = ++state.global_instruction_id;
-    
-    // 解码指令
-    DecodedInstruction decoded;
-    if (fetched.is_compressed) {
-        decoded = state.decoder.decodeCompressed(static_cast<uint16_t>(fetched.instruction), state.enabled_extensions);
-        LOGT(DECODE, "compressed instruction decoded");
-    } else {
-        decoded = state.decoder.decode(fetched.instruction, state.enabled_extensions);
-        LOGT(DECODE, "normal instruction decoded");
-    }
-    
-    // 分配ROB表项 (使用新的DynamicInst接口)
-    DynamicInstPtr dynamic_inst = state.reorder_buffer->allocate_entry(decoded, fetched.pc, instruction_id);
-    if (!dynamic_inst) {
-        // ROB分配失败，放回取指缓冲区
-        state.fetch_buffer.push(fetched);
-        LOGT(DECODE, "rob allocation failed, push instruction back to fetch buffer");
-        state.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
-        return;
+
+    size_t decoded_this_cycle = 0;
+
+    for (size_t slot = 0; slot < OOOPipelineConfig::DECODE_WIDTH; ++slot) {
+        if (state.fetch_buffer.empty()) {
+            break;
+        }
+        if (!state.reorder_buffer->has_free_entry()) {
+            if (decoded_this_cycle == 0) {
+                LOGT(DECODE, "rob full, decode stalled");
+                state.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
+            }
+            break;
+        }
+
+        FetchedInstruction fetched = state.fetch_buffer.front();
+        state.fetch_buffer.pop();
+
+        uint64_t instruction_id = ++state.global_instruction_id;
+
+        DecodedInstruction decoded;
+        if (fetched.is_compressed) {
+            decoded = state.decoder.decodeCompressed(static_cast<uint16_t>(fetched.instruction), state.enabled_extensions);
+            LOGT(DECODE, "slot=%zu compressed instruction decoded", slot);
+        } else {
+            decoded = state.decoder.decode(fetched.instruction, state.enabled_extensions);
+            LOGT(DECODE, "slot=%zu normal instruction decoded", slot);
+        }
+
+        DynamicInstPtr dynamic_inst = state.reorder_buffer->allocate_entry(decoded, fetched.pc, instruction_id);
+        if (!dynamic_inst) {
+            state.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
+            break;
+        }
+
+        state.perf_counters.increment(PerfCounterId::DECODED_INSTRUCTIONS);
+        decoded_this_cycle++;
+
+        dynamic_inst->set_fetch_cycle(fetched.fetch_cycle);
+        dynamic_inst->set_decode_cycle(state.cycle_count);
+        dynamic_inst->set_predicted_next_pc(fetched.predicted_next_pc);
+        if (fetched.has_branch_meta) {
+            dynamic_inst->set_branch_predict_meta(fetched.branch_meta);
+        }
+
+        LOGT(DECODE, "slot=%zu allocated rob[%d], pc=0x%" PRIx64 ", inst=%" PRId64,
+             slot, dynamic_inst->get_rob_entry(), fetched.pc, instruction_id);
     }
 
-    state.perf_counters.increment(PerfCounterId::DECODED_INSTRUCTIONS);
-
-    // 记录流水线各阶段周期时间戳
-    dynamic_inst->set_fetch_cycle(fetched.fetch_cycle);
-    dynamic_inst->set_decode_cycle(state.cycle_count);
-
-    // 记录Fetch阶段生成的预测next PC，用于Commit阶段判断是否需要redirect/flush。
-    dynamic_inst->set_predicted_next_pc(fetched.predicted_next_pc);
-    if (fetched.has_branch_meta) {
-        dynamic_inst->set_branch_predict_meta(fetched.branch_meta);
-    }
-    
-    LOGT(DECODE, "allocated rob[%d], pc=0x%" PRIx64 ", inst=%" PRId64,
-        dynamic_inst->get_rob_entry(), fetched.pc, instruction_id);
-    
-    // 继续到发射阶段的处理将在issue_stage中完成
-    // 这里我们需要一个中间缓冲区来存储译码后的指令
-    // 简化实现：直接在issue_stage中处理
+    state.perf_counters.increment(PerfCounterId::DECODE_UTILIZED_SLOTS, decoded_this_cycle);
 }
 
 void DecodeStage::flush() {

@@ -12,7 +12,7 @@ RISCV_GCC="${RISCV_GCC:-riscv64-unknown-elf-gcc}"
 RISCV_OBJDUMP="${RISCV_OBJDUMP:-riscv64-unknown-elf-objdump}"
 RISCV_MARCH="${RISCV_MARCH:-rv64gc}"
 RISCV_MABI="${RISCV_MABI:-lp64d}"
-ITERATIONS="${ITERATIONS:-2000}"
+ITERATIONS="${ITERATIONS:-10}"
 
 usage() {
   cat <<EOF

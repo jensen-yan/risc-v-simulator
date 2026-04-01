@@ -21,7 +21,7 @@ typedef size_t ee_size_t;
 typedef double secs_ret;
 
 #ifndef ITERATIONS
-#define ITERATIONS 2000
+#define ITERATIONS 10
 #endif
 
 #ifndef MULTITHREAD
@@ -38,6 +38,15 @@ typedef double secs_ret;
 
 #ifndef PROFILE_RUN
 #define PROFILE_RUN 0
+#endif
+
+/*
+ * baremetal CoreMark 没有命令行参数入口，必须使用 volatile seed。
+ * 否则会错误退化到 SEED_ARG，main(0, 0) 下 iterations 恒为 0，
+ * 进而触发 CoreMark 的自动校准长跑路径。
+ */
+#ifndef SEED_METHOD
+#define SEED_METHOD SEED_VOLATILE
 #endif
 
 #define HAS_FLOAT 1

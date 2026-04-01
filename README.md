@@ -93,7 +93,7 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 
 ## 文档
 
-- 架构设计（精简）：`docs/代码架构文档.md`
+- 架构设计（精简）：`ARCHITECTURE.md`
 - 需求与范围（精简）：`docs/requirements.md`
 - 项目计划（精简）：`docs/plans.md`
 - 任务与重构记录：`tasks/`

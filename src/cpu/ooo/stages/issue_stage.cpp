@@ -185,6 +185,7 @@ void IssueStage::execute(CPUState& state) {
 
                 LOGT(ISSUE, "issued slot=%zu fp inst=%" PRId64 " to rs[%d]",
                      slot, dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
+                state.store_buffer->publish_ready_store(dispatchable_entry);
                 issued = true;
             }
         } else {
@@ -215,6 +216,7 @@ void IssueStage::execute(CPUState& state) {
 
             LOGT(ISSUE, "issued slot=%zu inst=%" PRId64 " to rs[%d]",
                  slot, dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
+            state.store_buffer->publish_ready_store(dispatchable_entry);
             issued = true;
         }
 

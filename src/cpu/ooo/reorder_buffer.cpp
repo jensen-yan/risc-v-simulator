@@ -409,6 +409,10 @@ ReorderBuffer::StoreHazardInfo ReorderBuffer::get_earlier_store_hazard_info(
         }
 
         if (rangesOverlap(load_address, load_size, memory_info.memory_address, memory_info.memory_size)) {
+            if (memory_info.store_buffer_published) {
+                info.instruction = nullptr;
+                continue;
+            }
             info.kind = StoreHazardKind::Overlap;
             return info;
         }

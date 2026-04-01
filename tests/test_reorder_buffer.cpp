@@ -332,6 +332,34 @@ TEST_F(ReorderBufferTest, UnknownOrOverlappingOlderStoreStillBlocksLoadHazardChe
               ReorderBuffer::StoreHazardKind::Overlap);
 }
 
+TEST_F(ReorderBufferTest, PublishedOverlappingOlderStoreDoesNotBlockLoadHazardCheck) {
+    DecodedInstruction store_inst = createInstruction(InstructionType::S_TYPE, 0, 1, 2);
+    store_inst.opcode = Opcode::STORE;
+    store_inst.memory_access_size = 4;
+    auto older_store = rob.allocate_entry(store_inst, 0x1000, getNextInstructionId());
+    ASSERT_TRUE(older_store != nullptr);
+
+    auto& store_memory = older_store->get_memory_info();
+    store_memory.is_memory_op = true;
+    store_memory.is_store = true;
+    store_memory.address_ready = true;
+    store_memory.memory_address = 0x240;
+    store_memory.memory_size = 4;
+    store_memory.memory_value = 0x12345678;
+    store_memory.store_buffer_published = true;
+
+    DecodedInstruction load_inst = createInstruction(InstructionType::I_TYPE, 3, 4, 0);
+    load_inst.opcode = Opcode::LOAD;
+    load_inst.memory_access_size = 4;
+    auto younger_load = rob.allocate_entry(load_inst, 0x1004, getNextInstructionId());
+    ASSERT_TRUE(younger_load != nullptr);
+
+    EXPECT_FALSE(rob.has_earlier_store_hazard(younger_load->get_instruction_id(), 0x240, 4))
+        << "已经对 store buffer 可见的更老 store，应交给 forwarding 路径处理";
+    EXPECT_EQ(rob.get_earlier_store_hazard_kind(younger_load->get_instruction_id(), 0x240, 4),
+              ReorderBuffer::StoreHazardKind::None);
+}
+
 TEST_F(ReorderBufferTest, EarlierAmoIsReportedAsDistinctLoadHazardKind) {
     DecodedInstruction amo_inst = createInstruction(InstructionType::R_TYPE, 1, 2, 3);
     amo_inst.opcode = Opcode::AMO;

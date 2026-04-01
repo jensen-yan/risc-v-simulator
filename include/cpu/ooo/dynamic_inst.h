@@ -79,6 +79,7 @@ public:
         uint64_t memory_value;                 // 内存值
         uint8_t memory_size;                   // 访问大小（字节）
         bool address_ready;                    // 地址是否准备好
+        bool store_buffer_published;           // store 是否已经对 younger load 可见
         bool store_forwarded;                  // 是否通过Store-to-Load转发
         uint32_t replay_count;                 // Load replay次数（用于分布统计）
         uint32_t replay_host_comm_count;       // host-comm 串行化导致的 replay 次数
@@ -95,7 +96,7 @@ public:
         
         MemoryInfo() : is_memory_op(false), is_load(false), is_store(false),
                       memory_address(0), memory_value(0), memory_size(0),
-                      address_ready(false), store_forwarded(false), replay_count(0),
+                      address_ready(false), store_buffer_published(false), store_forwarded(false), replay_count(0),
                       replay_host_comm_count(0), replay_rob_store_amo_count(0),
                       replay_rob_store_addr_unknown_count(0), replay_rob_store_overlap_count(0),
                       replay_store_buffer_overlap_count(0), caused_forwarded_full_count(0),

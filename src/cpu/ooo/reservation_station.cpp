@@ -1,4 +1,5 @@
 #include "cpu/ooo/reservation_station.h"
+#include "cpu/ooo/store_buffer.h"
 #include "common/debug_types.h"
 #include <climits>
 #include <algorithm>
@@ -178,7 +179,7 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
     return results;
 }
 
-void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry) {
+void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry, StoreBuffer* store_buffer) {
     if (!cdb_entry.valid || !cdb_entry.instruction) return;
     
     auto phys_dest = cdb_entry.instruction->get_physical_dest();
@@ -199,6 +200,10 @@ void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry) {
             if (!inst->is_src2_ready() && inst->get_physical_src2() == phys_dest) {
                 inst->set_src2_ready(true, result);
                 LOGT(RS, "rs[%d] src2 ready: p%d = 0x%" PRIx64, i, phys_dest, result);
+            }
+
+            if (store_buffer) {
+                store_buffer->publish_ready_store(inst);
             }
         }
     }

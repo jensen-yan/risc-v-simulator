@@ -11,21 +11,58 @@ StoreBuffer::StoreBuffer() : next_allocate_index(0) {
     }
 }
 
+int StoreBuffer::find_entry_for_instruction(const DynamicInstPtr& instruction) const {
+    if (!instruction) {
+        return -1;
+    }
+
+    for (int i = 0; i < MAX_ENTRIES; ++i) {
+        if (entries[i].valid && entries[i].instruction == instruction) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64_t value, uint8_t size) {
+    const int existing_index = find_entry_for_instruction(instruction);
+    const int target_index = existing_index >= 0 ? existing_index : next_allocate_index;
+
     // 找到下一个可用的条目（可能覆盖旧条目）
-    StoreBufferEntry& entry = entries[next_allocate_index];
-    
+    StoreBufferEntry& entry = entries[target_index];
+
     entry.valid = true;
     entry.instruction = instruction;
     entry.address = address;
     entry.value = value;
     entry.size = size;
-    
+
+    if (instruction) {
+        instruction->get_memory_info().store_buffer_published = true;
+    }
+
     LOGT(EXECUTE, "store buffer add[%d]: addr=0x%" PRIx64 ", value=0x%" PRIx64 ", size=%d, inst=%" PRId64 ", pc=0x%" PRIx64,
-            next_allocate_index, address, value, size, instruction->get_instruction_id(), instruction->get_pc());
-    
-    // 移动到下一个分配位置（循环）
-    next_allocate_index = (next_allocate_index + 1) % MAX_ENTRIES;
+            target_index, address, value, size, instruction->get_instruction_id(), instruction->get_pc());
+
+    if (existing_index < 0) {
+        // 移动到下一个分配位置（循环）
+        next_allocate_index = (next_allocate_index + 1) % MAX_ENTRIES;
+    }
+}
+
+bool StoreBuffer::publish_ready_store(DynamicInstPtr instruction) {
+    if (!instruction || !instruction->is_store_instruction()) {
+        return false;
+    }
+
+    auto& memory_info = instruction->get_memory_info();
+    if (!memory_info.is_store || !memory_info.address_ready || memory_info.memory_size == 0 ||
+        !instruction->is_src2_ready()) {
+        return false;
+    }
+
+    add_store(instruction, memory_info.memory_address, memory_info.memory_value, memory_info.memory_size);
+    return true;
 }
 
 bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value) const {
@@ -172,6 +209,7 @@ void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
         if (entries[i].valid && entries[i].instruction && entries[i].instruction->get_instruction_id() <= instruction_id) {
             LOGT(EXECUTE, "store buffer retire[%d]: inst=%" PRId64 ", addr=0x%" PRIx64,
                     i, entries[i].instruction->get_instruction_id(), entries[i].address);
+            entries[i].instruction->get_memory_info().store_buffer_published = false;
             entries[i].valid = false;
             entries[i].instruction = nullptr; // 清除指令指针
             retired_count++;
@@ -190,6 +228,7 @@ void StoreBuffer::flush_after(uint64_t instruction_id) {
             entry.instruction->get_instruction_id() > instruction_id) {
             LOGT(EXECUTE, "store buffer flush younger: inst=%" PRId64 ", addr=0x%" PRIx64,
                  entry.instruction->get_instruction_id(), entry.address);
+            entry.instruction->get_memory_info().store_buffer_published = false;
             entry.valid = false;
             entry.instruction = nullptr;
             flushed_count++;
@@ -206,6 +245,9 @@ void StoreBuffer::flush() {
     LOGT(EXECUTE, "store buffer flush: clear all entries");
     
     for (auto& entry : entries) {
+        if (entry.valid && entry.instruction) {
+            entry.instruction->get_memory_info().store_buffer_published = false;
+        }
         entry.valid = false;
         entry.instruction = nullptr; // 清除指令指针
     }

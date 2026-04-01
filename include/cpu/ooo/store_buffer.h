@@ -42,8 +42,11 @@ public:
 
     StoreBuffer();
 
-    // 添加Store条目
+    // 添加或更新Store条目；同一条动态指令重复发布时保持幂等
     void add_store(DynamicInstPtr instruction, uint64_t address, uint64_t value, uint8_t size);
+
+    // 当store地址和值都已ready时，提前向 younger load 暴露 forwarding 可见性
+    bool publish_ready_store(DynamicInstPtr instruction);
 
     // 查找匹配的Store (返回是否找到，如果找到则通过result_value返回值)
     bool forward_load(uint64_t address, uint8_t size, uint64_t& result_value) const;
@@ -79,6 +82,8 @@ private:
     int next_allocate_index; // 下一个分配位置（循环使用）
     
 private:
+    int find_entry_for_instruction(const DynamicInstPtr& instruction) const;
+
     // 检查两个内存访问是否有重叠
     bool addresses_overlap(uint64_t addr1, uint8_t size1, uint64_t addr2, uint8_t size2) const;
     

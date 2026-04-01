@@ -31,7 +31,7 @@ void WritebackStage::execute(CPUState& state) {
         state.perf_counters.increment(PerfCounterId::WRITEBACKS);
         
         // 更新保留站中的操作数
-        state.reservation_station->update_operands(cdb_entry);
+        state.reservation_station->update_operands(cdb_entry, state.store_buffer.get());
         
         // 更新寄存器重命名映射
         state.register_rename->update_physical_register(phys_dest, result, rob_entry);

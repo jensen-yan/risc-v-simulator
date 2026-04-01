@@ -290,3 +290,30 @@ TEST_F(StoreBufferTest, OccupiedEntryCountTracksValidStores) {
     store_buffer->flush();
     EXPECT_EQ(store_buffer->get_occupied_entry_count(), 0u);
 }
+
+TEST_F(StoreBufferTest, RepublishSameStoreUpdatesInPlaceWithoutGrowingOccupancy) {
+    const uint32_t pc = 0x80000000;
+    auto store = createTestDynamicInst(1, pc);
+
+    auto& memory_info = store->get_memory_info();
+    memory_info.is_memory_op = true;
+    memory_info.is_store = true;
+    memory_info.address_ready = true;
+    memory_info.memory_address = 0x1000;
+    memory_info.memory_size = 4;
+    memory_info.memory_value = 0x11111111;
+    store->set_src2_ready(true, 0x11111111);
+
+    EXPECT_TRUE(store_buffer->publish_ready_store(store));
+    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 1u);
+    EXPECT_TRUE(memory_info.store_buffer_published);
+
+    memory_info.memory_value = 0x22222222;
+    store->set_src2_ready(true, 0x22222222);
+    EXPECT_TRUE(store_buffer->publish_ready_store(store));
+    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 1u);
+
+    uint64_t load_result = 0;
+    EXPECT_TRUE(store_buffer->forward_load(0x1000, 4, load_result));
+    EXPECT_EQ(load_result, 0x22222222u);
+}

@@ -155,7 +155,7 @@ TEST_F(ReservationStationTest, OperandDependency) {
     
     CommonDataBusEntry cdb_entry(mock_inst);
     
-    rs.update_operands(cdb_entry);
+    rs.update_operands(cdb_entry, nullptr);
     
     // 现在应该可以调度了
     dispatch_result = rs.dispatch_instruction();

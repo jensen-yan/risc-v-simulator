@@ -65,6 +65,8 @@ TEST_F(StoreBufferTest, ForwardingExactMatch) {
 
     EXPECT_TRUE(forwarded);
     EXPECT_EQ(load_result, store_value);
+    EXPECT_EQ(store_buffer->classify_load_forwarding(address, size, load_result, instruction_id + 1),
+              StoreBuffer::LoadForwardingKind::FullMatch);
 }
 
 // 测试Store-to-Load Forwarding - 字节访问
@@ -101,6 +103,9 @@ TEST_F(StoreBufferTest, ForwardingByteAccess) {
     forwarded = store_buffer->forward_load(address + 3, 1, load_result);
     EXPECT_TRUE(forwarded);
     EXPECT_EQ(load_result, 0x12);  // 最高字节
+
+    EXPECT_EQ(store_buffer->classify_load_forwarding(address + 1, 1, load_result, instruction_id + 1),
+              StoreBuffer::LoadForwardingKind::PartialMatch);
 }
 
 // 测试Store-to-Load Forwarding - 不匹配
@@ -264,4 +269,24 @@ TEST_F(StoreBufferTest, OverlapNoForwarding) {
 
     // 应该无法转发，因为Load需要的数据超出了Store的范围
     EXPECT_FALSE(forwarded);
+    EXPECT_EQ(store_buffer->classify_load_forwarding(store_address, 4, load_result, instruction_id + 1),
+              StoreBuffer::LoadForwardingKind::BlockedByOverlap);
 } 
+
+TEST_F(StoreBufferTest, OccupiedEntryCountTracksValidStores) {
+    const uint32_t pc = 0x80000000;
+    auto older = createTestDynamicInst(1, pc);
+    auto younger = createTestDynamicInst(2, pc);
+
+    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 0u);
+
+    store_buffer->add_store(older, 0x1000, 0x11111111, 4);
+    store_buffer->add_store(younger, 0x1004, 0x22222222, 4);
+    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 2u);
+
+    store_buffer->flush_after(1);
+    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 1u);
+
+    store_buffer->flush();
+    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 0u);
+}

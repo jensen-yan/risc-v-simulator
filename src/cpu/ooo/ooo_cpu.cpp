@@ -99,6 +99,23 @@ void sampleRobOccupancy(CPUState& state) {
     }
 }
 
+void sampleStoreBufferOccupancy(CPUState& state) {
+    if (!state.store_buffer) {
+        return;
+    }
+
+    const uint64_t occupancy = state.store_buffer->get_occupied_entry_count();
+    state.perf_counters.increment(PerfCounterId::STORE_BUFFER_OCCUPANCY_SAMPLES);
+    state.perf_counters.increment(PerfCounterId::STORE_BUFFER_OCCUPANCY_TOTAL, occupancy);
+
+    const uint64_t high_watermark =
+        state.perf_counters.value(PerfCounterId::STORE_BUFFER_OCCUPANCY_HIGH_WATERMARK);
+    if (occupancy > high_watermark) {
+        state.perf_counters.increment(PerfCounterId::STORE_BUFFER_OCCUPANCY_HIGH_WATERMARK,
+                                      occupancy - high_watermark);
+    }
+}
+
 } // namespace
 
 OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
@@ -174,6 +191,7 @@ void OutOfOrderCPU::step() {
         cpu_state_.cycle_count++;
         cpu_state_.perf_counters.increment(PerfCounterId::CYCLES);
         sampleRobOccupancy(cpu_state_);
+        sampleStoreBufferOccupancy(cpu_state_);
     } catch (const MemoryException& e) {
         handle_exception(e.what(), cpu_state_.pc);
     } catch (const SimulatorException& e) {
@@ -410,6 +428,18 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
     os << std::left << std::setw(40) << "cpu.rob.occupancy_avg"
        << std::right << std::setw(16) << std::fixed << std::setprecision(6) << rob_avg
        << " # Average occupied ROB entries per cycle\n";
+
+    const uint64_t store_buffer_samples =
+        cpu_state_.perf_counters.value(PerfCounterId::STORE_BUFFER_OCCUPANCY_SAMPLES);
+    const uint64_t store_buffer_total =
+        cpu_state_.perf_counters.value(PerfCounterId::STORE_BUFFER_OCCUPANCY_TOTAL);
+    const double store_buffer_avg =
+        store_buffer_samples == 0
+            ? 0.0
+            : static_cast<double>(store_buffer_total) / static_cast<double>(store_buffer_samples);
+    os << std::left << std::setw(40) << "cpu.store_buffer.occupancy_avg"
+       << std::right << std::setw(16) << std::fixed << std::setprecision(6) << store_buffer_avg
+       << " # Average occupied store buffer entries per cycle\n";
 
     // ===== Topdown-lite (以Execute每周期最多dispatch 1条为slot口径) =====
     const uint64_t execute_frontend_starved =

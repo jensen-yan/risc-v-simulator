@@ -213,15 +213,15 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                          "inst=%" PRId64 " LOAD%zu waits for ROB head before host-comm access",
                          blocked_inst->get_instruction_id(), i);
                     blocked_inst->get_memory_info().replay_count++;
-                    state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
+                    record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_HOST_COMM);
                     continue;
                 }
 
                 // 在Load指令完成前，再次检查Store依赖
-                bool should_wait = state.reorder_buffer->has_earlier_store_hazard(
+                const auto hazard_kind = state.reorder_buffer->get_earlier_store_hazard_kind(
                     unit.instruction->get_instruction_id(), unit.load_address, unit.load_size);
                 
-                if (should_wait) {
+                if (hazard_kind != ReorderBuffer::StoreHazardKind::None) {
                     // 关键修复：不要长期占用唯一LOAD单元，否则会阻塞更老的LOAD并形成死锁。
                     // 将该指令回退到ISSUED状态，释放执行单元，等待下个周期重调度。
                     auto blocked_inst = unit.instruction;
@@ -231,7 +231,19 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waits on earlier STORE, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
                     blocked_inst->get_memory_info().replay_count++;
-                    state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
+                    switch (hazard_kind) {
+                        case ReorderBuffer::StoreHazardKind::Amo:
+                            record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_AMO);
+                            break;
+                        case ReorderBuffer::StoreHazardKind::AddressUnknown:
+                            record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN);
+                            break;
+                        case ReorderBuffer::StoreHazardKind::Overlap:
+                            record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP);
+                            break;
+                        case ReorderBuffer::StoreHazardKind::None:
+                            break;
+                    }
                     continue; // 跳过完成处理
                 }
                 
@@ -246,7 +258,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
                     blocked_inst->get_memory_info().replay_count++;
-                    state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
+                    record_load_replay_reason(state, PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP);
                     continue;
                 }
                 if (load_result == LoadExecutionResult::WaitingForCache) {
@@ -560,6 +572,11 @@ void ExecuteStage::record_load_replay_bucket(const DynamicInstPtr& instruction, 
     }
 }
 
+void ExecuteStage::record_load_replay_reason(CPUState& state, PerfCounterId reason_counter_id) {
+    state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
+    state.perf_counters.increment(reason_counter_id);
+}
+
 void ExecuteStage::flush() {
     LOGT(EXECUTE, "execute stage flushed");
 }
@@ -646,16 +663,22 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
     if (!unit.dcache.request_sent) {
         // 尝试Store-to-Load Forwarding
         uint64_t forwarded_value = 0;
-        bool blocked = false;
-        const bool forwarded = state.store_buffer->forward_load(
-            addr, access_size, forwarded_value, unit.instruction->get_instruction_id(), blocked);
-        if (blocked) {
+        const auto forwarding_kind = state.store_buffer->classify_load_forwarding(
+            addr, access_size, forwarded_value, unit.instruction->get_instruction_id());
+        if (forwarding_kind == StoreBuffer::LoadForwardingKind::BlockedByOverlap) {
             state.perf_counters.increment(PerfCounterId::LOADS_BLOCKED_BY_STORE);
             return LoadExecutionResult::BlockedByStore;
         }
 
-        if (forwarded) {
+        if (forwarding_kind == StoreBuffer::LoadForwardingKind::FullMatch ||
+            forwarding_kind == StoreBuffer::LoadForwardingKind::PartialMatch) {
             memory_info.store_forwarded = true;
+            state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
+            if (forwarding_kind == StoreBuffer::LoadForwardingKind::FullMatch) {
+                state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED_FULL_MATCH);
+            } else {
+                state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED_PARTIAL_MATCH);
+            }
             if (inst.opcode == Opcode::LOAD_FP) {
                 // FLW 需要nan-box到64位浮点寄存器；FLD 直接写入64位
                 if (access_size == 4) {
@@ -666,7 +689,6 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
                 LOGT(EXECUTE, "fp store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64,
                      addr, unit.result);
                 memory_info.memory_value = unit.result;
-                state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
                 return LoadExecutionResult::Forwarded;
             }
 
@@ -714,7 +736,6 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
             LOGT(EXECUTE, "store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64 " %s-extended",
                            addr, unit.result, inst.is_signed_load ? "sign" : "zero");
             memory_info.memory_value = unit.result;
-            state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
             return LoadExecutionResult::Forwarded;
         }
 

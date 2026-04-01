@@ -319,6 +319,8 @@ TEST_F(ReorderBufferTest, UnknownOrOverlappingOlderStoreStillBlocksLoadHazardChe
 
     EXPECT_TRUE(rob.has_earlier_store_hazard(younger_load->get_instruction_id(), 0x240, 4))
         << "地址未知的更老store仍应保守阻塞load";
+    EXPECT_EQ(rob.get_earlier_store_hazard_kind(younger_load->get_instruction_id(), 0x240, 4),
+              ReorderBuffer::StoreHazardKind::AddressUnknown);
 
     store_memory.address_ready = true;
     store_memory.memory_address = 0x240;
@@ -326,6 +328,24 @@ TEST_F(ReorderBufferTest, UnknownOrOverlappingOlderStoreStillBlocksLoadHazardChe
 
     EXPECT_TRUE(rob.has_earlier_store_hazard(younger_load->get_instruction_id(), 0x240, 4))
         << "地址重叠的更老store应阻塞load";
+    EXPECT_EQ(rob.get_earlier_store_hazard_kind(younger_load->get_instruction_id(), 0x240, 4),
+              ReorderBuffer::StoreHazardKind::Overlap);
+}
+
+TEST_F(ReorderBufferTest, EarlierAmoIsReportedAsDistinctLoadHazardKind) {
+    DecodedInstruction amo_inst = createInstruction(InstructionType::R_TYPE, 1, 2, 3);
+    amo_inst.opcode = Opcode::AMO;
+    auto older_amo = rob.allocate_entry(amo_inst, 0x1000, getNextInstructionId());
+    ASSERT_TRUE(older_amo != nullptr);
+
+    DecodedInstruction load_inst = createInstruction(InstructionType::I_TYPE, 3, 4, 0);
+    load_inst.opcode = Opcode::LOAD;
+    load_inst.memory_access_size = 8;
+    auto younger_load = rob.allocate_entry(load_inst, 0x1004, getNextInstructionId());
+    ASSERT_TRUE(younger_load != nullptr);
+
+    EXPECT_EQ(rob.get_earlier_store_hazard_kind(younger_load->get_instruction_id(), 0x300, 8),
+              ReorderBuffer::StoreHazardKind::Amo);
 }
 
 // 测试10：复杂场景

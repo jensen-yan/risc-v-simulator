@@ -21,31 +21,44 @@ struct StoreBufferEntry {
 
 // Store Buffer，用于实现 Store-to-Load Forwarding
 class StoreBuffer {
-private:
-    static const int MAX_ENTRIES = 8; // Store Buffer大小
-    std::array<StoreBufferEntry, MAX_ENTRIES> entries;
-    int next_allocate_index; // 下一个分配位置（循环使用）
-
 public:
+    enum class LoadForwardingKind {
+        NoMatch,
+        FullMatch,
+        PartialMatch,
+        BlockedByOverlap,
+    };
+
     StoreBuffer();
-    
+
     // 添加Store条目
     void add_store(DynamicInstPtr instruction, uint64_t address, uint64_t value, uint8_t size);
-    
+
     // 查找匹配的Store (返回是否找到，如果找到则通过result_value返回值)
     bool forward_load(uint64_t address, uint8_t size, uint64_t& result_value) const;
     bool forward_load(uint64_t address, uint8_t size, uint64_t& result_value,
                       uint64_t current_instruction_id, bool& blocked) const;
-    
+    LoadForwardingKind classify_load_forwarding(uint64_t address,
+                                                uint8_t size,
+                                                uint64_t& result_value,
+                                                uint64_t current_instruction_id) const;
+
     // 清除指定指令ID及之前的Store条目（当Store指令提交时调用）
     void retire_stores_before(uint64_t instruction_id);
     void flush_after(uint64_t instruction_id);
-    
+
     // 清空所有条目（流水线刷新时调用）
     void flush();
-    
+
     // 调试：打印Store Buffer状态
     void dump() const;
+    size_t get_occupied_entry_count() const;
+    size_t get_capacity() const { return MAX_ENTRIES; }
+
+private:
+    static const int MAX_ENTRIES = 8; // Store Buffer大小
+    std::array<StoreBufferEntry, MAX_ENTRIES> entries;
+    int next_allocate_index; // 下一个分配位置（循环使用）
     
 private:
     // 检查两个内存访问是否有重叠

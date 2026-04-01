@@ -28,13 +28,22 @@ void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64
 }
 
 bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value) const {
-    bool blocked = false;
-    return forward_load(address, size, result_value, std::numeric_limits<uint64_t>::max(), blocked);
+    const auto kind =
+        classify_load_forwarding(address, size, result_value, std::numeric_limits<uint64_t>::max());
+    return kind == LoadForwardingKind::FullMatch || kind == LoadForwardingKind::PartialMatch;
 }
 
 bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value,
                                uint64_t current_instruction_id, bool& blocked) const {
-    blocked = false;
+    const auto kind = classify_load_forwarding(address, size, result_value, current_instruction_id);
+    blocked = (kind == LoadForwardingKind::BlockedByOverlap);
+    return kind == LoadForwardingKind::FullMatch || kind == LoadForwardingKind::PartialMatch;
+}
+
+StoreBuffer::LoadForwardingKind StoreBuffer::classify_load_forwarding(uint64_t address,
+                                                                      uint8_t size,
+                                                                      uint64_t& result_value,
+                                                                      uint64_t current_instruction_id) const {
     // 从最新的Store开始向前搜索（最近的Store优先）
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         // 从最近分配的位置开始向前搜索
@@ -55,7 +64,7 @@ bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_
                 result_value = entry.value;
                 LOGT(EXECUTE, "store-to-load forwarding full match: addr=0x%" PRIx64 ", size=%d, value=0x%" PRIx64 " (inst=%" PRId64 ")",
                         address, size, result_value, entry.instruction->get_instruction_id());
-                return true;
+                return LoadForwardingKind::FullMatch;
             }
             
             // 部分重叠的情况 - 需要提取正确的数据
@@ -63,20 +72,19 @@ bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_
                 result_value = extract_load_data(entry, address, size);
                 LOGT(EXECUTE, "store-to-load forwarding partial match: load_addr=0x%" PRIx64 ", load_size=%d, store_addr=0x%" PRIx64 ", store_size=%d, value=0x%" PRIx64 " (inst=%" PRId64 ")",
                         address, size, entry.address, entry.size, result_value, entry.instruction->get_instruction_id());
-                return true;
+                return LoadForwardingKind::PartialMatch;
             } else {
                 // 有重叠但无法转发（如部分字节写入）- 这种情况下Load必须等待Store提交到内存
                 LOGT(EXECUTE, "store-to-load overlap but cannot forward: load_addr=0x%" PRIx64 ", load_size=%d, store_addr=0x%" PRIx64 ", store_size=%d (inst=%" PRId64 ")",
                         address, size, entry.address, entry.size, entry.instruction->get_instruction_id());
-                blocked = true;
-                return false; // 无法转发，Load需要等待
+                return LoadForwardingKind::BlockedByOverlap;
             }
         }
     }
     
     // 没有找到匹配的Store，Load可以直接从内存读取
     LOGT(EXECUTE, "store-to-load no matching store: addr=0x%" PRIx64 ", size=%d", address, size);
-    return false; // 表示没有匹配，不是转发失败
+    return LoadForwardingKind::NoMatch;
 }
 
 void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
@@ -143,6 +151,16 @@ void StoreBuffer::dump() const {
     if (!has_valid) {
         LOGT(EXECUTE, "  (empty)");
     }
+}
+
+size_t StoreBuffer::get_occupied_entry_count() const {
+    size_t occupied = 0;
+    for (const auto& entry : entries) {
+        if (entry.valid && entry.instruction) {
+            occupied++;
+        }
+    }
+    return occupied;
 }
 
 bool StoreBuffer::addresses_overlap(uint64_t addr1, uint8_t size1, uint64_t addr2, uint8_t size2) const {

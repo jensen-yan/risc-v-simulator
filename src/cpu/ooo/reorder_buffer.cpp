@@ -362,8 +362,14 @@ bool ReorderBuffer::has_earlier_store_pending(uint64_t current_instruction_id) c
 bool ReorderBuffer::has_earlier_store_hazard(uint64_t current_instruction_id,
                                              uint64_t load_address,
                                              uint8_t load_size) const {
+    return get_earlier_store_hazard_kind(current_instruction_id, load_address, load_size) !=
+           StoreHazardKind::None;
+}
+
+ReorderBuffer::StoreHazardKind ReorderBuffer::get_earlier_store_hazard_kind(
+    uint64_t current_instruction_id, uint64_t load_address, uint8_t load_size) const {
     if (load_size == 0) {
-        return false;
+        return StoreHazardKind::None;
     }
 
     for (int i = 0; i < entry_count; ++i) {
@@ -389,20 +395,20 @@ bool ReorderBuffer::has_earlier_store_hazard(uint64_t current_instruction_id,
         }
 
         if (is_amo) {
-            return true;
+            return StoreHazardKind::Amo;
         }
 
         const auto& memory_info = inst->get_memory_info();
         if (!memory_info.address_ready || memory_info.memory_size == 0) {
-            return true;
+            return StoreHazardKind::AddressUnknown;
         }
 
         if (rangesOverlap(load_address, load_size, memory_info.memory_address, memory_info.memory_size)) {
-            return true;
+            return StoreHazardKind::Overlap;
         }
     }
 
-    return false;
+    return StoreHazardKind::None;
 }
 
 bool ReorderBuffer::has_earlier_store_uncommitted(uint64_t current_instruction_id) const {

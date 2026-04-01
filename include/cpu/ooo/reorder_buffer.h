@@ -24,6 +24,13 @@ using ReorderBufferEntry = DynamicInst;
  */
 class ReorderBuffer {
 public:
+    enum class StoreHazardKind {
+        None,
+        Amo,
+        AddressUnknown,
+        Overlap,
+    };
+
     // 配置参数
     static const int MAX_ROB_ENTRIES = 96;       // ROB最大容量
 
@@ -145,6 +152,9 @@ public:
     bool has_earlier_store_hazard(uint64_t current_instruction_id,
                                   uint64_t load_address,
                                   uint8_t load_size) const;
+    StoreHazardKind get_earlier_store_hazard_kind(uint64_t current_instruction_id,
+                                                  uint64_t load_address,
+                                                  uint8_t load_size) const;
 
     // 检查是否有更早的未提交Store/AMO指令（用于AMO顺序约束）
     bool has_earlier_store_uncommitted(uint64_t current_instruction_id) const;

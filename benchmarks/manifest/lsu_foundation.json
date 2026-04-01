@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "description": "LSU 基础学习集：自定义微基准 + 轻量已有 memory benchmark",
+  "benchmarks": [
+    {
+      "suite": "riscv-tests",
+      "name": "dhrystone",
+      "path": "riscv-tests/benchmarks/dhrystone.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "memcpy",
+      "path": "riscv-tests/benchmarks/memcpy.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "mm",
+      "path": "riscv-tests/benchmarks/mm.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "spmv",
+      "path": "riscv-tests/benchmarks/spmv.riscv"
+    },
+    {
+      "suite": "custom-lsu",
+      "name": "lsu-microbench",
+      "glob": "benchmarks/build/lsu/*.riscv"
+    }
+  ]
+}

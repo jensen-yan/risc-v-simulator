@@ -63,6 +63,8 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.reservation_addr = 0;
     state.global_instruction_id = 0;
     state.rename_checkpoints.clear();
+    state.branch_profiles.clear();
+    state.jalr_profiles.clear();
 
     state.arch_registers.fill(0);
     state.arch_fp_registers.fill(0);
@@ -203,6 +205,7 @@ void OutOfOrderCPU::resetStats() {
     cpu_state_.pipeline_stalls = 0;
     cpu_state_.perf_counters.reset();
     cpu_state_.branch_profiles.clear();
+    cpu_state_.jalr_profiles.clear();
 }
 
 uint64_t OutOfOrderCPU::get_physical_register_value(PhysRegNum reg) const {
@@ -510,6 +513,33 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " both_incorrect=" << prof.both_incorrect << "\n";
         }
         os << "cpu.branch_profile.top.end\n";
+    }
+
+    if (!cpu_state_.jalr_profiles.empty()) {
+        std::vector<std::pair<uint64_t, JalrProfileEntry>> entries(
+            cpu_state_.jalr_profiles.begin(), cpu_state_.jalr_profiles.end());
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            if (a.second.mispredicts != b.second.mispredicts) {
+                return a.second.mispredicts > b.second.mispredicts;
+            }
+            return a.second.executions > b.second.executions;
+        });
+
+        os << "cpu.jalr_profile.top.begin\n";
+        const size_t limit = std::min<size_t>(10, entries.size());
+        for (size_t i = 0; i < limit; ++i) {
+            const auto& [pc, prof] = entries[i];
+            os << "cpu.jalr_profile.top[" << i << "].pc 0x"
+               << std::hex << pc << std::dec
+               << " exec=" << prof.executions
+               << " mispredicts=" << prof.mispredicts
+               << " predicted_fallthrough=" << prof.predicted_fallthrough
+               << " wrong_target=" << prof.wrong_target
+               << " return_like=" << prof.return_like
+               << " call_like=" << prof.call_like
+               << " other=" << prof.other << "\n";
+        }
+        os << "cpu.jalr_profile.top.end\n";
     }
 
     os << "----------- End Simulation Statistics -----------\n";

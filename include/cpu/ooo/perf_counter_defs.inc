@@ -46,6 +46,11 @@ PERF_COUNTER_DEF(PREDICTOR_TOURNAMENT_CHOOSE_LOCAL, "cpu.predictor.tournament.ch
 PERF_COUNTER_DEF(PREDICTOR_TOURNAMENT_CHOOSE_GLOBAL, "cpu.predictor.tournament.chooser.global", "Tournament chooser selected gshare predictor")
 PERF_COUNTER_DEF(PREDICTOR_TOURNAMENT_RECOVERIES, "cpu.predictor.tournament.recoveries", "Tournament speculative history recoveries due to branch mispredict")
 PERF_COUNTER_DEF(PREDICTOR_JALR_MISPREDICTS, "cpu.predictor.jalr.mispredicts", "JALR predictions that were incorrect")
+PERF_COUNTER_DEF(PREDICTOR_JALR_RETURN_MISPREDICTS, "cpu.predictor.jalr.return_like.mispredicts", "Return-like JALR predictions that were incorrect")
+PERF_COUNTER_DEF(PREDICTOR_JALR_CALL_MISPREDICTS, "cpu.predictor.jalr.call_like.mispredicts", "Call-like JALR predictions that were incorrect")
+PERF_COUNTER_DEF(PREDICTOR_JALR_OTHER_MISPREDICTS, "cpu.predictor.jalr.other.mispredicts", "Non-call/return JALR predictions that were incorrect")
+PERF_COUNTER_DEF(PREDICTOR_JALR_FALLTHROUGH_MISPREDICTS, "cpu.predictor.jalr.fallthrough.mispredicts", "JALR mispredicts where prediction stayed on fallthrough (BTB-miss-like)")
+PERF_COUNTER_DEF(PREDICTOR_JALR_WRONG_TARGET_MISPREDICTS, "cpu.predictor.jalr.wrong_target.mispredicts", "JALR mispredicts where predictor chose a non-fallthrough but wrong target")
 PERF_COUNTER_DEF(PREDICTOR_CONTROL_CORRECT, "cpu.predictor.control.correct", "Control-flow next PC predictions that were correct (BRANCH/JAL/JALR)")
 PERF_COUNTER_DEF(PREDICTOR_CONTROL_INCORRECT, "cpu.predictor.control.incorrect", "Control-flow next PC predictions that were incorrect (BRANCH/JAL/JALR)")
 

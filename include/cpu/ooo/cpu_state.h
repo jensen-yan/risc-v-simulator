@@ -170,6 +170,16 @@ struct BranchProfileEntry {
     uint64_t both_incorrect = 0;
 };
 
+struct JalrProfileEntry {
+    uint64_t executions = 0;
+    uint64_t mispredicts = 0;
+    uint64_t predicted_fallthrough = 0;
+    uint64_t wrong_target = 0;
+    uint64_t return_like = 0;
+    uint64_t call_like = 0;
+    uint64_t other = 0;
+};
+
 struct CPUState {
     // 基本CPU状态
     uint64_t pc;                    // 程序计数器（取指PC）
@@ -226,6 +236,7 @@ struct CPUState {
     uint64_t branch_mispredicts;   // 条件分支预测错误次数（仅B-type）
     uint64_t pipeline_stalls;      // 流水线停顿次数
     std::unordered_map<uint64_t, BranchProfileEntry> branch_profiles;
+    std::unordered_map<uint64_t, JalrProfileEntry> jalr_profiles;
 
     // A扩展 LR/SC 预留状态
     bool reservation_valid;        // LR 预留是否有效

@@ -150,4 +150,42 @@ TEST(OutOfOrderControlFlowPredictionTest, DetailedStatsIncludeBranchRootCauseBre
     EXPECT_NE(stats_text.find("global_correct="), std::string::npos);
 }
 
+TEST(OutOfOrderControlFlowPredictionTest, DetailedStatsIncludeJalrRootCauseBreakdown) {
+    auto memory = std::make_shared<Memory>(8192);
+    auto cpu = std::make_unique<OutOfOrderCPU>(memory);
+
+    memory->writeWord(0x0, createIType(Opcode::OP_IMM, /*rd=*/1, /*rs1=*/0, /*imm=*/0x20, Funct3::ADD_SUB));
+    memory->writeWord(0x4, createIType(Opcode::JALR, /*rd=*/0, /*rs1=*/1, /*imm=*/0, Funct3::ADD_SUB));
+    memory->writeWord(0x8, createIType(Opcode::OP_IMM, /*rd=*/3, /*rs1=*/0, /*imm=*/0x111, Funct3::ADD_SUB));
+    memory->writeWord(0xC, 0x00000073); // ECALL
+
+    memory->writeWord(0x20, createIType(Opcode::OP_IMM, /*rd=*/2, /*rs1=*/2, /*imm=*/1, Funct3::ADD_SUB));
+    memory->writeWord(0x24, createIType(Opcode::OP_IMM, /*rd=*/4, /*rs1=*/0, /*imm=*/2, Funct3::ADD_SUB));
+    memory->writeWord(0x28, createBType(Opcode::BRANCH, /*rs1=*/2, /*rs2=*/4, /*imm=*/0x10, Funct3::BEQ));
+    memory->writeWord(0x2C, createJType(Opcode::JAL, /*rd=*/0, /*imm=*/-0x28));
+    memory->writeWord(0x30, createIType(Opcode::OP_IMM, /*rd=*/0, /*rs1=*/0, /*imm=*/0, Funct3::ADD_SUB));
+    memory->writeWord(0x34, createIType(Opcode::OP_IMM, /*rd=*/0, /*rs1=*/0, /*imm=*/0, Funct3::ADD_SUB));
+    memory->writeWord(0x38, 0x00000073); // ECALL
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 2000 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted());
+
+    const auto stats = cpu->getStats();
+    EXPECT_EQ(statValueByName(stats, "cpu.predictor.jalr.mispredicts"), 1u);
+    EXPECT_EQ(statValueByName(stats, "cpu.predictor.jalr.return_like.mispredicts"), 1u);
+    EXPECT_EQ(statValueByName(stats, "cpu.predictor.jalr.fallthrough.mispredicts"), 1u);
+    EXPECT_EQ(statValueByName(stats, "cpu.predictor.jalr.wrong_target.mispredicts"), 0u);
+
+    std::ostringstream oss;
+    cpu->dumpDetailedStats(oss);
+    const std::string stats_text = oss.str();
+    EXPECT_NE(stats_text.find("cpu.jalr_profile.top.begin"), std::string::npos);
+    EXPECT_NE(stats_text.find("predicted_fallthrough="), std::string::npos);
+    EXPECT_NE(stats_text.find("return_like="), std::string::npos);
+}
+
 } // namespace riscv

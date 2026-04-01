@@ -14,6 +14,12 @@ constexpr uint32_t kMinstretCsrAddr = 0xB02;
 constexpr uint32_t kCycleCsrAddr = 0xC00;
 constexpr uint32_t kInstretCsrAddr = 0xC02;
 
+enum class JalrProfileKind {
+    ReturnLike,
+    CallLike,
+    Other,
+};
+
 uint8_t atomicWidthToSize(Funct3 width) {
     switch (width) {
         case Funct3::LW:
@@ -45,6 +51,20 @@ void syncBasicPerfCounters(CPUState& state) {
     csr::write(state.csr_registers, kMinstretCsrAddr, retired);
     csr::write(state.csr_registers, kCycleCsrAddr, retired);
     csr::write(state.csr_registers, kInstretCsrAddr, retired);
+}
+
+bool isLinkRegister(RegNum reg) {
+    return reg == 1 || reg == 5;
+}
+
+JalrProfileKind classifyJalrKind(const DecodedInstruction& decoded) {
+    if (decoded.rd == 0 && decoded.imm == 0 && isLinkRegister(decoded.rs1)) {
+        return JalrProfileKind::ReturnLike;
+    }
+    if (isLinkRegister(decoded.rd)) {
+        return JalrProfileKind::CallLike;
+    }
+    return JalrProfileKind::Other;
 }
 }  // namespace
 
@@ -439,6 +459,50 @@ void CommitStage::execute(CPUState& state) {
             // JALR：预测错次数
             if (decoded_info.opcode == Opcode::JALR && !correct) {
                 state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_MISPREDICTS);
+
+                const auto jalr_kind = classifyJalrKind(decoded_info);
+                switch (jalr_kind) {
+                    case JalrProfileKind::ReturnLike:
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_RETURN_MISPREDICTS);
+                        break;
+                    case JalrProfileKind::CallLike:
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_CALL_MISPREDICTS);
+                        break;
+                    case JalrProfileKind::Other:
+                        state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_OTHER_MISPREDICTS);
+                        break;
+                }
+
+                if (predicted_next_pc == fallthrough) {
+                    state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_FALLTHROUGH_MISPREDICTS);
+                } else {
+                    state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_WRONG_TARGET_MISPREDICTS);
+                }
+            }
+
+            if (decoded_info.opcode == Opcode::JALR) {
+                auto& profile = state.jalr_profiles[instruction_pc];
+                profile.executions++;
+                if (!correct) {
+                    profile.mispredicts++;
+                    if (predicted_next_pc == fallthrough) {
+                        profile.predicted_fallthrough++;
+                    } else {
+                        profile.wrong_target++;
+                    }
+                }
+
+                switch (classifyJalrKind(decoded_info)) {
+                    case JalrProfileKind::ReturnLike:
+                        profile.return_like++;
+                        break;
+                    case JalrProfileKind::CallLike:
+                        profile.call_like++;
+                        break;
+                    case JalrProfileKind::Other:
+                        profile.other++;
+                        break;
+                }
             }
 
             // Commit阶段训练预测器（flush不应清空预测器状态）

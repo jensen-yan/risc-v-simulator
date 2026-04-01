@@ -18,6 +18,7 @@ DynamicInst::DynamicInst()
       rob_entry_(0), rs_entry_(0), is_jump_(false), jump_target_(0),
       predicted_next_pc_(0), has_predicted_next_pc_(false),
       has_branch_predict_meta_(false), branch_predict_meta_{},
+      has_ras_checkpoint_(false), ras_checkpoint_{},
       control_recovered_early_(false),
       fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
@@ -36,6 +37,7 @@ DynamicInst::DynamicInst(const DecodedInstruction& decoded_info, uint64_t pc, ui
       rob_entry_(0), rs_entry_(0), is_jump_(false), jump_target_(0),
       predicted_next_pc_(0), has_predicted_next_pc_(false),
       has_branch_predict_meta_(false), branch_predict_meta_{},
+      has_ras_checkpoint_(false), ras_checkpoint_{},
       control_recovered_early_(false),
       fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
@@ -234,6 +236,8 @@ void DynamicInst::reset_to_allocated() {
     has_predicted_next_pc_ = false;
     has_branch_predict_meta_ = false;
     branch_predict_meta_ = BranchPredictor::BranchMeta{};
+    has_ras_checkpoint_ = false;
+    ras_checkpoint_ = BranchPredictor::RasCheckpoint{};
     control_recovered_early_ = false;
     rs_entry_ = 0;
     

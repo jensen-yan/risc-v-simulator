@@ -143,6 +143,8 @@ private:
     bool has_predicted_next_pc_;              // 是否记录了预测next PC
     bool has_branch_predict_meta_;            // 是否记录了条件分支预测元数据
     BranchPredictor::BranchMeta branch_predict_meta_; // 条件分支预测元数据
+    bool has_ras_checkpoint_;                 // 是否记录了fetch时的RAS checkpoint
+    BranchPredictor::RasCheckpoint ras_checkpoint_;
     bool control_recovered_early_;            // 是否已在执行阶段完成控制流早恢复
 
     // ========== 扩展信息（可选，支持未来功能） ==========
@@ -289,6 +291,12 @@ public:
     }
     bool has_branch_predict_meta() const { return has_branch_predict_meta_; }
     const BranchPredictor::BranchMeta& get_branch_predict_meta() const { return branch_predict_meta_; }
+    void set_ras_checkpoint(const BranchPredictor::RasCheckpoint& checkpoint) {
+        ras_checkpoint_ = checkpoint;
+        has_ras_checkpoint_ = true;
+    }
+    bool has_ras_checkpoint() const { return has_ras_checkpoint_; }
+    const BranchPredictor::RasCheckpoint& get_ras_checkpoint() const { return ras_checkpoint_; }
     void mark_control_recovered_early() { control_recovered_early_ = true; }
     void clear_control_recovered_early() { control_recovered_early_ = false; }
     bool is_control_recovered_early() const { return control_recovered_early_; }

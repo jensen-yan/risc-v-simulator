@@ -115,6 +115,10 @@ void FetchStage::execute(CPUState& state) {
                 }
 
                 if (decoded_ok && state.branch_predictor) {
+                    if (decoded.opcode == Opcode::BRANCH || decoded.opcode == Opcode::JALR) {
+                        fetched.ras_checkpoint = state.branch_predictor->captureRasCheckpoint();
+                        fetched.has_ras_checkpoint = true;
+                    }
                     const auto pred = state.branch_predictor->predict(fetch_pc, decoded, fallthrough);
                     predicted_next_pc = pred.next_pc;
 
@@ -142,6 +146,12 @@ void FetchStage::execute(CPUState& state) {
                         if (fetched.has_branch_meta) {
                             state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_LOCAL_LOOKUPS);
                             state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_GLOBAL_LOOKUPS);
+                            if (pred.branch_meta.loop_prediction_available) {
+                                state.perf_counters.increment(PerfCounterId::PREDICTOR_LOOP_LOOKUPS);
+                            }
+                            if (pred.branch_meta.loop_override_used) {
+                                state.perf_counters.increment(PerfCounterId::PREDICTOR_LOOP_OVERRIDES);
+                            }
                             if (pred.branch_meta.chooser_use_global) {
                                 state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_CHOOSE_GLOBAL);
                             } else {

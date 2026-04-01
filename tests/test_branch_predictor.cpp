@@ -176,6 +176,28 @@ TEST(BranchPredictorTest, ReturnLikeJalrFallsBackToBtbWhenRasEmpty) {
     EXPECT_EQ(pred.next_pc, 0x880u);
 }
 
+TEST(BranchPredictorTest, RasCheckpointRestoresSpeculativeStackAfterWrongPathControl) {
+    BranchPredictor predictor;
+
+    const auto call = makeJalInst(/*rd=*/1, /*imm=*/16);
+    const auto wrong_path_call = makeJalInst(/*rd=*/1, /*imm=*/12);
+    const auto ret = makeJalrInst(/*rd=*/0, /*rs1=*/1, /*imm=*/0);
+    const uint64_t call_pc = 0x120;
+    const uint64_t wrong_path_call_pc = 0x220;
+    const uint64_t ret_pc = 0x320;
+
+    predictor.predict(call_pc, call, call_pc + 4);
+    const auto checkpoint = predictor.captureRasCheckpoint();
+
+    predictor.predict(wrong_path_call_pc, wrong_path_call, wrong_path_call_pc + 4);
+    predictor.restoreRasCheckpoint(checkpoint);
+
+    auto ret_pred = predictor.predict(ret_pc, ret, ret_pc + 4);
+    EXPECT_TRUE(ret_pred.ras_used);
+    EXPECT_TRUE(ret_pred.ras_hit);
+    EXPECT_EQ(ret_pred.next_pc, call_pc + 4);
+}
+
 TEST(BranchPredictorTest, GShareUsesDifferentHistoryContexts) {
     BranchPredictor predictor;
     const DecodedInstruction branch = makeBranchInst();
@@ -207,6 +229,26 @@ TEST(BranchPredictorTest, GShareUsesDifferentHistoryContexts) {
     EXPECT_LE(pred_ghr1.branch_meta.chooser_counter_before, 3u);
     EXPECT_LE(pred_ghr1.branch_meta.local_counter_before, 3u);
     EXPECT_LE(pred_ghr1.branch_meta.global_counter_before, 3u);
+}
+
+TEST(BranchPredictorTest, BranchRecoveryRestoresResolvedLocalHistoryIntoSpeculativeState) {
+    BranchPredictor predictor;
+    const DecodedInstruction branch = makeBranchInst();
+    const uint64_t pc = 0x2A0;
+    const uint64_t fallthrough = pc + 4;
+    const uint16_t local_hist_index = static_cast<uint16_t>((pc >> 1) & 0x3FFU);
+    const uint16_t local_history_before = 0xAAu;
+
+    auto recovery_meta = makeBranchMeta(/*ghr_before=*/0x12u,
+                                        /*local_history_before=*/local_history_before,
+                                        /*local_history_index=*/local_hist_index,
+                                        /*local_pred_taken=*/false,
+                                        /*global_pred_taken=*/false);
+    predictor.recover_after_branch_mispredict(pc, /*actual_taken=*/true, &recovery_meta);
+
+    auto pred = predictor.predict(pc, branch, fallthrough);
+    EXPECT_EQ(pred.branch_meta.ghr_before, 0x25u);
+    EXPECT_EQ(pred.branch_meta.local_history_before, 0x55u);
 }
 
 TEST(BranchPredictorTest, TournamentChooserConvergesToGlobal) {
@@ -360,6 +402,47 @@ TEST(BranchPredictorTest, LocalHistoryLearnsEightTakenThenExitPattern) {
     EXPECT_EQ(exit_pred.branch_meta.local_history_before, 0xFFu);
     EXPECT_FALSE(exit_pred.branch_meta.local_pred_taken)
         << "8-bit local history 应能把 8T + 1N 的退出相位学成 not-taken";
+}
+
+TEST(BranchPredictorTest, LoopPredictorLearnsBackwardEightTakenThenExitPattern) {
+    BranchPredictor predictor;
+    const DecodedInstruction branch = makeBranchInst(/*imm=*/-8);
+    const uint64_t pc = 0x2C0;
+    const uint64_t fallthrough = pc + 4;
+    const uint64_t target = pc - 8;
+
+    auto run_branch = [&](bool actual_taken) {
+        const auto pred = predictor.predict(pc, branch, fallthrough);
+        predictor.update(pc,
+                         branch,
+                         actual_taken,
+                         actual_taken ? target : fallthrough,
+                         &pred.branch_meta);
+        if (pred.bht_pred_taken != actual_taken) {
+            predictor.recover_after_branch_mispredict(pc, actual_taken, &pred.branch_meta);
+        }
+        return pred;
+    };
+
+    for (int loop = 0; loop < 3; ++loop) {
+        for (int i = 0; i < 8; ++i) {
+            run_branch(true);
+        }
+        run_branch(false);
+    }
+
+    for (int i = 0; i < 8; ++i) {
+        run_branch(true);
+    }
+
+    const auto exit_pred = predictor.predict(pc, branch, fallthrough);
+    ASSERT_TRUE(exit_pred.branch_meta.valid);
+    EXPECT_TRUE(exit_pred.branch_meta.loop_prediction_available);
+    EXPECT_TRUE(exit_pred.branch_meta.loop_override_used);
+    EXPECT_EQ(exit_pred.branch_meta.loop_trip_count_before, 8u);
+    EXPECT_EQ(exit_pred.branch_meta.loop_iter_before, 8u);
+    EXPECT_FALSE(exit_pred.bht_pred_taken);
+    EXPECT_EQ(exit_pred.next_pc, fallthrough);
 }
 
 } // namespace riscv

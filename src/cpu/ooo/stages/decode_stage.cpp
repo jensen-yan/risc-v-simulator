@@ -61,6 +61,9 @@ void DecodeStage::execute(CPUState& state) {
         if (fetched.has_branch_meta) {
             dynamic_inst->set_branch_predict_meta(fetched.branch_meta);
         }
+        if (fetched.has_ras_checkpoint) {
+            dynamic_inst->set_ras_checkpoint(fetched.ras_checkpoint);
+        }
 
         LOGT(DECODE, "slot=%zu allocated rob[%d], pc=0x%" PRIx64 ", inst=%" PRId64,
              slot, dynamic_inst->get_rob_entry(), fetched.pc, instruction_id);

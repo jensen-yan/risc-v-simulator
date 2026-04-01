@@ -32,11 +32,14 @@ struct FetchedInstruction {
     uint64_t predicted_next_pc;
     bool has_branch_meta;
     BranchPredictor::BranchMeta branch_meta;
+    bool has_ras_checkpoint;
+    BranchPredictor::RasCheckpoint ras_checkpoint;
     uint64_t fetch_cycle;  // 取指周期（用于流水线可视化）
 
     FetchedInstruction()
         : pc(0), instruction(0), is_compressed(false), predicted_next_pc(0),
-          has_branch_meta(false), branch_meta{}, fetch_cycle(0) {}
+          has_branch_meta(false), branch_meta{}, has_ras_checkpoint(false),
+          ras_checkpoint{}, fetch_cycle(0) {}
 };
 
 /**
@@ -168,6 +171,9 @@ struct BranchProfileEntry {
     uint64_t chooser_misses = 0;
     uint64_t both_correct = 0;
     uint64_t both_incorrect = 0;
+    uint64_t loop_override_used = 0;
+    uint64_t loop_override_correct = 0;
+    uint64_t loop_override_incorrect = 0;
 };
 
 struct JalrProfileEntry {

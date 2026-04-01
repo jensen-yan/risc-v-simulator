@@ -326,7 +326,7 @@ void OutOfOrderCPU::flush_pipeline() {
     // 保留已提交架构状态，仅清除推测性重命名状态
     cpu_state_.register_rename->flush_pipeline();
     cpu_state_.rename_checkpoints.clear();
-    
+
     // 清空CDB队列
     while (!cpu_state_.cdb_queue.empty()) {
         cpu_state_.cdb_queue.pop();
@@ -510,7 +510,10 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " chooser_incorrect=" << prof.chooser_incorrect
                << " chooser_misses=" << prof.chooser_misses
                << " both_correct=" << prof.both_correct
-               << " both_incorrect=" << prof.both_incorrect << "\n";
+               << " both_incorrect=" << prof.both_incorrect
+               << " loop_override_used=" << prof.loop_override_used
+               << " loop_override_correct=" << prof.loop_override_correct
+               << " loop_override_incorrect=" << prof.loop_override_incorrect << "\n";
         }
         os << "cpu.branch_profile.top.end\n";
     }

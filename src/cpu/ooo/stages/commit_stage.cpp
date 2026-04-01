@@ -446,6 +446,17 @@ void CommitStage::execute(CPUState& state) {
                             profile.chooser_misses++;
                         }
                     }
+
+                    if (branch_meta->loop_override_used) {
+                        profile.loop_override_used++;
+                        if (chooser_correct) {
+                            profile.loop_override_correct++;
+                            state.perf_counters.increment(PerfCounterId::PREDICTOR_LOOP_CORRECT);
+                        } else {
+                            profile.loop_override_incorrect++;
+                            state.perf_counters.increment(PerfCounterId::PREDICTOR_LOOP_INCORRECT);
+                        }
+                    }
                 }
 
                 if (correct) {

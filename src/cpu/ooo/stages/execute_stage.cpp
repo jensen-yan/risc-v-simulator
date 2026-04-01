@@ -430,6 +430,11 @@ bool ExecuteStage::try_recover_control_mispredict_early(ExecutionUnit& unit,
     state.register_rename->restore_checkpoint(checkpoint_it->second, surviving_live_regs);
     erase_younger_rename_checkpoints(state, instruction_id);
     state.rename_checkpoints.erase(instruction_id);
+    if (state.branch_predictor && instruction->has_ras_checkpoint()) {
+        state.branch_predictor->restoreRasCheckpoint(instruction->get_ras_checkpoint());
+        state.branch_predictor->applyResolvedControlToSpeculativeRas(
+            instruction_pc, decoded_info, instruction->is_jump());
+    }
 
     state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSHES);
     state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, static_cast<uint64_t>(rob_flushed));

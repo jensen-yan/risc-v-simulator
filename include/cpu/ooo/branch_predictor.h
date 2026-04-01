@@ -34,6 +34,12 @@ public:
         uint8_t local_counter_before = 0;
         uint8_t global_counter_before = 0;
         uint8_t chooser_counter_before = 0;
+        bool loop_prediction_available = false;
+        bool loop_override_used = false;
+        bool loop_pred_taken = false;
+        uint16_t loop_trip_count_before = 0;
+        uint16_t loop_iter_before = 0;
+        uint8_t loop_confidence_before = 0;
     };
 
     struct Prediction {
@@ -45,6 +51,11 @@ public:
         bool bht_used = false;
         bool bht_pred_taken = false;
         BranchMeta branch_meta{};
+    };
+
+    struct RasCheckpoint {
+        std::array<uint64_t, kRasEntries> ras{};
+        size_t ras_size = 0;
     };
 
     BranchPredictor();
@@ -59,6 +70,9 @@ public:
                 const BranchMeta* meta = nullptr);
     void recover_after_branch_mispredict(uint64_t pc, bool actual_taken, const BranchMeta* meta = nullptr);
     void on_pipeline_flush();
+    RasCheckpoint captureRasCheckpoint() const;
+    void restoreRasCheckpoint(const RasCheckpoint& checkpoint);
+    void applyResolvedControlToSpeculativeRas(uint64_t pc, const DecodedInstruction& decoded, bool actual_taken);
 
     bool usesTournamentPredictor() const;
     std::string modeName() const;
@@ -77,6 +91,8 @@ private:
     static constexpr size_t kLocalHistoryBits = 8;
     static constexpr size_t kLocalPhtEntries = 1ULL << kLocalHistoryBits; // 256
     static constexpr size_t kChooserEntries = 1ULL << kGhrBits;      // 4096
+    static constexpr size_t kLoopEntries = 128;
+    static constexpr uint8_t kLoopMinConfidence = 2;
 
     static constexpr uint16_t kGhrMask = static_cast<uint16_t>((1ULL << kGhrBits) - 1ULL);
     static constexpr uint16_t kShortGhrMask = static_cast<uint16_t>((1ULL << kShortGhrBits) - 1ULL);
@@ -88,9 +104,20 @@ private:
         uint64_t target = 0;
     };
 
+    struct LoopEntry {
+        bool valid = false;
+        uint64_t tag_pc = 0;
+        bool dir_taken = true;
+        uint16_t trip_count = 0;
+        uint16_t current_iter = 0;
+        uint8_t confidence = 0;
+    };
+
     std::array<BtbEntry, kBtbEntries> btb_{};
     std::array<uint64_t, kRasEntries> committed_ras_{};
     std::array<uint64_t, kRasEntries> speculative_ras_{};
+    std::array<LoopEntry, kLoopEntries> committed_loop_table_{};
+    std::array<LoopEntry, kLoopEntries> speculative_loop_table_{};
 
     enum class Mode {
         Tournament,
@@ -132,6 +159,10 @@ private:
         return static_cast<size_t>(local_history & static_cast<uint16_t>(kLocalPhtEntries - 1));
     }
 
+    static constexpr size_t loopIndex(uint64_t pc) {
+        return static_cast<size_t>((pc >> 1) & (kLoopEntries - 1));
+    }
+
     static bool counterPredictTaken(uint8_t counter);
     static void counterUpdate(uint8_t& counter, bool taken);
     static uint16_t pushHistory(uint16_t history, bool taken, uint16_t mask);
@@ -141,6 +172,11 @@ private:
 
     bool btbLookup(uint64_t pc, uint64_t& target) const;
     void btbUpdate(uint64_t pc, uint64_t target);
+    static bool loopLookup(const std::array<LoopEntry, kLoopEntries>& loop_table,
+                           uint64_t pc,
+                           LoopEntry& entry_out);
+    static void loopPredictAdvance(LoopEntry& entry, bool predicted_taken);
+    static void loopUpdate(LoopEntry& entry, uint64_t pc, bool actual_taken);
     static bool rasPeek(const std::array<uint64_t, kRasEntries>& ras, size_t ras_size, uint64_t& target);
     static void rasPush(std::array<uint64_t, kRasEntries>& ras, size_t& ras_size, uint64_t target);
     static void rasPop(size_t& ras_size);

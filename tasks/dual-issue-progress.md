@@ -23,6 +23,7 @@
 - [ ] 第五阶段：继续压控制流 flush 与 load replay
 - [x] 第六阶段：补 JALR 分类日志，再决定 RAS / indirect predictor 优先级
 - [x] 第七阶段：落 speculative RAS，并验证 return-like JALR 收益
+- [x] 第八阶段：为 backward branch 引入轻量 loop predictor 并验证 CoreMark 收益
 
 ## 当前状态
 
@@ -39,4 +40,7 @@
 - 已落 speculative RAS：fetch/predict 维护投机返回栈，flush/recover 回到 committed 栈，commit 继续做最终训练
 - steady-state CoreMark：`JALR miss 120 -> 3`，`IPC 1.5014 -> 1.5025`
 - 200k Dhrystone：`JALR miss 6174 -> 21`，`IPC 1.3839 -> 1.6121`
-- 分支侧下一步优先看 predictor recover/training 语义
+- 已为 backward conditional branch 增加高置信度 loop predictor，专门覆盖固定 trip-count 循环出口
+- steady-state CoreMark：`branch mispredict 2405 -> 2046`，`IPC 1.5025 -> 1.5290`
+- 完整 CoreMark：`branch mispredict 33939 -> 24171`，`IPC 1.2757 -> 1.3081`
+- 分支侧下一步优先看 loop override 的误用热点，再决定是否需要更细的 enable/disable 条件

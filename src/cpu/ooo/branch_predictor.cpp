@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib>
+#include <limits>
 
 namespace riscv {
 
@@ -28,6 +29,8 @@ void BranchPredictor::reset() {
     for (auto& entry : btb_) {
         entry = BtbEntry{};
     }
+    committed_loop_table_.fill(LoopEntry{});
+    speculative_loop_table_.fill(LoopEntry{});
     committed_ras_.fill(0);
     speculative_ras_.fill(0);
     global_pht_.fill(kCounterWeakNotTaken);
@@ -55,6 +58,68 @@ void BranchPredictor::btbUpdate(uint64_t pc, uint64_t target) {
     entry.valid = true;
     entry.tag_pc = pc;
     entry.target = target;
+}
+
+bool BranchPredictor::loopLookup(const std::array<LoopEntry, kLoopEntries>& loop_table,
+                                 uint64_t pc,
+                                 LoopEntry& entry_out) {
+    const auto& entry = loop_table[loopIndex(pc)];
+    if (!entry.valid || entry.tag_pc != pc) {
+        return false;
+    }
+    entry_out = entry;
+    return true;
+}
+
+void BranchPredictor::loopPredictAdvance(LoopEntry& entry, bool predicted_taken) {
+    if (predicted_taken == entry.dir_taken) {
+        if (entry.current_iter < std::numeric_limits<uint16_t>::max()) {
+            ++entry.current_iter;
+        }
+    } else {
+        entry.current_iter = 0;
+    }
+}
+
+void BranchPredictor::loopUpdate(LoopEntry& entry, uint64_t pc, bool actual_taken) {
+    if (!entry.valid || entry.tag_pc != pc) {
+        entry = LoopEntry{};
+        entry.valid = true;
+        entry.tag_pc = pc;
+        entry.dir_taken = actual_taken;
+        entry.current_iter = actual_taken ? 1 : 0;
+        return;
+    }
+
+    if (actual_taken == entry.dir_taken) {
+        if (entry.current_iter < std::numeric_limits<uint16_t>::max()) {
+            ++entry.current_iter;
+        }
+        return;
+    }
+
+    const uint16_t observed_trip_count = entry.current_iter;
+    if (observed_trip_count == 0) {
+        entry.dir_taken = actual_taken;
+        entry.trip_count = 0;
+        entry.confidence = 0;
+        entry.current_iter = actual_taken ? 1 : 0;
+        return;
+    }
+
+    if (entry.trip_count == 0) {
+        entry.trip_count = observed_trip_count;
+        entry.confidence = 1;
+    } else if (entry.trip_count == observed_trip_count) {
+        if (entry.confidence < 3U) {
+            ++entry.confidence;
+        }
+    } else {
+        entry.trip_count = observed_trip_count;
+        entry.confidence = 0;
+    }
+
+    entry.current_iter = 0;
 }
 
 bool BranchPredictor::counterPredictTaken(uint8_t counter) {
@@ -184,9 +249,27 @@ BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
             const bool global_pred_taken = counterPredictTaken(global_counter);
             const bool use_local = (mode_ == Mode::Tournament && chooser_counter < 2);
             const bool force_global = (mode_ == Mode::Gshare || mode_ == Mode::TournamentNoSpec);
-            const bool pred_taken = (force_global || !use_local)
-                                        ? global_pred_taken
-                                        : local_pred_taken;
+            bool pred_taken = (force_global || !use_local)
+                                  ? global_pred_taken
+                                  : local_pred_taken;
+
+            LoopEntry loop_entry{};
+            const bool loop_prediction_available =
+                use_short_global_history &&
+                loopLookup(use_speculative_history ? speculative_loop_table_ : committed_loop_table_,
+                           pc,
+                           loop_entry) &&
+                loop_entry.trip_count > 0 &&
+                loop_entry.confidence >= kLoopMinConfidence;
+            const bool loop_pred_taken =
+                loop_prediction_available &&
+                (loop_entry.current_iter == loop_entry.trip_count)
+                    ? !loop_entry.dir_taken
+                    : loop_entry.dir_taken;
+            const bool use_loop_override = loop_prediction_available;
+            if (use_loop_override) {
+                pred_taken = loop_pred_taken;
+            }
 
             pred.bht_pred_taken = pred_taken;
             pred.branch_meta.valid = true;
@@ -205,6 +288,12 @@ BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
             pred.branch_meta.local_counter_before = local_counter;
             pred.branch_meta.global_counter_before = global_counter;
             pred.branch_meta.chooser_counter_before = chooser_counter;
+            pred.branch_meta.loop_prediction_available = loop_prediction_available;
+            pred.branch_meta.loop_override_used = use_loop_override;
+            pred.branch_meta.loop_pred_taken = loop_pred_taken;
+            pred.branch_meta.loop_trip_count_before = loop_entry.trip_count;
+            pred.branch_meta.loop_iter_before = loop_entry.current_iter;
+            pred.branch_meta.loop_confidence_before = loop_entry.confidence;
 
             if (pred_taken) {
                 pred.next_pc = pc + static_cast<uint64_t>(static_cast<int64_t>(decoded.imm));
@@ -213,13 +302,27 @@ BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
                 speculative_local_history_table_[lht_index] =
                     pushHistory(local_history_before, pred_taken, kLocalHistoryMask);
                 speculative_ghr_ = pushHistory(speculative_ghr_, pred_taken, kGhrMask);
+                if (use_short_global_history) {
+                    auto& speculative_loop_entry = speculative_loop_table_[loopIndex(pc)];
+                    if (!speculative_loop_entry.valid || speculative_loop_entry.tag_pc != pc) {
+                        speculative_loop_entry = LoopEntry{};
+                        speculative_loop_entry.valid = true;
+                        speculative_loop_entry.tag_pc = pc;
+                        speculative_loop_entry.dir_taken = pred_taken;
+                        speculative_loop_entry.current_iter = pred_taken ? 1 : 0;
+                    } else {
+                        loopPredictAdvance(speculative_loop_entry, pred_taken);
+                    }
+                }
             }
             if (shouldTrace(pc) && DebugManager::getInstance().shouldLog("BRANCH")) {
                 LOGT(BRANCH,
                      "bp predict pc=0x%" PRIx64
                      " ghr_before=0x%x ghr_global=0x%x local_hist=0x%x"
                      " local[idx=%zu ctr=%u pred=%d] global[idx=%zu ctr=%u pred=%d]"
-                     " chooser[idx=%zu ctr=%u choose=%s] next=0x%" PRIx64,
+                     " chooser[idx=%zu ctr=%u choose=%s]"
+                     " loop[avail=%d conf=%u trip=%u iter=%u pred=%d override=%d]"
+                     " next=0x%" PRIx64,
                      pc,
                      static_cast<unsigned>(ghr_before),
                      static_cast<unsigned>(ghr_for_global_index),
@@ -233,6 +336,12 @@ BranchPredictor::Prediction BranchPredictor::predict(uint64_t pc,
                      chooser_idx,
                      static_cast<unsigned>(chooser_counter),
                      pred.branch_meta.chooser_use_global ? "global" : "local",
+                     static_cast<int>(loop_prediction_available),
+                     static_cast<unsigned>(loop_entry.confidence),
+                     static_cast<unsigned>(loop_entry.trip_count),
+                     static_cast<unsigned>(loop_entry.current_iter),
+                     static_cast<int>(loop_pred_taken),
+                     static_cast<int>(use_loop_override),
                      pred.next_pc);
             }
             return pred;
@@ -347,12 +456,19 @@ void BranchPredictor::update(uint64_t pc,
             committed_local_history_table_[local_hist_index] =
                 pushHistory(committed_local_history_base, actual_taken, kLocalHistoryMask);
             committed_ghr_ = pushHistory(committed_ghr_, actual_taken, kGhrMask);
+            if (decoded.imm < 0) {
+                auto& loop_entry = committed_loop_table_[loopIndex(pc)];
+                loopUpdate(loop_entry, pc, actual_taken);
+            }
 
             if (shouldTrace(pc) && DebugManager::getInstance().shouldLog("BRANCH")) {
+                LoopEntry loop_entry{};
+                const bool loop_valid = decoded.imm < 0 && loopLookup(committed_loop_table_, pc, loop_entry);
                 LOGT(BRANCH,
                      "bp update pc=0x%" PRIx64
                      " actual=%d local[idx=%zu %u->%u pred=%d] global[idx=%zu %u->%u pred=%d]"
                      " chooser[idx=%zu %u->%u choose=%s mismatch=%d]"
+                     " loop[valid=%d conf=%u trip=%u iter=%u]"
                      " committed_ghr=0x%x",
                      pc,
                      static_cast<int>(actual_taken),
@@ -369,6 +485,10 @@ void BranchPredictor::update(uint64_t pc,
                      static_cast<unsigned>(chooser_counter_after),
                      (meta && meta->valid && !meta->chooser_use_global) ? "local" : "global",
                      static_cast<int>(meta_index_mismatch),
+                     static_cast<int>(loop_valid),
+                     static_cast<unsigned>(loop_entry.confidence),
+                     static_cast<unsigned>(loop_entry.trip_count),
+                     static_cast<unsigned>(loop_entry.current_iter),
                      static_cast<unsigned>(committed_ghr_));
             }
             return;
@@ -397,6 +517,37 @@ void BranchPredictor::update(uint64_t pc,
     }
 }
 
+BranchPredictor::RasCheckpoint BranchPredictor::captureRasCheckpoint() const {
+    RasCheckpoint checkpoint{};
+    checkpoint.ras = speculative_ras_;
+    checkpoint.ras_size = speculative_ras_size_;
+    return checkpoint;
+}
+
+void BranchPredictor::restoreRasCheckpoint(const RasCheckpoint& checkpoint) {
+    speculative_ras_ = checkpoint.ras;
+    speculative_ras_size_ = std::min(checkpoint.ras_size, kRasEntries);
+}
+
+void BranchPredictor::applyResolvedControlToSpeculativeRas(uint64_t pc,
+                                                           const DecodedInstruction& decoded,
+                                                           bool actual_taken) {
+    if (!actual_taken) {
+        return;
+    }
+
+    if (decoded.opcode == Opcode::JALR && isReturnLikeJalr(decoded)) {
+        rasPop(speculative_ras_size_);
+        return;
+    }
+
+    if ((decoded.opcode == Opcode::JAL || decoded.opcode == Opcode::JALR) && isCallLikeControl(decoded)) {
+        rasPush(speculative_ras_,
+                speculative_ras_size_,
+                pc + (decoded.is_compressed ? 2ULL : 4ULL));
+    }
+}
+
 void BranchPredictor::recover_after_branch_mispredict(uint64_t pc, bool actual_taken, const BranchMeta* meta) {
     (void)pc;
     if (mode_ == Mode::Simple) {
@@ -406,19 +557,30 @@ void BranchPredictor::recover_after_branch_mispredict(uint64_t pc, bool actual_t
         const uint16_t ghr_before = static_cast<uint16_t>(meta->ghr_before & kGhrMask);
         speculative_ghr_ = pushHistory(ghr_before, actual_taken, kGhrMask);
         speculative_local_history_table_ = committed_local_history_table_;
+        speculative_loop_table_ = committed_loop_table_;
+        const size_t local_hist_index =
+            static_cast<size_t>(meta->local_history_index & static_cast<uint16_t>(kLocalHistoryEntries - 1));
+        speculative_local_history_table_[local_hist_index] =
+            pushHistory(static_cast<uint16_t>(meta->local_history_before & kLocalHistoryMask),
+                        actual_taken,
+                        kLocalHistoryMask);
         if (shouldTrace(pc) && DebugManager::getInstance().shouldLog("BRANCH")) {
             LOGT(BRANCH,
-                 "bp recover pc=0x%" PRIx64 " actual=%d ghr_before=0x%x -> speculative_ghr=0x%x",
+                 "bp recover pc=0x%" PRIx64
+                 " actual=%d ghr_before=0x%x -> speculative_ghr=0x%x local_hist[idx=%zu]=0x%x",
                  pc,
                  static_cast<int>(actual_taken),
                  static_cast<unsigned>(ghr_before),
-                 static_cast<unsigned>(speculative_ghr_));
+                 static_cast<unsigned>(speculative_ghr_),
+                 local_hist_index,
+                 static_cast<unsigned>(speculative_local_history_table_[local_hist_index]));
         }
         return;
     }
 
     speculative_ghr_ = committed_ghr_;
     speculative_local_history_table_ = committed_local_history_table_;
+    speculative_loop_table_ = committed_loop_table_;
     if (shouldTrace(pc) && DebugManager::getInstance().shouldLog("BRANCH")) {
         LOGT(BRANCH,
              "bp recover pc=0x%" PRIx64 " fallback-to-committed speculative_ghr=0x%x",
@@ -433,6 +595,7 @@ void BranchPredictor::on_pipeline_flush() {
     }
     speculative_ghr_ = committed_ghr_;
     speculative_local_history_table_ = committed_local_history_table_;
+    speculative_loop_table_ = committed_loop_table_;
     speculative_ras_ = committed_ras_;
     speculative_ras_size_ = committed_ras_size_;
     if (trace_pc_.has_value() && DebugManager::getInstance().shouldLog("BRANCH")) {

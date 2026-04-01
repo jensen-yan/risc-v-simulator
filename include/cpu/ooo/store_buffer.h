@@ -22,7 +22,8 @@ struct StoreBufferEntry {
 // Store Buffer，用于实现 Store-to-Load Forwarding
 class StoreBuffer {
 public:
-    static const int MAX_ENTRIES = 8; // Store Buffer大小
+    // 需覆盖全部在飞store，避免提早发布后因环形覆盖丢失live entry。
+    static const int MAX_ENTRIES = 96;
 
     enum class LoadForwardingKind {
         NoMatch,

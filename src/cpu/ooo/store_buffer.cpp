@@ -26,9 +26,23 @@ int StoreBuffer::find_entry_for_instruction(const DynamicInstPtr& instruction) c
 
 void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64_t value, uint8_t size) {
     const int existing_index = find_entry_for_instruction(instruction);
-    const int target_index = existing_index >= 0 ? existing_index : next_allocate_index;
+    int target_index = existing_index;
 
-    // 找到下一个可用的条目（可能覆盖旧条目）
+    if (target_index < 0) {
+        for (int i = 0; i < MAX_ENTRIES; ++i) {
+            const int candidate = (next_allocate_index + i) % MAX_ENTRIES;
+            if (!entries[candidate].valid) {
+                target_index = candidate;
+                break;
+            }
+        }
+    }
+
+    if (target_index < 0) {
+        throw SimulatorException("store buffer is full while publishing a live store");
+    }
+
+    // 找到下一个可用的条目或更新现有条目
     StoreBufferEntry& entry = entries[target_index];
 
     entry.valid = true;
@@ -45,8 +59,8 @@ void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64
             target_index, address, value, size, instruction->get_instruction_id(), instruction->get_pc());
 
     if (existing_index < 0) {
-        // 移动到下一个分配位置（循环）
-        next_allocate_index = (next_allocate_index + 1) % MAX_ENTRIES;
+        // 移动到下一个分配位置（从下一个位置继续找空槽）
+        next_allocate_index = (target_index + 1) % MAX_ENTRIES;
     }
 }
 

@@ -163,26 +163,28 @@ TEST_F(StoreBufferTest, RetireStores) {
     EXPECT_FALSE(store_buffer->forward_load(address2, size, load_result));
 }
 
-// 测试Store Buffer循环覆盖
-TEST_F(StoreBufferTest, CircularOverwrite) {
+// 测试Store Buffer在容量范围内保留全部live stores
+TEST_F(StoreBufferTest, KeepsAllLiveStoresWithinCapacity) {
     uint32_t base_address = 0x1000;
     uint32_t value = 0x12345678;
     uint8_t size = 4;
     uint32_t pc = 0x80000000;
 
-    // 添加超过Buffer容量的Store条目（假设容量为8）
+    // 添加远小于Buffer容量的Store条目
     for (int i = 0; i < 10; ++i) {
         auto instruction = createTestDynamicInst(i + 1, pc);
         store_buffer->add_store(instruction, base_address + i * 4, value + i, size);
     }
 
-    // 最早的Store条目应该被覆盖
     uint64_t load_result;
-    
-    // 最新的几个条目应该仍然存在
+
+    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 10u);
+    EXPECT_TRUE(store_buffer->forward_load(base_address, size, load_result));
+    EXPECT_EQ(load_result, value);
+
     EXPECT_TRUE(store_buffer->forward_load(base_address + 9 * 4, size, load_result));
     EXPECT_EQ(load_result, value + 9);
-    
+
     EXPECT_TRUE(store_buffer->forward_load(base_address + 8 * 4, size, load_result));
     EXPECT_EQ(load_result, value + 8);
 }

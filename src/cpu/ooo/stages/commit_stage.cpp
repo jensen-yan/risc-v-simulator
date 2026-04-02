@@ -360,6 +360,10 @@ void CommitStage::execute(CPUState& state) {
             profile.replay_rob_store_addr_unknown += memory_info.replay_rob_store_addr_unknown_count;
             profile.replay_rob_store_overlap += memory_info.replay_rob_store_overlap_count;
             profile.replay_store_buffer_overlap += memory_info.replay_store_buffer_overlap_count;
+            if (memory_info.speculated_past_addr_unknown_store) {
+                profile.speculated_addr_unknown++;
+                state.trainLoadAddrUnknownPredictor(committed_inst->get_pc(), true);
+            }
 
             switch (memory_info.load_final_source) {
                 case DynamicInst::MemoryInfo::LoadFinalSource::ForwardedFull:

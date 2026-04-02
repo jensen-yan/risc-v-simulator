@@ -120,6 +120,21 @@ void ExecuteStage::execute(CPUState& state) {
         unit->dcache.reset();
         unit->remaining_cycles = decoded_info.execution_cycles;
 
+        if (dispatch_result.unit_type == ExecutionUnitType::LOAD) {
+            auto& memory_info = dispatch_result.instruction->get_memory_info();
+            if (!memory_info.speculated_past_addr_unknown_store &&
+                state.shouldSpeculatePastAddrUnknownStore(dispatch_result.instruction->get_pc()) &&
+                state.reorder_buffer->has_earlier_address_unknown_store(
+                    dispatch_result.instruction->get_instruction_id())) {
+                memory_info.speculated_past_addr_unknown_store = true;
+                state.perf_counters.increment(PerfCounterId::LOADS_SPECULATED_ADDR_UNKNOWN);
+                LOGT(EXECUTE,
+                     "inst=%" PRId64
+                     " load dispatch marks speculative bypass for older STORE with unresolved address",
+                     dispatch_result.instruction->get_instruction_id());
+            }
+        }
+
         const char* unit_type_str = "";
         switch (dispatch_result.unit_type) {
             case ExecutionUnitType::ALU:
@@ -227,37 +242,56 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     // 关键修复：不要长期占用唯一LOAD单元，否则会阻塞更老的LOAD并形成死锁。
                     // 将该指令回退到ISSUED状态，释放执行单元，等待下个周期重调度。
                     auto blocked_inst = unit.instruction;
-                    blocked_inst->set_status(DynamicInst::Status::ISSUED);
-                    state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, static_cast<int>(i));
-                    resetExecutionUnitState(unit);
-                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waits on earlier STORE, replay and release load unit",
-                        blocked_inst->get_instruction_id(), i);
-                    blocked_inst->get_memory_info().replay_count++;
+                    const bool speculated_past_addr_unknown =
+                        hazard_kind == ReorderBuffer::StoreHazardKind::AddressUnknown &&
+                        blocked_inst->get_memory_info().speculated_past_addr_unknown_store;
+
+                    if (speculated_past_addr_unknown) {
+                        LOGT(EXECUTE,
+                             "inst=%" PRId64 " LOAD%zu speculates past older STORE with unresolved address",
+                             blocked_inst->get_instruction_id(), i);
+                    } else {
+                        blocked_inst->set_status(DynamicInst::Status::ISSUED);
+                        state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, static_cast<int>(i));
+                        resetExecutionUnitState(unit);
+                        LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waits on earlier STORE, replay and release load unit",
+                            blocked_inst->get_instruction_id(), i);
+                        blocked_inst->get_memory_info().replay_count++;
+                    }
+
                     switch (hazard_kind) {
                         case ReorderBuffer::StoreHazardKind::Amo:
-                            record_load_replay_reason(
-                                blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_AMO);
+                            if (!speculated_past_addr_unknown) {
+                                record_load_replay_reason(
+                                    blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_AMO);
+                            }
                             break;
                         case ReorderBuffer::StoreHazardKind::AddressUnknown:
-                            if (hazard_info.instruction) {
+                            if (!speculated_past_addr_unknown && hazard_info.instruction) {
                                 hazard_info.instruction->get_memory_info()
                                     .caused_rob_addr_unknown_block_count++;
                             }
-                            record_load_replay_reason(
-                                blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN);
+                            if (!speculated_past_addr_unknown) {
+                                record_load_replay_reason(
+                                    blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN);
+                            }
                             break;
                         case ReorderBuffer::StoreHazardKind::Overlap:
-                            if (hazard_info.instruction) {
+                            if (!speculated_past_addr_unknown && hazard_info.instruction) {
                                 hazard_info.instruction->get_memory_info()
                                     .caused_rob_overlap_block_count++;
                             }
-                            record_load_replay_reason(
-                                blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP);
+                            if (!speculated_past_addr_unknown) {
+                                record_load_replay_reason(
+                                    blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP);
+                            }
                             break;
                         case ReorderBuffer::StoreHazardKind::None:
                             break;
                     }
-                    continue; // 跳过完成处理
+                    if (!speculated_past_addr_unknown) {
+                        continue; // 跳过完成处理
+                    }
                 }
                 
                 // 没有Store依赖，可以完成
@@ -332,6 +366,10 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 
                 LOGT(EXECUTE, "inst=%" PRId64 " STORE%zu done, notify ROB",
                     unit.instruction->get_instruction_id(), i);
+
+                if (try_recover_memory_order_violation(unit.instruction, state)) {
+                    return;
+                }
                 
                 complete_execution_unit(unit, ExecutionUnitType::STORE, i, state);
             }
@@ -564,6 +602,108 @@ void ExecuteStage::erase_younger_rename_checkpoints(CPUState& state, uint64_t in
             ++it;
         }
     }
+}
+
+bool ExecuteStage::try_recover_memory_order_violation(const DynamicInstPtr& store_instruction,
+                                                      CPUState& state) {
+    if (!store_instruction || !store_instruction->is_store_instruction() || !state.reorder_buffer) {
+        return false;
+    }
+
+    const auto& store_memory = store_instruction->get_memory_info();
+    if (!store_memory.address_ready || store_memory.memory_size == 0) {
+        return false;
+    }
+
+    DynamicInstPtr violating_load = nullptr;
+    for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
+        if (!state.reorder_buffer->is_entry_valid(static_cast<ROBEntry>(i))) {
+            continue;
+        }
+
+        auto candidate = state.reorder_buffer->get_entry(static_cast<ROBEntry>(i));
+        if (!candidate || candidate->get_instruction_id() <= store_instruction->get_instruction_id()) {
+            continue;
+        }
+        if (!candidate->is_load_instruction()) {
+            continue;
+        }
+
+        const auto& load_memory = candidate->get_memory_info();
+        if (!load_memory.speculated_past_addr_unknown_store || !load_memory.address_ready ||
+            load_memory.memory_size == 0) {
+            continue;
+        }
+        if (!candidate->is_executing() && !candidate->is_completed()) {
+            continue;
+        }
+        if (!rangesOverlap(store_memory.memory_address,
+                           store_memory.memory_size,
+                           load_memory.memory_address,
+                           load_memory.memory_size)) {
+            continue;
+        }
+
+        violating_load = std::move(candidate);
+        break;
+    }
+
+    if (!violating_load) {
+        return false;
+    }
+
+    state.trainLoadAddrUnknownPredictor(violating_load->get_pc(), false);
+
+    uint64_t restart_pc = store_instruction->get_pc();
+    const ROBEntry head_entry = state.reorder_buffer->get_head_entry();
+    if (!state.reorder_buffer->is_empty() && state.reorder_buffer->is_entry_valid(head_entry)) {
+        if (const auto head_inst = state.reorder_buffer->get_entry(head_entry)) {
+            restart_pc = head_inst->get_pc();
+        }
+    }
+
+    const uint64_t rob_used =
+        static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES - state.reorder_buffer->get_free_entry_count());
+    state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSHES);
+    state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_OTHER);
+    state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, rob_used);
+    state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_OTHER, rob_used);
+    state.perf_counters.increment(PerfCounterId::MEMORY_ORDER_VIOLATION_RECOVERIES);
+
+    state.pc = restart_pc;
+    clearQueue(state.fetch_buffer);
+    clearQueue(state.cdb_queue);
+    state.reservation_station->flush_pipeline();
+    state.reorder_buffer->flush_pipeline();
+    state.register_rename->flush_pipeline();
+    state.rename_checkpoints.clear();
+    state.store_buffer->flush();
+    state.resetExecutionUnits();
+    state.reservation_valid = false;
+    state.reservation_addr = 0;
+    if (state.l1i_cache) {
+        state.l1i_cache->flushInFlight();
+    }
+    if (state.l1d_cache) {
+        state.l1d_cache->flushInFlight();
+    }
+    state.icache.reset();
+    if (state.branch_predictor) {
+        state.branch_predictor->on_pipeline_flush();
+    }
+
+    LOGT(EXECUTE,
+         "memory order violation recovery: store inst=%" PRId64 " pc=0x%" PRIx64
+         " addr=0x%" PRIx64 " load inst=%" PRId64 " pc=0x%" PRIx64 " addr=0x%" PRIx64
+         " restart_pc=0x%" PRIx64,
+         store_instruction->get_instruction_id(),
+         store_instruction->get_pc(),
+         store_memory.memory_address,
+         violating_load->get_instruction_id(),
+         violating_load->get_pc(),
+         violating_load->get_memory_info().memory_address,
+         restart_pc);
+    return true;
 }
 
 void ExecuteStage::record_load_replay_bucket(const DynamicInstPtr& instruction, CPUState& state) {

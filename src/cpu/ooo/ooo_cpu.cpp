@@ -67,6 +67,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.jalr_profiles.clear();
     state.load_profiles.clear();
     state.store_profiles.clear();
+    state.load_addr_unknown_predictor.clear();
 
     state.arch_registers.fill(0);
     state.arch_fp_registers.fill(0);
@@ -603,6 +604,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " replay_rob_store_addr_unknown=" << prof.replay_rob_store_addr_unknown
                << " replay_rob_store_overlap=" << prof.replay_rob_store_overlap
                << " replay_store_buffer_overlap=" << prof.replay_store_buffer_overlap
+               << " speculated_addr_unknown=" << prof.speculated_addr_unknown
                << " forwarded_full=" << prof.forwarded_full
                << " forwarded_partial=" << prof.forwarded_partial
                << " from_memory=" << prof.from_memory << "\n";

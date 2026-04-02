@@ -195,6 +195,7 @@ struct LoadProfileEntry {
     uint64_t replay_rob_store_addr_unknown = 0;
     uint64_t replay_rob_store_overlap = 0;
     uint64_t replay_store_buffer_overlap = 0;
+    uint64_t speculated_addr_unknown = 0;
     uint64_t forwarded_full = 0;
     uint64_t forwarded_partial = 0;
     uint64_t from_memory = 0;
@@ -268,6 +269,7 @@ struct CPUState {
     std::unordered_map<uint64_t, JalrProfileEntry> jalr_profiles;
     std::unordered_map<uint64_t, LoadProfileEntry> load_profiles;
     std::unordered_map<uint64_t, StoreProfileEntry> store_profiles;
+    std::unordered_map<uint64_t, uint8_t> load_addr_unknown_predictor;
 
     // A扩展 LR/SC 预留状态
     bool reservation_valid;        // LR 预留是否有效
@@ -316,6 +318,31 @@ struct CPUState {
     void recordBranchMispredict() {
         ++branch_mispredicts;
         perf_counters.increment(PerfCounterId::BRANCH_MISPREDICTS);
+    }
+
+    uint8_t getLoadAddrUnknownPredictorCounter(uint64_t pc) const {
+        constexpr uint8_t kDefaultCounter = 2;
+        const auto it = load_addr_unknown_predictor.find(pc);
+        return it == load_addr_unknown_predictor.end() ? kDefaultCounter : it->second;
+    }
+
+    bool shouldSpeculatePastAddrUnknownStore(uint64_t pc) const {
+        return getLoadAddrUnknownPredictorCounter(pc) >= 2;
+    }
+
+    void trainLoadAddrUnknownPredictor(uint64_t pc, bool success) {
+        uint8_t& counter = load_addr_unknown_predictor[pc];
+        if (counter == 0 && success) {
+            counter = 2;
+        }
+
+        if (success) {
+            if (counter < 3) {
+                counter++;
+            }
+        } else {
+            counter = 0;
+        }
     }
 
     void resetExecutionUnits() {

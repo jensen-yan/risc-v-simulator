@@ -332,6 +332,34 @@ TEST_F(ReorderBufferTest, UnknownOrOverlappingOlderStoreStillBlocksLoadHazardChe
               ReorderBuffer::StoreHazardKind::Overlap);
 }
 
+TEST_F(ReorderBufferTest, EarlierAddressUnknownStoreCanBeDetectedWithoutLoadAddress) {
+    DecodedInstruction store_inst = createInstruction(InstructionType::S_TYPE, 0, 1, 2);
+    store_inst.opcode = Opcode::STORE;
+    store_inst.memory_access_size = 4;
+    auto older_store = rob.allocate_entry(store_inst, 0x1000, getNextInstructionId());
+    ASSERT_TRUE(older_store != nullptr);
+
+    auto& store_memory = older_store->get_memory_info();
+    store_memory.is_memory_op = true;
+    store_memory.is_store = true;
+
+    DecodedInstruction load_inst = createInstruction(InstructionType::I_TYPE, 3, 4, 0);
+    load_inst.opcode = Opcode::LOAD;
+    load_inst.memory_access_size = 4;
+    auto younger_load = rob.allocate_entry(load_inst, 0x1004, getNextInstructionId());
+    ASSERT_TRUE(younger_load != nullptr);
+
+    EXPECT_TRUE(rob.has_earlier_address_unknown_store(younger_load->get_instruction_id()))
+        << "dispatch阶段应能在不依赖load地址的情况下发现更老地址未知store";
+
+    store_memory.address_ready = true;
+    store_memory.memory_address = 0x240;
+    store_memory.memory_size = 4;
+
+    EXPECT_FALSE(rob.has_earlier_address_unknown_store(younger_load->get_instruction_id()))
+        << "更老store地址已就绪后，不应再被视为addr-unknown阻塞源";
+}
+
 TEST_F(ReorderBufferTest, PublishedOverlappingOlderStoreDoesNotBlockLoadHazardCheck) {
     DecodedInstruction store_inst = createInstruction(InstructionType::S_TYPE, 0, 1, 2);
     store_inst.opcode = Opcode::STORE;

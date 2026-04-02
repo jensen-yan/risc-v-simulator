@@ -596,6 +596,7 @@ TEST_F(OutOfOrderCPUTest, DetailedStatsIncludeLoadReplayAndForwardingProfile) {
     const std::string stats_text = oss.str();
     EXPECT_NE(stats_text.find("cpu.load_profile.top.begin"), std::string::npos);
     EXPECT_NE(stats_text.find("replay_total="), std::string::npos);
+    EXPECT_NE(stats_text.find("speculated_addr_unknown="), std::string::npos);
     EXPECT_NE(stats_text.find("forwarded_full="), std::string::npos);
 }
 
@@ -706,6 +707,51 @@ TEST_F(OutOfOrderCPUTest, ReadyStoreValueAvoidsRobOverlapReplayForDependentLoad)
 
     const auto stats = cpu->getStats();
     EXPECT_EQ(statValueByName(stats, "cpu.memory.load_replays.rob_store_overlap"), 0u);
+}
+
+TEST_F(OutOfOrderCPUTest, LoadCanSpeculatePastAddressUnknownStoreWhenNoOverlapExists) {
+    memory->writeWord(0x100, 0x12345678u);
+
+    // ADDI x13, x0, 20
+    // ADDI x14, x0, 16
+    // MUL  x1, x13, x14    ; x1 <- 0x140，故意放慢 older store 的地址准备
+    // ADDI x11, x0, 0x34
+    // ADDI x12, x0, 0x100
+    // SW   x11, 0(x1)      ; older store, 地址执行前未知
+    // LW   x3, 0(x12)      ; younger load, 应可越过未知地址store推测执行
+    // ADDI x17, x0, 93
+    // ECALL
+    writeInstruction(0x0, createITypeInstruction(20, 0, 0x0, 13, 0x13));
+    writeInstruction(0x4, createITypeInstruction(16, 0, 0x0, 14, 0x13));
+    writeInstruction(0x8, createRTypeInstruction(0x01, 14, 13, 0x0, 1, 0x33));
+    writeInstruction(0xC, createITypeInstruction(0x34, 0, 0x0, 11, 0x13));
+    writeInstruction(0x10, createITypeInstruction(0x100, 0, 0x0, 12, 0x13));
+    writeInstruction(0x14, createSTypeInstruction(0, 11, 1, 0x2, 0x23));
+    writeInstruction(0x18, createITypeInstruction(0, 12, 0x2, 3, 0x03));
+    writeInstruction(0x1C, createITypeInstruction(93, 0, 0x0, 17, 0x13));
+    writeInstruction(0x20, createECallInstruction());
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 500 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted());
+    EXPECT_EQ(cpu->getRegister(3), 0x12345678u);
+    EXPECT_EQ(memory->readWord(0x140), 0x34u);
+
+    auto statValueByName = [](const ICpuInterface::StatsList& stats, const std::string& name) {
+        for (const auto& entry : stats) {
+            if (entry.name == name) {
+                return entry.value;
+            }
+        }
+        return uint64_t{0};
+    };
+
+    const auto stats = cpu->getStats();
+    EXPECT_GT(statValueByName(stats, "cpu.memory.loads_speculated_addr_unknown"), 0u);
+    EXPECT_EQ(statValueByName(stats, "cpu.memory.order_violation_recoveries"), 0u);
 }
 
 TEST_F(OutOfOrderCPUTest, BranchMispredictRecoversEarlyAndFlushesWrongPath) {

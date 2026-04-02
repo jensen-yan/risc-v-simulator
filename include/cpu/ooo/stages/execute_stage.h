@@ -54,6 +54,8 @@ private:
                                        ExecutionUnitType current_unit_type,
                                        size_t current_unit_index);
     void erase_younger_rename_checkpoints(CPUState& state, uint64_t instruction_id);
+    bool try_recover_memory_order_violation(const DynamicInstPtr& store_instruction,
+                                            CPUState& state);
 
     // 记录load replay分布桶
     void record_load_replay_bucket(const DynamicInstPtr& instruction, CPUState& state);

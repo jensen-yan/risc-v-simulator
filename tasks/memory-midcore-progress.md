@@ -31,4 +31,6 @@
 - 新增 `lsu_overlap_mix`，专门覆盖 `partial forward` 与 `overlap replay` 两类 LSU 行为
 - 已实现“内存值 + store buffer 字节 merge”的部分重叠 load 解析，`lsu_overlap_mix` 上 `store_buffer_overlap replay` 已降到 `0`
 - 已开始把“地址和值都 ready 的 store”提前发布到 store buffer，目标是继续压 `rob_store_overlap`
+- 已补 `addr_unknown` 轻量推测与恢复骨架：dispatch 时可越过地址未知的更老 store，违例在 store resolve 后全流水恢复
+- `lsu_overlap_mix` 上已实际观察到 `loads_speculated_addr_unknown` 与 `order_violation_recoveries`，说明这条链路不再只是静态统计
 - 下一步优先看 `rob_store_overlap` 是否已明显转成 forwarding；若边际收益变小，再切到 `L2 / prefetcher`

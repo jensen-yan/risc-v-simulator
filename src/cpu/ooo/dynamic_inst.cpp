@@ -291,6 +291,25 @@ void DynamicInst::setup_execution_requirements() {
     switch (unit_type) {
         case ExecutionUnitType::ALU:
             exec_info_->execution_cycles = 1;
+            if ((decoded_info_.opcode == Opcode::OP || decoded_info_.opcode == Opcode::OP_32) &&
+                decoded_info_.funct7 == Funct7::M_EXT) {
+                switch (static_cast<Funct3>(decoded_info_.funct3)) {
+                    case Funct3::MUL:
+                    case Funct3::MULH:
+                    case Funct3::MULHSU:
+                    case Funct3::MULHU:
+                        exec_info_->execution_cycles = 5;
+                        break;
+                    case Funct3::DIV:
+                    case Funct3::DIVU:
+                    case Funct3::REM:
+                    case Funct3::REMU:
+                        exec_info_->execution_cycles = 8;
+                        break;
+                    default:
+                        break;
+                }
+            }
             break;
         case ExecutionUnitType::LOAD:
             exec_info_->execution_cycles = 2;  // 加载指令需要2个周期

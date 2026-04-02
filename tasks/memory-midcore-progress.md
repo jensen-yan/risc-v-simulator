@@ -33,4 +33,5 @@
 - 已开始把“地址和值都 ready 的 store”提前发布到 store buffer，目标是继续压 `rob_store_overlap`
 - 已补 `addr_unknown` 轻量推测与恢复骨架：dispatch 时可越过地址未知的更老 store，违例在 store resolve 后全流水恢复
 - `lsu_overlap_mix` 上已实际观察到 `loads_speculated_addr_unknown` 与 `order_violation_recoveries`，说明这条链路不再只是静态统计
+- 已补齐 `load/store profile` 的 addr-unknown 失败归因，可直接看到“哪个 load 推测失败、哪个 store 触发恢复”
 - 下一步优先看 `rob_store_overlap` 是否已明显转成 forwarding；若边际收益变小，再切到 `L2 / prefetcher`

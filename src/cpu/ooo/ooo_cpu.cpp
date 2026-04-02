@@ -584,8 +584,10 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
         std::vector<std::pair<uint64_t, LoadProfileEntry>> entries(
             cpu_state_.load_profiles.begin(), cpu_state_.load_profiles.end());
         std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-            if (a.second.replay_total != b.second.replay_total) {
-                return a.second.replay_total > b.second.replay_total;
+            const uint64_t a_events = a.second.replay_total + a.second.speculated_addr_unknown_violation;
+            const uint64_t b_events = b.second.replay_total + b.second.speculated_addr_unknown_violation;
+            if (a_events != b_events) {
+                return a_events > b_events;
             }
             return a.second.executions > b.second.executions;
         });
@@ -605,6 +607,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " replay_rob_store_overlap=" << prof.replay_rob_store_overlap
                << " replay_store_buffer_overlap=" << prof.replay_store_buffer_overlap
                << " speculated_addr_unknown=" << prof.speculated_addr_unknown
+               << " speculated_addr_unknown_violation=" << prof.speculated_addr_unknown_violation
                << " forwarded_full=" << prof.forwarded_full
                << " forwarded_partial=" << prof.forwarded_partial
                << " from_memory=" << prof.from_memory << "\n";
@@ -619,11 +622,13 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
             const uint64_t a_events = a.second.forwarded_full + a.second.forwarded_partial +
                                       a.second.blocked_rob_addr_unknown +
                                       a.second.blocked_rob_overlap +
-                                      a.second.blocked_store_buffer_overlap;
+                                      a.second.blocked_store_buffer_overlap +
+                                      a.second.caused_order_violation;
             const uint64_t b_events = b.second.forwarded_full + b.second.forwarded_partial +
                                       b.second.blocked_rob_addr_unknown +
                                       b.second.blocked_rob_overlap +
-                                      b.second.blocked_store_buffer_overlap;
+                                      b.second.blocked_store_buffer_overlap +
+                                      b.second.caused_order_violation;
             if (a_events != b_events) {
                 return a_events > b_events;
             }
@@ -641,7 +646,8 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " forwarded_partial=" << prof.forwarded_partial
                << " blocked_rob_addr_unknown=" << prof.blocked_rob_addr_unknown
                << " blocked_rob_overlap=" << prof.blocked_rob_overlap
-               << " blocked_store_buffer_overlap=" << prof.blocked_store_buffer_overlap << "\n";
+               << " blocked_store_buffer_overlap=" << prof.blocked_store_buffer_overlap
+               << " caused_order_violation=" << prof.caused_order_violation << "\n";
         }
         os << "cpu.store_profile.top.end\n";
     }

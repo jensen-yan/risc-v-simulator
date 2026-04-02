@@ -196,6 +196,7 @@ struct LoadProfileEntry {
     uint64_t replay_rob_store_overlap = 0;
     uint64_t replay_store_buffer_overlap = 0;
     uint64_t speculated_addr_unknown = 0;
+    uint64_t speculated_addr_unknown_violation = 0;
     uint64_t forwarded_full = 0;
     uint64_t forwarded_partial = 0;
     uint64_t from_memory = 0;
@@ -208,6 +209,7 @@ struct StoreProfileEntry {
     uint64_t blocked_rob_addr_unknown = 0;
     uint64_t blocked_rob_overlap = 0;
     uint64_t blocked_store_buffer_overlap = 0;
+    uint64_t caused_order_violation = 0;
 };
 
 struct CPUState {

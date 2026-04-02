@@ -652,6 +652,8 @@ bool ExecuteStage::try_recover_memory_order_violation(const DynamicInstPtr& stor
         return false;
     }
 
+    state.load_profiles[violating_load->get_pc()].speculated_addr_unknown_violation++;
+    state.store_profiles[store_instruction->get_pc()].caused_order_violation++;
     state.trainLoadAddrUnknownPredictor(violating_load->get_pc(), false);
 
     uint64_t restart_pc = store_instruction->get_pc();

@@ -83,6 +83,7 @@ PERF_COUNTER_DEF(LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN, "cpu.memory.load_replays.r
 PERF_COUNTER_DEF(LOAD_REPLAYS_ROB_STORE_OVERLAP, "cpu.memory.load_replays.rob_store_overlap", "Load replays caused by overlapping older stores discovered in ROB")
 PERF_COUNTER_DEF(LOAD_REPLAYS_STORE_BUFFER_OVERLAP, "cpu.memory.load_replays.store_buffer_overlap", "Load replays caused by overlapping older stores in store buffer that cannot forward")
 PERF_COUNTER_DEF(LOADS_SPECULATED_ADDR_UNKNOWN, "cpu.memory.loads_speculated_addr_unknown", "Loads allowed to bypass older stores with unresolved addresses")
+PERF_COUNTER_DEF(LOADS_BLOCKED_ADDR_UNKNOWN_PAIR, "cpu.memory.loads_blocked_addr_unknown_pair", "Loads blocked by proven-bad addr-unknown load/store pairs")
 PERF_COUNTER_DEF(MEMORY_ORDER_VIOLATION_RECOVERIES, "cpu.memory.order_violation_recoveries", "Full-pipeline recoveries caused by detected load-store ordering violations")
 PERF_COUNTER_DEF(LOAD_REPLAY_BUCKET_0, "cpu.memory.load_replay_bucket_0", "Loads completed without replay")
 PERF_COUNTER_DEF(LOAD_REPLAY_BUCKET_1, "cpu.memory.load_replay_bucket_1", "Loads completed after 1 replay")

@@ -19,6 +19,7 @@
 #include <memory>
 #include <queue>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace riscv {
 
@@ -197,6 +198,7 @@ struct LoadProfileEntry {
     uint64_t replay_store_buffer_overlap = 0;
     uint64_t speculated_addr_unknown = 0;
     uint64_t speculated_addr_unknown_violation = 0;
+    uint64_t blocked_addr_unknown_pair = 0;
     uint64_t forwarded_full = 0;
     uint64_t forwarded_partial = 0;
     uint64_t from_memory = 0;
@@ -272,6 +274,7 @@ struct CPUState {
     std::unordered_map<uint64_t, LoadProfileEntry> load_profiles;
     std::unordered_map<uint64_t, StoreProfileEntry> store_profiles;
     std::unordered_map<uint64_t, uint8_t> load_addr_unknown_predictor;
+    std::unordered_set<uint64_t> blocked_addr_unknown_pairs;
 
     // A扩展 LR/SC 预留状态
     bool reservation_valid;        // LR 预留是否有效
@@ -328,23 +331,34 @@ struct CPUState {
         return it == load_addr_unknown_predictor.end() ? kDefaultCounter : it->second;
     }
 
-    bool shouldSpeculatePastAddrUnknownStore(uint64_t pc) const {
-        return getLoadAddrUnknownPredictorCounter(pc) >= 2;
+    static uint64_t makeAddrUnknownPairKey(uint64_t load_pc, uint64_t store_pc) {
+        return (load_pc >> 2) ^ (store_pc << 1) ^ (load_pc << 32);
+    }
+
+    bool isBlockedAddrUnknownPair(uint64_t load_pc, uint64_t store_pc) const {
+        return blocked_addr_unknown_pairs.count(makeAddrUnknownPairKey(load_pc, store_pc)) != 0;
+    }
+
+    bool shouldSpeculatePastAddrUnknownStore(uint64_t load_pc, uint64_t store_pc) const {
+        return getLoadAddrUnknownPredictorCounter(load_pc) >= 1 &&
+               !isBlockedAddrUnknownPair(load_pc, store_pc);
     }
 
     void trainLoadAddrUnknownPredictor(uint64_t pc, bool success) {
         uint8_t& counter = load_addr_unknown_predictor[pc];
-        if (counter == 0 && success) {
-            counter = 2;
-        }
-
         if (success) {
             if (counter < 3) {
                 counter++;
             }
         } else {
-            counter = 0;
+            if (counter > 1) {
+                counter--;
+            }
         }
+    }
+
+    void recordAddrUnknownPairViolation(uint64_t load_pc, uint64_t store_pc) {
+        blocked_addr_unknown_pairs.insert(makeAddrUnknownPairKey(load_pc, store_pc));
     }
 
     void resetExecutionUnits() {

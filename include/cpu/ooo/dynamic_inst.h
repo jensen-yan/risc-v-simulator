@@ -81,6 +81,9 @@ public:
         bool address_ready;                    // 地址是否准备好
         bool store_buffer_published;           // store 是否已经对 younger load 可见
         bool speculated_past_addr_unknown_store; // load 是否曾越过地址未知的更老store
+        bool has_speculated_addr_unknown_source; // 是否记录了触发本次推测的更老store PC
+        uint64_t speculated_addr_unknown_store_pc; // 触发本次推测的更老store PC
+        bool blocked_by_addr_unknown_pair;     // load 是否被已知坏 pair 阻塞过
         bool store_forwarded;                  // 是否通过Store-to-Load转发
         uint32_t replay_count;                 // Load replay次数（用于分布统计）
         uint32_t replay_host_comm_count;       // host-comm 串行化导致的 replay 次数
@@ -98,7 +101,11 @@ public:
         MemoryInfo() : is_memory_op(false), is_load(false), is_store(false),
                       memory_address(0), memory_value(0), memory_size(0),
                       address_ready(false), store_buffer_published(false),
-                      speculated_past_addr_unknown_store(false), store_forwarded(false), replay_count(0),
+                      speculated_past_addr_unknown_store(false),
+                      has_speculated_addr_unknown_source(false),
+                      speculated_addr_unknown_store_pc(0),
+                      blocked_by_addr_unknown_pair(false),
+                      store_forwarded(false), replay_count(0),
                       replay_host_comm_count(0), replay_rob_store_amo_count(0),
                       replay_rob_store_addr_unknown_count(0), replay_rob_store_overlap_count(0),
                       replay_store_buffer_overlap_count(0), caused_forwarded_full_count(0),

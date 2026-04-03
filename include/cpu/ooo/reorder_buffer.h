@@ -160,6 +160,7 @@ public:
     StoreHazardInfo get_earlier_store_hazard_info(uint64_t current_instruction_id,
                                                   uint64_t load_address,
                                                   uint8_t load_size) const;
+    DynamicInstPtr get_earlier_address_unknown_store(uint64_t current_instruction_id) const;
     bool has_earlier_address_unknown_store(uint64_t current_instruction_id) const;
     StoreHazardKind get_earlier_store_hazard_kind(uint64_t current_instruction_id,
                                                   uint64_t load_address,

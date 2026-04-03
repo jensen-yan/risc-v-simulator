@@ -68,6 +68,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.load_profiles.clear();
     state.store_profiles.clear();
     state.load_addr_unknown_predictor.clear();
+    state.blocked_addr_unknown_pairs.clear();
 
     state.arch_registers.fill(0);
     state.arch_fp_registers.fill(0);
@@ -584,8 +585,10 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
         std::vector<std::pair<uint64_t, LoadProfileEntry>> entries(
             cpu_state_.load_profiles.begin(), cpu_state_.load_profiles.end());
         std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-            const uint64_t a_events = a.second.replay_total + a.second.speculated_addr_unknown_violation;
-            const uint64_t b_events = b.second.replay_total + b.second.speculated_addr_unknown_violation;
+            const uint64_t a_events = a.second.replay_total + a.second.speculated_addr_unknown_violation +
+                                      a.second.blocked_addr_unknown_pair;
+            const uint64_t b_events = b.second.replay_total + b.second.speculated_addr_unknown_violation +
+                                      b.second.blocked_addr_unknown_pair;
             if (a_events != b_events) {
                 return a_events > b_events;
             }
@@ -608,6 +611,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " replay_store_buffer_overlap=" << prof.replay_store_buffer_overlap
                << " speculated_addr_unknown=" << prof.speculated_addr_unknown
                << " speculated_addr_unknown_violation=" << prof.speculated_addr_unknown_violation
+               << " blocked_addr_unknown_pair=" << prof.blocked_addr_unknown_pair
                << " forwarded_full=" << prof.forwarded_full
                << " forwarded_partial=" << prof.forwarded_partial
                << " from_memory=" << prof.from_memory << "\n";

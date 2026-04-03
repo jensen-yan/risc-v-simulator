@@ -424,6 +424,10 @@ ReorderBuffer::StoreHazardInfo ReorderBuffer::get_earlier_store_hazard_info(
 }
 
 bool ReorderBuffer::has_earlier_address_unknown_store(uint64_t current_instruction_id) const {
+    return get_earlier_address_unknown_store(current_instruction_id) != nullptr;
+}
+
+DynamicInstPtr ReorderBuffer::get_earlier_address_unknown_store(uint64_t current_instruction_id) const {
     for (int i = 0; i < entry_count; ++i) {
         int index = (head_ptr + i) % MAX_ROB_ENTRIES;
         if (!rob_entries[index]) {
@@ -441,11 +445,11 @@ bool ReorderBuffer::has_earlier_address_unknown_store(uint64_t current_instructi
 
         const auto& memory_info = inst->get_memory_info();
         if (!memory_info.address_ready || memory_info.memory_size == 0) {
-            return true;
+            return inst;
         }
     }
 
-    return false;
+    return nullptr;
 }
 
 ReorderBuffer::StoreHazardKind ReorderBuffer::get_earlier_store_hazard_kind(

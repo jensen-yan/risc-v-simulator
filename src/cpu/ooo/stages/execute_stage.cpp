@@ -122,16 +122,33 @@ void ExecuteStage::execute(CPUState& state) {
 
         if (dispatch_result.unit_type == ExecutionUnitType::LOAD) {
             auto& memory_info = dispatch_result.instruction->get_memory_info();
-            if (!memory_info.speculated_past_addr_unknown_store &&
-                state.shouldSpeculatePastAddrUnknownStore(dispatch_result.instruction->get_pc()) &&
-                state.reorder_buffer->has_earlier_address_unknown_store(
+            if (const auto older_unknown_store = state.reorder_buffer->get_earlier_address_unknown_store(
                     dispatch_result.instruction->get_instruction_id())) {
-                memory_info.speculated_past_addr_unknown_store = true;
-                state.perf_counters.increment(PerfCounterId::LOADS_SPECULATED_ADDR_UNKNOWN);
-                LOGT(EXECUTE,
-                     "inst=%" PRId64
-                     " load dispatch marks speculative bypass for older STORE with unresolved address",
-                     dispatch_result.instruction->get_instruction_id());
+                const uint64_t load_pc = dispatch_result.instruction->get_pc();
+                const uint64_t store_pc = older_unknown_store->get_pc();
+                if (!memory_info.speculated_past_addr_unknown_store &&
+                    state.shouldSpeculatePastAddrUnknownStore(load_pc, store_pc)) {
+                    memory_info.speculated_past_addr_unknown_store = true;
+                    memory_info.has_speculated_addr_unknown_source = true;
+                    memory_info.speculated_addr_unknown_store_pc = store_pc;
+                    state.perf_counters.increment(PerfCounterId::LOADS_SPECULATED_ADDR_UNKNOWN);
+                    LOGT(EXECUTE,
+                         "inst=%" PRId64
+                         " load dispatch speculates past unresolved STORE pc=0x%" PRIx64,
+                         dispatch_result.instruction->get_instruction_id(),
+                         store_pc);
+                } else if (state.isBlockedAddrUnknownPair(load_pc, store_pc) &&
+                           !memory_info.blocked_by_addr_unknown_pair) {
+                    memory_info.blocked_by_addr_unknown_pair = true;
+                    state.perf_counters.increment(PerfCounterId::LOADS_BLOCKED_ADDR_UNKNOWN_PAIR);
+                    LOGT(EXECUTE,
+                         "inst=%" PRId64
+                         " load dispatch blocks addr-unknown speculation for bad pair load_pc=0x%" PRIx64
+                         " store_pc=0x%" PRIx64,
+                         dispatch_result.instruction->get_instruction_id(),
+                         load_pc,
+                         store_pc);
+                }
             }
         }
 
@@ -654,6 +671,7 @@ bool ExecuteStage::try_recover_memory_order_violation(const DynamicInstPtr& stor
 
     state.load_profiles[violating_load->get_pc()].speculated_addr_unknown_violation++;
     state.store_profiles[store_instruction->get_pc()].caused_order_violation++;
+    state.recordAddrUnknownPairViolation(violating_load->get_pc(), store_instruction->get_pc());
     state.trainLoadAddrUnknownPredictor(violating_load->get_pc(), false);
 
     uint64_t restart_pc = store_instruction->get_pc();

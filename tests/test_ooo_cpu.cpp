@@ -598,6 +598,7 @@ TEST_F(OutOfOrderCPUTest, DetailedStatsIncludeLoadReplayAndForwardingProfile) {
     EXPECT_NE(stats_text.find("replay_total="), std::string::npos);
     EXPECT_NE(stats_text.find("speculated_addr_unknown="), std::string::npos);
     EXPECT_NE(stats_text.find("speculated_addr_unknown_violation="), std::string::npos);
+    EXPECT_NE(stats_text.find("blocked_addr_unknown_pair="), std::string::npos);
     EXPECT_NE(stats_text.find("forwarded_full="), std::string::npos);
 }
 
@@ -798,7 +799,7 @@ TEST_F(OutOfOrderCPUTest, LoadOrderViolationRecoveryIsAttributedToLoadAndStorePr
 
     const auto stats = cpu->getStats();
     EXPECT_GT(statValueByName(stats, "cpu.memory.loads_speculated_addr_unknown"), 0u);
-    EXPECT_GT(statValueByName(stats, "cpu.memory.order_violation_recoveries"), 0u);
+    EXPECT_EQ(statValueByName(stats, "cpu.memory.order_violation_recoveries"), 1u);
 
     std::ostringstream oss;
     cpu->dumpDetailedStats(oss);

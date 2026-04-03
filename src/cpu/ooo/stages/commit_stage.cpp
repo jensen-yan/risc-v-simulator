@@ -364,6 +364,9 @@ void CommitStage::execute(CPUState& state) {
                 profile.speculated_addr_unknown++;
                 state.trainLoadAddrUnknownPredictor(committed_inst->get_pc(), true);
             }
+            if (memory_info.blocked_by_addr_unknown_pair) {
+                profile.blocked_addr_unknown_pair++;
+            }
 
             switch (memory_info.load_final_source) {
                 case DynamicInst::MemoryInfo::LoadFinalSource::ForwardedFull:

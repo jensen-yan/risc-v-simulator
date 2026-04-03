@@ -427,7 +427,9 @@ bool ReorderBuffer::has_earlier_address_unknown_store(uint64_t current_instructi
     return get_earlier_address_unknown_store(current_instruction_id) != nullptr;
 }
 
-DynamicInstPtr ReorderBuffer::get_earlier_address_unknown_store(uint64_t current_instruction_id) const {
+std::vector<DynamicInstPtr> ReorderBuffer::get_earlier_address_unknown_stores(
+    uint64_t current_instruction_id) const {
+    std::vector<DynamicInstPtr> unresolved_stores;
     for (int i = 0; i < entry_count; ++i) {
         int index = (head_ptr + i) % MAX_ROB_ENTRIES;
         if (!rob_entries[index]) {
@@ -445,10 +447,18 @@ DynamicInstPtr ReorderBuffer::get_earlier_address_unknown_store(uint64_t current
 
         const auto& memory_info = inst->get_memory_info();
         if (!memory_info.address_ready || memory_info.memory_size == 0) {
-            return inst;
+            unresolved_stores.push_back(inst);
         }
     }
 
+    return unresolved_stores;
+}
+
+DynamicInstPtr ReorderBuffer::get_earlier_address_unknown_store(uint64_t current_instruction_id) const {
+    const auto unresolved_stores = get_earlier_address_unknown_stores(current_instruction_id);
+    if (!unresolved_stores.empty()) {
+        return unresolved_stores.front();
+    }
     return nullptr;
 }
 

@@ -220,6 +220,29 @@ TEST_F(ReorderBufferTest, PartialFlushOnlyDropsYoungerEntries) {
     EXPECT_FALSE(rob.is_entry_valid(allocated[3]->get_rob_entry()));
 }
 
+TEST_F(ReorderBufferTest, EarlierAddressUnknownStoresAreReturnedInProgramOrder) {
+    auto store0 = createInstruction(InstructionType::S_TYPE, 0, 1, 2);
+    store0.opcode = Opcode::STORE;
+    auto store1 = createInstruction(InstructionType::S_TYPE, 0, 3, 4);
+    store1.opcode = Opcode::STORE;
+    auto load = createInstruction(InstructionType::I_TYPE, 5, 6, 0);
+    load.opcode = Opcode::LOAD;
+
+    auto dyn_store0 = rob.allocate_entry(store0, 0x1000, getNextInstructionId());
+    auto dyn_store1 = rob.allocate_entry(store1, 0x1004, getNextInstructionId());
+    auto dyn_load = rob.allocate_entry(load, 0x1008, getNextInstructionId());
+
+    ASSERT_NE(dyn_store0, nullptr);
+    ASSERT_NE(dyn_store1, nullptr);
+    ASSERT_NE(dyn_load, nullptr);
+
+    auto older_unknown_stores =
+        rob.get_earlier_address_unknown_stores(dyn_load->get_instruction_id());
+    ASSERT_EQ(older_unknown_stores.size(), 2u);
+    EXPECT_EQ(older_unknown_stores[0]->get_instruction_id(), dyn_store0->get_instruction_id());
+    EXPECT_EQ(older_unknown_stores[1]->get_instruction_id(), dyn_store1->get_instruction_id());
+}
+
 // 测试8：ROB状态查询
 TEST_F(ReorderBufferTest, StateQuery) {
     // 分配一个表项

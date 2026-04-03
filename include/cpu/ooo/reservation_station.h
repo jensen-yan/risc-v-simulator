@@ -2,6 +2,7 @@
 
 #include "cpu/ooo/ooo_types.h"
 #include "cpu/ooo/dynamic_inst.h"
+#include <functional>
 #include <vector>
 #include <string>
 
@@ -73,7 +74,9 @@ public:
     DispatchResult dispatch_instruction();
 
     // 同拍批量调度多条准备好的指令，保持程序顺序并跳过资源冲突候选
-    std::vector<DispatchResult> dispatch_instructions(size_t limit);
+    std::vector<DispatchResult> dispatch_instructions(
+        size_t limit,
+        const std::function<bool(const DynamicInstPtr&)>& can_dispatch = {});
     
     // 更新操作数（来自CDB）
     void update_operands(const CommonDataBusEntry& cdb_entry, StoreBuffer* store_buffer);

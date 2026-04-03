@@ -391,4 +391,25 @@ TEST_F(ReservationStationTest, BatchDispatchSkipsBlockedOlderCandidateForSecondS
     EXPECT_EQ(results[1].unit_type, ExecutionUnitType::STORE);
 }
 
+TEST_F(ReservationStationTest, BatchDispatchSkipsPredicateRejectedOlderCandidate) {
+    auto older_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
+    auto older_load_inst = createDynamicInst(older_load, 32, 0, 40, true, true, 0x1000, 1);
+    auto younger_alu = createInstruction(InstructionType::R_TYPE, Opcode::OP, 3, 4, 5);
+    auto younger_alu_inst = createDynamicInst(younger_alu, 41, 42, 43, true, true, 0x1004, 2);
+
+    EXPECT_TRUE(rs.issue_instruction(older_load_inst).success);
+    EXPECT_TRUE(rs.issue_instruction(younger_alu_inst).success);
+
+    const auto results = rs.dispatch_instructions(
+        2,
+        [&](const DynamicInstPtr& inst) {
+            return inst->get_instruction_id() != older_load_inst->get_instruction_id();
+        });
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_EQ(results[0].instruction->get_instruction_id(),
+              younger_alu_inst->get_instruction_id());
+    EXPECT_EQ(results[0].unit_type, ExecutionUnitType::ALU);
+}
+
 } // namespace riscv

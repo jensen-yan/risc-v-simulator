@@ -78,7 +78,8 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
     return result;
 }
 
-std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_instructions(size_t limit) {
+std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_instructions(
+    size_t limit, const std::function<bool(const DynamicInstPtr&)>& can_dispatch) {
     std::vector<DispatchResult> results;
     if (limit == 0) {
         return results;
@@ -113,6 +114,11 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
         DynamicInstPtr instruction = rs_entries[ready_rs];
         if (!instruction) {
             break;
+        }
+
+        if (can_dispatch && !can_dispatch(instruction)) {
+            selected_entries[ready_rs] = true;
+            continue;
         }
 
         const ExecutionUnitType unit_type = instruction->get_required_execution_unit();

@@ -37,4 +37,5 @@
 - 已补齐 `load/store profile` 的 addr-unknown 失败归因，可直接看到“哪个 load 推测失败、哪个 store 触发恢复”
 - 已补 `load PC -> store PC` 粒度的坏 pair 阻断，避免一次违例把整个 load PC 全局关死
 - 已修正 addr-unknown 决策只看第一条未知 store 的缺口：现在会遍历所有更老未知地址 store，避免坏 pair 被前面的安全 store 掩盖
+- 已把坏 pair 阻断前移到 RS->execute 之间，避免明知不能越过的 load 先占一次 LOAD 单元和 dispatch 槽
 - 下一步优先看 `rob_store_overlap` 是否已明显转成 forwarding；若边际收益变小，再切到 `L2 / prefetcher`

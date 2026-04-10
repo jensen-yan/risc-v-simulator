@@ -45,9 +45,11 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     state.store_buffer = std::make_unique<StoreBuffer>();
     state.syscall_handler = std::make_unique<SyscallHandler>(memory);
     state.branch_predictor = std::make_unique<BranchPredictor>();
-    const auto cache_cfg = createDefaultL1CacheConfig();
-    state.l1i_cache = std::make_unique<BlockingCache>(cache_cfg);
-    state.l1d_cache = std::make_unique<BlockingCache>(cache_cfg);
+    auto icache_cfg = createDefaultL1CacheConfig();
+    auto dcache_cfg = createDefaultL1CacheConfig();
+    dcache_cfg.enable_next_line_prefetch = true;
+    state.l1i_cache = std::make_unique<BlockingCache>(icache_cfg);
+    state.l1d_cache = std::make_unique<BlockingCache>(dcache_cfg);
 }
 
 void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memory) {
@@ -230,6 +232,12 @@ void OutOfOrderCPU::resetStats() {
     cpu_state_.jalr_profiles.clear();
     cpu_state_.load_profiles.clear();
     cpu_state_.store_profiles.clear();
+    if (cpu_state_.l1i_cache) {
+        cpu_state_.l1i_cache->resetStats();
+    }
+    if (cpu_state_.l1d_cache) {
+        cpu_state_.l1d_cache->resetStats();
+    }
 }
 
 uint64_t OutOfOrderCPU::get_physical_register_value(PhysRegNum reg) const {
@@ -388,7 +396,7 @@ int32_t OutOfOrderCPU::signExtend(uint32_t value, int bits) const {
 
 ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
     StatsList stats;
-    stats.reserve(4 + PerfCounterBank::NUM_COUNTERS);
+    stats.reserve(9 + PerfCounterBank::NUM_COUNTERS);
 
     // 兼容现有脚本字段
     stats.push_back({"instructions", cpu_state_.perf_counters.value(PerfCounterId::INSTRUCTIONS_RETIRED),
@@ -406,6 +414,21 @@ ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
         stats.push_back({meta.name, cpu_state_.perf_counters.value(id), meta.description});
     }
 
+    if (cpu_state_.l1d_cache) {
+        const auto& prefetch_stats = cpu_state_.l1d_cache->getStats();
+        stats.push_back({"cpu.cache.l1d.prefetch_requests", prefetch_stats.prefetch_requests,
+                         "Next-line prefetch requests triggered by demand L1D misses"});
+        stats.push_back({"cpu.cache.l1d.prefetch_issued", prefetch_stats.prefetch_issued,
+                         "Next-line prefetch lines installed into L1D"});
+        stats.push_back({"cpu.cache.l1d.prefetch_useful_hits", prefetch_stats.prefetch_useful_hits,
+                         "Demand accesses that hit a prefetched L1D line"});
+        stats.push_back({"cpu.cache.l1d.prefetch_unused_evictions", prefetch_stats.prefetch_unused_evictions,
+                         "Prefetched L1D lines evicted before any demand access used them"});
+        stats.push_back({"cpu.cache.l1d.prefetch_dropped_already_resident",
+                         prefetch_stats.prefetch_dropped_already_resident,
+                         "Prefetch requests dropped because the target line was already resident"});
+    }
+
     return stats;
 }
 
@@ -418,6 +441,25 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
         os << std::left << std::setw(40) << meta.name
            << std::right << std::setw(16) << cpu_state_.perf_counters.value(id)
            << " # " << meta.description << "\n";
+    }
+
+    if (cpu_state_.l1d_cache) {
+        const auto& prefetch_stats = cpu_state_.l1d_cache->getStats();
+        os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_requests"
+           << std::right << std::setw(16) << prefetch_stats.prefetch_requests
+           << " # Next-line prefetch requests triggered by demand L1D misses\n";
+        os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_issued"
+           << std::right << std::setw(16) << prefetch_stats.prefetch_issued
+           << " # Next-line prefetch lines installed into L1D\n";
+        os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_useful_hits"
+           << std::right << std::setw(16) << prefetch_stats.prefetch_useful_hits
+           << " # Demand accesses that hit a prefetched L1D line\n";
+        os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_unused_evictions"
+           << std::right << std::setw(16) << prefetch_stats.prefetch_unused_evictions
+           << " # Prefetched L1D lines evicted before any demand access used them\n";
+        os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_dropped_already_resident"
+           << std::right << std::setw(16) << prefetch_stats.prefetch_dropped_already_resident
+           << " # Prefetch requests dropped because the target line was already resident\n";
     }
 
     const uint64_t cycles = cpu_state_.perf_counters.value(PerfCounterId::CYCLES);

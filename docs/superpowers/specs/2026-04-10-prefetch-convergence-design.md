@@ -32,13 +32,34 @@
 本阶段明确不做以下工作：
 
 - 启动 `4-issue` 实现。
+- 启动 `non-blocking L1D` 实现。
 - 把 `L2` 升级为并行主线。
 - 大改 LSU 主时序、load replay 主机制、store buffer 主仲裁。
 - 引入复杂的大型表驱动预取器。
 - 依赖单一综合 workload 分数直接下结论。
 
 说明：
-`4-issue` 后续仍可能成为重要方向，尤其是 `CoreMark` 这类综合程序可能从更高 issue/commit 吞吐中获益。但在当前 memory 路线尚未收敛、真实 workload 外环尚未固定之前，`4-issue` 继续保持 `analyze-only` 更稳妥。
+`non-blocking L1D` 与 `4-issue` 后续都可能成为重要方向。当前顺序应调整为：
+
+1. 先完成 `prefetch convergence`
+2. 再评估或实现 `non-blocking L1D` 的最小原型
+3. 最后才评估 `4-issue`
+
+原因是当前 D-cache 仍是轻量 `blocking cache` 模型，真实的 memory-level parallelism 还没有被充分表达。如果在此之前直接进入 `4-issue`，收益很可能被后端 memory 阻塞掩盖，也难以归因。
+
+## 阶段排序
+
+下一阶段相关方向的推荐排序固定为：
+
+1. `prefetch convergence`
+2. `non-blocking L1D feasibility / minimal prototype`
+3. `4-issue feasibility`
+
+排序理由：
+
+- `prefetch convergence` 用于在当前模型下先完成止血、门禁固化和真实性外环接通。
+- `non-blocking L1D` 比 `4-issue` 更基础，因为它直接决定 memory 并发能力是否被 cache 模型压死。
+- `4-issue` 只有在 memory 路线不再是第一主矛盾时，才值得升级为主线。
 
 ## 方案选择
 
@@ -206,6 +227,7 @@ flowchart TD
 ### 禁止的改动
 
 - 启动 `4-issue` 实现
+- 启动 `non-blocking L1D` 实现
 - 将 `L2` 升级为并行主线
 - 大改 LSU 主时序
 - 大改 load replay 主机制
@@ -230,8 +252,24 @@ flowchart TD
 下一阶段的路线判断遵循以下顺序：
 
 1. 若 prefetch 收敛后，负样本仍明显失控，则停止扩大 prefetch 复杂度，优先止损或转向。
-2. 若 prefetch 收敛后，正样本收益保住且真实 workload 没有明显回退，则继续沿该方向小步扩展。
-3. 若 prefetch 收敛后，真实 workload 显示 memory 路线收益有限，而 issue/commit/ROB 压力仍明显，则把 `4-issue` 升级为下一阶段候选主线。
+2. 若 prefetch 收敛后，正样本收益保住且真实 workload 没有明显回退，则进入 `non-blocking L1D feasibility / minimal prototype` 阶段。
+3. 若 `non-blocking L1D` 完成最小验证后，真实 workload 仍显示 memory 路线收益有限，而 issue/commit/ROB 压力明显，则再把 `4-issue` 升级为后续候选主线。
+
+## 后续阶段接口
+
+本阶段结束时，必须额外回答下面两个问题，供下一份 spec 直接承接：
+
+1. `non-blocking L1D` 是否已经具备被正式立项的证据
+   需要结合：
+   - 服务器 SPEC06 切片中 memory 相关 stall 的持续性
+   - 本地多流 workload 在 blocking 模型下的解释局限
+   - 当前 prefetch 收敛后是否仍然被 blocking miss 模型压制
+
+2. `4-issue` 是否仍应保持 analyze-only
+   默认答案应为“是”，除非：
+   - prefetch 收敛已经完成
+   - `non-blocking L1D` 已经评估过或最小实现过
+   - 真实 workload 显示 issue/commit/ROB 压力已经比 memory 问题更主导
 
 ## 输出物
 

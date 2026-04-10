@@ -20,6 +20,8 @@ namespace riscv {
 
 namespace {
 
+bool g_enable_l1d_next_line_prefetch = true;
+
 template <typename T>
 void clearQueue(std::queue<T>& q) {
     while (!q.empty()) {
@@ -47,7 +49,7 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     state.branch_predictor = std::make_unique<BranchPredictor>();
     auto icache_cfg = createDefaultL1CacheConfig();
     auto dcache_cfg = createDefaultL1CacheConfig();
-    dcache_cfg.enable_next_line_prefetch = true;
+    dcache_cfg.enable_next_line_prefetch = g_enable_l1d_next_line_prefetch;
     state.l1i_cache = std::make_unique<BlockingCache>(icache_cfg);
     state.l1d_cache = std::make_unique<BlockingCache>(dcache_cfg);
 }
@@ -123,6 +125,14 @@ void sampleStoreBufferOccupancy(CPUState& state) {
 }
 
 } // namespace
+
+void setOutOfOrderL1DNextLinePrefetchEnabled(bool enabled) {
+    g_enable_l1d_next_line_prefetch = enabled;
+}
+
+bool isOutOfOrderL1DNextLinePrefetchEnabled() {
+    return g_enable_l1d_next_line_prefetch;
+}
 
 OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
     : memory_(memory), difftest_(nullptr), difftest_synced_once_(false) {

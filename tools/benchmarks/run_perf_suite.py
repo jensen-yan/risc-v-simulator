@@ -298,6 +298,7 @@ def run_one(
     max_ooo_cycles: int,
     timeout_sec: int,
     stats_path: Path,
+    ooo_l1d_prefetch: str,
 ) -> RunRecord:
     cmd = [
         str(simulator),
@@ -310,6 +311,8 @@ def run_one(
     ]
     if mode == "ooo":
         cmd.append(f"--stats-file={stats_path}")
+        if ooo_l1d_prefetch != "auto":
+            cmd.append(f"--l1d-next-line-prefetch={ooo_l1d_prefetch}")
     cmd.append(str(target.path))
 
     start = time.perf_counter()
@@ -614,6 +617,12 @@ def main() -> int:
         action="store_true",
         help="若 manifest 中存在缺失文件则直接失败",
     )
+    parser.add_argument(
+        "--ooo-l1d-prefetch",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="OOO L1D next-line prefetcher 开关（默认 auto，沿用模拟器默认值）",
+    )
 
     args = parser.parse_args()
 
@@ -686,6 +695,7 @@ def main() -> int:
                 max_ooo_cycles=args.max_ooo_cycles,
                 timeout_sec=args.timeout,
                 stats_path=stats_path,
+                ooo_l1d_prefetch=args.ooo_l1d_prefetch,
             )
             records.append(rec)
             print(

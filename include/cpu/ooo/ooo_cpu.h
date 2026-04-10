@@ -18,6 +18,9 @@
 
 namespace riscv {
 
+void setOutOfOrderL1DNextLinePrefetchEnabled(bool enabled);
+bool isOutOfOrderL1DNextLinePrefetchEnabled();
+
 class SyscallHandler;
 class FetchStage;
 class DecodeStage;

@@ -114,6 +114,19 @@ python3 ./tools/benchmarks/run_perf_suite.py \
 ./tools/benchmarks/run_memory_learning.sh --phase baseline
 ```
 
+如果要在同一源码状态下对 OOO L1D next-line prefetch 做 A/B，对上面的命令追加：
+
+```bash
+./tools/benchmarks/run_memory_learning.sh --phase baseline --ooo-l1d-prefetch off
+./tools/benchmarks/run_memory_learning.sh --phase baseline --ooo-l1d-prefetch on
+```
+
+等价地，也可以在 `run_perf_suite.py` 上直接传：
+
+```bash
+python3 tools/benchmarks/run_perf_suite.py ... --ooo-l1d-prefetch off|on
+```
+
 这条 baseline 是首轮唯一的 canonical 入口，覆盖：
 - `dhrystone`
 - `memcpy`
@@ -198,4 +211,5 @@ python3 ./tools/benchmarks/run_perf_suite.py \
 - 自定义 LSU 微基准会输出 `=== TEST RESULT: PASS ===`，可直接纳入 `run_perf_suite.py`。
 - `run_memory_learning.sh` 会默认先构建 `benchmarks/custom/lsu/*.c`，再执行对应 manifest。
 - `stats_path` 指向每个 benchmark/mode 自动落盘的详细 stats 文件；OOO 模式会通过模拟器的 `--stats-file=` 导出 detailed stats，便于后续报告回溯。
+- `--ooo-l1d-prefetch auto|on|off` 只影响 OOO L1D next-line prefetcher；`auto` 表示沿用模拟器默认值。
 - 若要做严格可发表的绝对分数，请固定模拟器频率模型与编译参数，并记录完整环境。

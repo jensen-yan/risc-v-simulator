@@ -14,6 +14,7 @@ TIMEOUT=60
 FILTER="*"
 BUILD_LSU=1
 PHASE="lsu-foundation"
+OOO_L1D_PREFETCH="auto"
 
 usage() {
   cat <<EOF
@@ -28,6 +29,7 @@ usage() {
   --timeout <sec>            单个 benchmark 超时秒数（默认: ${TIMEOUT}）
   --output-dir <dir>         结果输出目录（默认: ${OUTPUT_DIR}）
   --filter <glob>            benchmark 名称过滤（默认: ${FILTER}）
+  --ooo-l1d-prefetch <mode>  OOO L1D next-line prefetch：auto | on | off（默认: ${OOO_L1D_PREFETCH}）
   --no-build-lsu             跳过 LSU 微基准构建
   -h, --help                 显示帮助
 
@@ -70,6 +72,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --filter)
       FILTER="$2"
+      shift 2
+      ;;
+    --ooo-l1d-prefetch)
+      OOO_L1D_PREFETCH="$2"
       shift 2
       ;;
     --no-build-lsu)
@@ -132,4 +138,5 @@ python3 "${ROOT_DIR}/tools/benchmarks/run_perf_suite.py" \
   --max-instructions "${MAX_INSTRUCTIONS}" \
   --max-ooo-cycles "${MAX_OOO_CYCLES}" \
   --output-dir "${OUTPUT_DIR}" \
-  --filter "${FILTER}"
+  --filter "${FILTER}" \
+  --ooo-l1d-prefetch "${OOO_L1D_PREFETCH}"

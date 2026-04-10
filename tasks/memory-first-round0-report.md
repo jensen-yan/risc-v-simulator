@@ -328,3 +328,235 @@ Round 1 已满足本轮主线的两个最小目标：
 - prefetcher / `L2` 原型实现
 - `4-issue` coding
 - 更深 BPU 设计
+
+## Round 3 Same-Source Prefetch A/B Regression
+
+Round 3 在同一源码状态下补齐了 OOO L1D next-line prefetch 的显式 A/B 开关，并用显式 `on/off` 命令重跑或复核了 task8 所需 workload。
+
+本轮关键前提：
+
+- `src/main.cpp` 已支持 `--l1d-next-line-prefetch=on|off`
+- `tools/benchmarks/run_perf_suite.py` 与 `tools/benchmarks/run_memory_learning.sh` 已支持 `--ooo-l1d-prefetch auto|on|off`
+- 因此本节所有 `off/on` 对比都来自同一源码状态，不再依赖“改代码切换 prefetch”
+
+统一命令模板：
+
+```bash
+python3 tools/benchmarks/run_perf_suite.py \
+  --manifest benchmarks/manifest/memory_first_baseline.json \
+  --simulator build/risc-v-sim \
+  --cpu-mode ooo \
+  --memory-size 2164260864 \
+  --timeout <sec> \
+  --max-instructions 0 \
+  --max-ooo-cycles <cycles> \
+  --output-dir benchmarks/results/<dir> \
+  --filter <workload> \
+  --ooo-l1d-prefetch off|on
+```
+
+结果落点：
+
+- `Dhrystone`: off [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round3-control-dhrystone/results.json)，on [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round2-dhrystone/results.json)
+- `CoreMark`: off [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round3-control-coremark/results.json)，on [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round2-coremark/results.json)
+- `stream_copy`: off [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round3-control-stream-copy/results.json)，on [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round2-stream-copy-prefetch/results.json)
+- `stream_triad`: off [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round3-control-stream-triad/results.json)，on [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round2-stream-triad/results.json)
+- `lsu_store_forward`: off [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round3-control-lsu-store-forward/results.json)，on [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round2-lsu-store-forward/results.json)
+- `lsu_stride_walk`: off [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round3-control-lsu-stride-walk/results.json)，on [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round2-lsu-stride-walk/results.json)
+- `lsu_mlp`: off [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round3-control-lsu-mlp/results.json)，on [results.json](/Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/benchmarks/results/rlcr-round2-lsu-mlp/results.json)
+
+### A/B Summary
+
+| Workload | Off | On | Core Delta | Round 3 Judgement |
+|----------|-----|----|------------|-------------------|
+| `Dhrystone` | `passed` | `passed` | `cycles 120358 -> 120308 (-0.04%)` | 基本无感，prefetch 不是主杠杆 |
+| `CoreMark` | `passed` | `passed` | `cycles 2703943 -> 2703814 (-0.00%)` | 基本无感，prefetch 不是主杠杆 |
+| `stream_copy` | `passed` | `passed` | `cycles 29757 -> 29170 (-1.97%)` | 明确正收益 |
+| `stream_triad` | `passed` | `passed` | `cycles 47946 -> 46661 (-2.68%)` | 明确正收益 |
+| `lsu_store_forward` | `passed` | `passed` | `cycles 1071047 -> 1070962 (-0.01%)` | 几乎无收益 |
+| `lsu_stride_walk` | `failed` | `failed` | `cycles` 同为 `6000001`，但 `ipc 0.384775 -> 0.682826` | 同周期上限下显著增吞吐 |
+| `lsu_mlp` | `failed` | `failed` | `cycles` 同为 `6000001`，`ipc 0.184618 -> 0.184760` | 基本无收益，且污染明显 |
+
+注意：
+
+- `lsu_stride_walk` 与 `lsu_mlp` 都在 `max_ooo_cycles=6000000` 处触顶，因此比较重点不是绝对 `cycles`，而是同上限下的 `ipc`、已退休工作量与 L1D 行为。
+- `topdown_*_pct` 仍不参与本轮 gate；原因见上文“现存盲区与口径风险”。
+
+### Per-Workload A/B Detail
+
+### Dhrystone
+
+- 状态：`passed -> passed`
+- `cycles`: `120358 -> 120308`
+- `ipc`: `1.606524 -> 1.607192`
+- `pipeline_stalls`: `9007 -> 8909`
+- `l1d_hits/misses`: `70958/37 -> 70963/29`
+- `l1d_stall_cycles_load/store`: `476/653 -> 376/506`
+- `l1d_prefetch_requests/issued/useful_hits/unused_evictions/dropped_already_resident`: `0/0/0/0/0 -> 29/15/8/0/14`
+- 收益解释：
+  next-line prefetch 能覆盖少量顺序 demand miss，`l1d_misses` 下降 `8`，`l1d_stall_cycles_load/store` 也同步下降。
+- 副作用解释：
+  整体收益极小，`cycles` 只改善 `0.04%`；说明 `Dhrystone` 的主瓶颈仍然是 control + ordering，而不是 L1D 顺序 miss。
+
+### CoreMark
+
+- 状态：`passed -> passed`
+- `cycles`: `2703943 -> 2703814`
+- `ipc`: `1.338688 -> 1.338752`
+- `pipeline_stalls`: `1767528 -> 1767388`
+- `l1d_hits/misses`: `689893/90 -> 689931/64`
+- `l1d_stall_cycles_load/store`: `1167/1437 -> 907/992`
+- `l1d_prefetch_requests/issued/useful_hits/unused_evictions/dropped_already_resident`: `0/0/0/0/0 -> 64/34/26/0/30`
+- 收益解释：
+  prefetch 的确减少了少量 L1D miss 与 stall，说明 `CoreMark` 中存在少量可预测的顺序访存窗口。
+- 副作用解释：
+  `cycles` 只改善 `129`，几乎不可见；对 `CoreMark` 的主导矛盾仍然是 dependency / ROB / control，不应把它当成 prefetch 成功样本。
+
+### stream_copy
+
+- 状态：`passed -> passed`
+- `cycles`: `29757 -> 29170`
+- `ipc`: `1.273717 -> 1.299349`
+- `pipeline_stalls`: `27325 -> 25160`
+- `l1d_hits/misses`: `9474/88 -> 9513/52`
+- `l1d_stall_cycles_load/store`: `286/1624 -> 202/924`
+- `l1d_prefetch_requests/issued/useful_hits/unused_evictions/dropped_already_resident`: `0/0/0/0/0 -> 52/40/36/0/12`
+- 收益解释：
+  这是最干净的正样本之一。顺序流式访问下，prefetch 把 `36` 个后续 demand 命中转化为 useful hit，并显著压低 store-side L1D stall。
+- 副作用解释：
+  当前没有看到明显污染，`unused_evictions=0`；但收益规模仍是个位百分比，不支持直接升级到更大 memory hierarchy 改造。
+
+### stream_triad
+
+- 状态：`passed -> passed`
+- `cycles`: `47946 -> 46661`
+- `ipc`: `1.677387 -> 1.723581`
+- `pipeline_stalls`: `8183 -> 3557`
+- `l1d_hits/misses`: `18080/153 -> 18152/84`
+- `l1d_stall_cycles_load/store`: `313/2903 -> 210/1563`
+- `l1d_prefetch_requests/issued/useful_hits/unused_evictions/dropped_already_resident`: `0/0/0/0/0 -> 84/72/69/0/12`
+- 收益解释：
+  `stream_triad` 对 next-line prefetch 更敏感，`useful_hits=69`，而且 `pipeline_stalls` 近乎腰斩，是当前最明确支持 memory 路线继续保留的 workload 之一。
+- 副作用解释：
+  本轮仍未看到明显污染，但其收益高度依赖规则访问模式，不能外推到一般 memory workload。
+
+### lsu_store_forward
+
+- 状态：`passed -> passed`
+- `cycles`: `1071047 -> 1070962`
+- `ipc`: `1.871763 -> 1.871911`
+- `pipeline_stalls`: `2365 -> 1942`
+- `l1d_hits/misses`: `201115/57 -> 201136/36`
+- `l1d_stall_cycles_load/store`: `259/974 -> 228/603`
+- `l1d_prefetch_requests/issued/useful_hits/unused_evictions/dropped_already_resident`: `0/0/0/0/0 -> 36/24/21/0/11`
+- 收益解释：
+  统计上存在少量 L1D 行为改善，说明该 workload 尾部或辅助路径里有一小段可预取访问。
+- 副作用解释：
+  主体性能几乎不变，说明 `lsu_store_forward` 的核心矛盾仍是 forwarding / overlap / tight loop，而不是 cache miss；它不构成扩大 prefetch 覆盖面的证据。
+
+### lsu_stride_walk
+
+- 状态：`failed -> failed`，两侧都在 `max_ooo_cycles=6000000` 截断
+- `cycles`: `6000001 -> 6000001`
+- `ipc`: `0.384775 -> 0.682826`
+- `pipeline_stalls`: `18009141 -> 14286143`
+- `l1d_hits/misses`: `30825/270094 -> 277639/246817`
+- `l1d_stall_cycles_load/store`: `5360820/41060 -> 4915800/20540`
+- `l1d_prefetch_requests/issued/useful_hits/unused_evictions/dropped_already_resident`: `0/0/0/0/0 -> 246817/246817/246814/2/0`
+- 收益解释：
+  这是 strongest positive sample。虽然 `cycles` 因 cap 相同而不可比，但同周期窗口内 `ipc` 提升约 `77%`，且几乎所有预取都转化为 useful hit，说明规则 stride 访问能显著受益。
+- 副作用解释：
+  即便收益很大，该 workload 仍然没有在当前上限内跑完，说明 next-line prefetch 并没有从根本上消除大规模 memory latency，只是把规则场景做得更好。
+
+### lsu_mlp
+
+- 状态：`failed -> failed`，两侧都在 `max_ooo_cycles=6000000` 截断
+- `cycles`: `6000001 -> 6000001`
+- `ipc`: `0.184618 -> 0.184760`
+- `pipeline_stalls`: `20986234 -> 20994088`
+- `l1d_hits/misses`: `30828/271294 -> 31853/270501`
+- `l1d_stall_cycles_load/store`: `5384820/41060 -> 5389460/20560`
+- `l1d_prefetch_requests/issued/useful_hits/unused_evictions/dropped_already_resident`: `0/0/0/0/0 -> 270501/270500/1025/269471/1`
+- 收益解释：
+  只有极小的 `ipc` 改善，说明 next-line prefetch 在高 MLP/弱空间局部性的场景下基本不提供真实帮助。
+- 副作用解释：
+  这是 strongest negative sample：`prefetch_issued=270500`，但 `useful_hits` 只有 `1025`，同时 `unused_evictions=269471`，说明污染极重，不适合按“默认更激进”方向继续扩展。
+
+## Task 9 Decision
+
+Round 3 对 memory 路线的正式结论是：`收敛`。
+
+原因：
+
+1. 不应 `停止`
+   - `stream_copy`、`stream_triad`、`lsu_stride_walk` 都给出了真实而可解释的正收益
+   - 特别是 `lsu_stride_walk` 在同周期上限下显示出明显吞吐提升，说明“规则访存可被 next-line prefetch 覆盖”这一方向成立
+2. 也不应直接 `继续扩展`
+   - `Dhrystone`、`CoreMark`、`lsu_store_forward` 的收益都接近于零
+   - `lsu_mlp` 出现了极重污染：`prefetch_unused_evictions=269471`
+3. 因此更合理的结论不是“更大规模地加 memory 结构”，而是：
+   - 保留 next-line prefetch 作为已验证的顺序/规则访存优化
+   - 暂不把它外推成更激进、更泛化的预取策略
+   - 也暂不据此升级到 `L2` 或更复杂的 memory hierarchy 改造
+
+## Task 10 Gate: 4-Issue
+
+结论：`4-issue` 继续延期，不升级为下一阶段 coding 主线。
+
+依据：
+
+- memory-bound workload 远未稳定打满当前 2-issue 宽度
+  - `lsu_stride_walk`：`issue_utilized_slots / issue_slots = 19.24% -> 34.14%`
+  - `lsu_mlp`：`9.24% -> 9.25%`
+  - `stream_copy`：`67.60% -> 68.88%`
+- 这些 workload 同时具有很高的 ROB 占用
+  - `rob_occupancy_avg`: `stream_copy 83.63 -> 83.26`
+  - `lsu_store_forward 95.72 -> 95.70`
+  - `lsu_stride_walk 95.99 -> 95.97`
+  - `lsu_mlp 95.98 -> 95.97`
+- 这说明关键矛盾是“窗口里堆满了等待 memory / replay / latency 的工作”，不是“当前宽度不够发”
+- 即使在 `CoreMark` 上，`issue_util` 也只有约 `72.38%`，而 `commit_util` 约 `66.94%`，仍不足以支持“先扩宽再看”的判断
+
+因此：
+
+- `4-issue` 继续保持 analyze-only
+- 在 memory 路线没有更稳的普适收益之前，不进入实现阶段
+
+## Task 11 Gate: BPU
+
+结论：BPU 深化继续延期，不升级为下一阶段主线。
+
+依据：
+
+- 当前 memory 关键 workload 的 branch 代价并不主导
+  - `stream_copy`: `branch_mispredicts 176 -> 172`
+  - `stream_triad`: `174 -> 172`
+  - `lsu_stride_walk`: `61 -> 71`
+  - `lsu_mlp`: `103 -> 103`
+- control-heavy workload 的确存在明显 branch/JALR 代价
+  - `Dhrystone`: `branch_mispredicts=1103`，`predictor_control_incorrect=1125`，`predictor_jalr_mispredicts=22`
+  - `CoreMark`: `branch_mispredicts=24560`，`predictor_control_incorrect=24646`，`predictor_jalr_mispredicts=86`
+- 但本轮 A/B 数据同时表明：
+  - `Dhrystone`、`CoreMark` 对 prefetch 几乎无感
+  - branch/JALR 指标在 `off/on` 间几乎不变
+  - 当前对下一阶段影响更大的，仍然是 memory workload 的 latency / miss / pollution 行为，而不是 BPU 参数空间
+
+因此：
+
+- BPU 深化仍然保留为后续 analyze 方向
+- 只有当 memory 路线进一步稳定，且 `Dhrystone` / `CoreMark` / 控制流密集 workload 仍显示显著 control penalty 时，再单独拉起
+
+## Round 3 Outcome
+
+Round 3 的最终判断如下：
+
+1. next-line L1D prefetch 已经通过同源码 `off/on` A/B 验证，不再是“只在单边结果里看起来有效”的原型
+2. memory 路线当前最合理的状态是 `收敛`
+3. `4-issue` 继续延期
+4. BPU 深化继续延期
+
+也就是说，本轮不是把 memory-first 扩大成“继续堆结构”的理由，而是把它收口成：
+
+- 顺序/规则访存上，next-line prefetch 是成立的
+- 高 MLP / 弱局部性场景下，它存在明显局限和污染
+- 后续若要继续做 memory 方向，应该优先考虑更有选择性的策略，而不是直接并行打开 `L2`、`4-issue` 与 BPU 多条主线

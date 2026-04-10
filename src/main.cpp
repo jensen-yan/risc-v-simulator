@@ -1,6 +1,7 @@
 #include "system/simulator.h"
 #include "system/elf_loader.h"
 #include "common/debug_types.h"
+#include "cpu/ooo/ooo_cpu.h"
 #include <cctype>
 #include <fstream>
 #include <iostream>
@@ -88,6 +89,7 @@ void printUsage(const char* programName) {
     std::cout << "  --isa=ISA                    Override enabled ISA extensions (e.g. RV64I_Zicsr)\n";
     std::cout << "  --stats-file=FILE            Dump detailed OOO stats to FILE\n";
     std::cout << "  --stats-warmup-cycles=N      Print pre-warmup stats, then reset OOO stats at cycle N\n";
+    std::cout << "  --l1d-next-line-prefetch=on|off  Toggle OOO L1D next-line prefetcher (default: on)\n";
     std::cout << "  --pipeline-view=FILE         Generate HTML pipeline visualization\n";
     std::cout << "  --pipeline-cycles=START-END  Limit pipeline view to cycle range\n";
     std::cout << "  --pipeline-max=N             Max instructions in pipeline view (default: 2000)\n";
@@ -161,6 +163,7 @@ int main(int argc, char* argv[]) {
     std::string isaString;
     std::string statsFile;
     uint64_t statsWarmupCycles = 0;
+    bool l1dNextLinePrefetchEnabled = true;
     std::string pipelineViewFile;
     uint64_t pipelineStartCycle = 0;
     uint64_t pipelineEndCycle = UINT64_MAX;
@@ -236,6 +239,18 @@ int main(int argc, char* argv[]) {
             statsFile = arg.substr(13);
         } else if (arg.find("--stats-warmup-cycles=") == 0) {
             statsWarmupCycles = std::stoull(arg.substr(22), nullptr, 0);
+        } else if (arg.find("--l1d-next-line-prefetch=") == 0) {
+            static const std::string kL1DPrefetchPrefix = "--l1d-next-line-prefetch=";
+            const std::string value = arg.substr(kL1DPrefetchPrefix.size());
+            if (value == "on") {
+                l1dNextLinePrefetchEnabled = true;
+            } else if (value == "off") {
+                l1dNextLinePrefetchEnabled = false;
+            } else {
+                std::cerr << "Error: invalid --l1d-next-line-prefetch value '" << value
+                          << "', expected on|off\n";
+                return 1;
+            }
         } else if (arg.find("--pipeline-view=") == 0) {
             pipelineViewFile = arg.substr(16);
         } else if (arg.find("--pipeline-cycles=") == 0) {
@@ -262,6 +277,10 @@ int main(int argc, char* argv[]) {
             if (willLoadElf) {
                 memorySize = ElfLoader::getRequiredMemorySize(filename, memorySize);
             }
+        }
+
+        if (cpuType == CpuType::OUT_OF_ORDER) {
+            setOutOfOrderL1DNextLinePrefetchEnabled(l1dNextLinePrefetchEnabled);
         }
 
         // 创建模拟器

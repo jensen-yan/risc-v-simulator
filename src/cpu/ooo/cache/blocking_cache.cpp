@@ -166,6 +166,7 @@ void BlockingCache::invalidateRange(uint64_t address, uint64_t size) {
         if (line) {
             line->valid = false;
             line->dirty = false;
+            line->prefetched = false;
             line->tag = 0;
             line->lru_stamp = 0;
             std::fill(line->data.begin(), line->data.end(), 0);
@@ -191,13 +192,19 @@ void BlockingCache::flushInFlight() {
     miss_service_remaining_cycles_ = 0;
 }
 
+void BlockingCache::resetStats() {
+    stats_ = BlockingCacheStats{};
+}
+
 void BlockingCache::reset() {
     flushInFlight();
     lru_clock_ = 0;
+    resetStats();
     for (auto& set : sets_) {
         for (auto& line : set) {
             line.valid = false;
             line.dirty = false;
+            line.prefetched = false;
             line.tag = 0;
             line.lru_stamp = 0;
             std::fill(line.data.begin(), line.data.end(), 0);
@@ -251,21 +258,16 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
     for (const auto line_address : line_addresses) {
         CacheLine* line = findLine(line_address);
         if (line) {
+            if (line->prefetched) {
+                stats_.prefetch_useful_hits++;
+                line->prefetched = false;
+            }
             touchLine(*line);
             continue;
         }
 
         overall_hit = false;
-        CacheLine& allocated = allocateLine(line_address, dirty_eviction);
-        if (allocated.valid && allocated.dirty) {
-            const uint64_t victim_line_addr = allocated.tag * set_count_ + lineToSetIndex(line_address);
-            writebackLineToMemory(memory, victim_line_addr, allocated);
-        }
-
-        allocated.valid = true;
-        allocated.dirty = false;
-        allocated.tag = lineToTag(line_address);
-        fillLineFromMemory(memory, line_address, allocated);
+        CacheLine& allocated = installLine(memory, line_address, dirty_eviction, /*mark_prefetched=*/false);
         touchLine(allocated);
     }
 
@@ -274,6 +276,7 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
     result.latency_cycles = config_.hit_latency + (overall_hit ? 0 : config_.miss_penalty);
 
     if (model_timing && !overall_hit) {
+        maybeIssueNextLinePrefetch(memory, line_addresses.back());
         miss_in_flight_ = true;
         miss_service_remaining_cycles_ = result.latency_cycles;
     }
@@ -344,6 +347,53 @@ BlockingCache::CacheLine& BlockingCache::allocateLine(uint64_t line_address, boo
         dirty_eviction = true;
     }
     return *victim_it;
+}
+
+BlockingCache::CacheLine& BlockingCache::installLine(const std::shared_ptr<Memory>& memory,
+                                                     uint64_t line_address,
+                                                     bool& dirty_eviction,
+                                                     bool mark_prefetched) {
+    CacheLine& allocated = allocateLine(line_address, dirty_eviction);
+    if (allocated.valid && allocated.prefetched) {
+        stats_.prefetch_unused_evictions++;
+    }
+    if (allocated.valid && allocated.dirty) {
+        const uint64_t victim_line_addr = allocated.tag * set_count_ + lineToSetIndex(line_address);
+        writebackLineToMemory(memory, victim_line_addr, allocated);
+    }
+
+    allocated.valid = true;
+    allocated.dirty = false;
+    allocated.prefetched = mark_prefetched;
+    allocated.tag = lineToTag(line_address);
+    fillLineFromMemory(memory, line_address, allocated);
+    return allocated;
+}
+
+void BlockingCache::maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory,
+                                               uint64_t demand_line_address) {
+    if (!config_.enable_next_line_prefetch || !memory) {
+        return;
+    }
+
+    stats_.prefetch_requests++;
+
+    const uint64_t next_line_address = demand_line_address + 1;
+    const uint64_t next_line_base = lineToBaseAddress(next_line_address);
+    if (next_line_base >= memory->getSize() || isBypassAccess(memory, next_line_base, /*size=*/1)) {
+        return;
+    }
+
+    if (findLine(next_line_address) != nullptr) {
+        stats_.prefetch_dropped_already_resident++;
+        return;
+    }
+
+    bool dirty_eviction = false;
+    CacheLine& prefetched_line =
+        installLine(memory, next_line_address, dirty_eviction, /*mark_prefetched=*/true);
+    touchLine(prefetched_line);
+    stats_.prefetch_issued++;
 }
 
 void BlockingCache::touchLine(CacheLine& line) {

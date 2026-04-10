@@ -22,6 +22,7 @@ struct BlockingCacheConfig {
     int hit_latency = 1;
     int miss_penalty = 20;
     CacheWritePolicy write_policy = CacheWritePolicy::WriteBackWriteAllocate;
+    bool enable_next_line_prefetch = false;
 };
 
 enum class CacheAccessType : uint8_t {
@@ -34,6 +35,14 @@ struct CacheAccessResult {
     int latency_cycles = 0;
     bool blocked = false;
     bool dirty_eviction = false;
+};
+
+struct BlockingCacheStats {
+    uint64_t prefetch_requests = 0;
+    uint64_t prefetch_issued = 0;
+    uint64_t prefetch_useful_hits = 0;
+    uint64_t prefetch_unused_evictions = 0;
+    uint64_t prefetch_dropped_already_resident = 0;
 };
 
 class BlockingCache {
@@ -62,15 +71,18 @@ public:
     void tick();
     void flushInFlight();
     void reset();
+    void resetStats();
 
     bool hasMissInFlight() const { return miss_in_flight_; }
     int missServiceRemainingCycles() const { return miss_service_remaining_cycles_; }
     const BlockingCacheConfig& getConfig() const { return config_; }
+    const BlockingCacheStats& getStats() const { return stats_; }
 
 private:
     struct CacheLine {
         bool valid = false;
         bool dirty = false;
+        bool prefetched = false;
         uint64_t tag = 0;
         uint64_t lru_stamp = 0;
         std::vector<uint8_t> data;
@@ -82,6 +94,7 @@ private:
     size_t set_count_ = 0;
     std::vector<CacheSet> sets_;
     uint64_t lru_clock_ = 0;
+    BlockingCacheStats stats_{};
 
     bool miss_in_flight_ = false;
     int miss_service_remaining_cycles_ = 0;
@@ -100,6 +113,11 @@ private:
 
     CacheLine* findLine(uint64_t line_address);
     CacheLine& allocateLine(uint64_t line_address, bool& dirty_eviction);
+    CacheLine& installLine(const std::shared_ptr<Memory>& memory,
+                           uint64_t line_address,
+                           bool& dirty_eviction,
+                           bool mark_prefetched);
+    void maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory, uint64_t demand_line_address);
     void touchLine(CacheLine& line);
 
     static uint64_t readMemoryValue(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size);

@@ -175,6 +175,11 @@ python3 ./tools/benchmarks/run_perf_suite.py \
 - `l1d_misses`
 - `l1d_stall_cycles_load`
 - `l1d_stall_cycles_store`
+- `l1d_prefetch_requests`
+- `l1d_prefetch_issued`
+- `l1d_prefetch_useful_hits`
+- `l1d_prefetch_unused_evictions`
+- `l1d_prefetch_dropped_already_resident`
 - `load_replays`
 - `load_replays_rob_store_addr_unknown`
 - `load_replays_rob_store_overlap`

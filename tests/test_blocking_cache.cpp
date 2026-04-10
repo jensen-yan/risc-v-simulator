@@ -203,4 +203,99 @@ TEST(BlockingCacheTest, AccessWrappingAddressSpaceThrowsSimulatorException) {
         SimulatorException);
 }
 
+TEST(BlockingCacheTest, NextLinePrefetchTurnsFollowingLineIntoUsefulHit) {
+    BlockingCacheConfig cfg = makeDefaultConfig();
+    cfg.size_bytes = 128;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.enable_next_line_prefetch = true;
+
+    auto memory = std::make_shared<Memory>(256);
+    memory->writeWord(0x0, 0x11111111);
+    memory->writeWord(0x40, 0x22222222);
+
+    BlockingCache cache(cfg);
+
+    const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+    drainMiss(cache);
+
+    const auto second = cache.access(memory, 0x40, 4, CacheAccessType::Read);
+    EXPECT_FALSE(second.blocked);
+    EXPECT_TRUE(second.hit);
+
+    const auto& stats = cache.getStats();
+    EXPECT_EQ(stats.prefetch_requests, 1u);
+    EXPECT_EQ(stats.prefetch_issued, 1u);
+    EXPECT_EQ(stats.prefetch_useful_hits, 1u);
+    EXPECT_EQ(stats.prefetch_unused_evictions, 0u);
+    EXPECT_EQ(stats.prefetch_dropped_already_resident, 0u);
+}
+
+TEST(BlockingCacheTest, NextLinePrefetchDropsRequestWhenTargetAlreadyResident) {
+    BlockingCacheConfig cfg = makeDefaultConfig();
+    cfg.size_bytes = 256;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.enable_next_line_prefetch = true;
+
+    auto memory = std::make_shared<Memory>(256);
+    memory->writeWord(0x40, 0x22222222);
+    memory->writeWord(0x80, 0x33333333);
+
+    BlockingCache cache(cfg);
+
+    const auto warm = cache.access(memory, 0x80, 4, CacheAccessType::Read);
+    EXPECT_FALSE(warm.blocked);
+    EXPECT_FALSE(warm.hit);
+    drainMiss(cache);
+
+    cache.resetStats();
+
+    const auto demand = cache.access(memory, 0x40, 4, CacheAccessType::Read);
+    EXPECT_FALSE(demand.blocked);
+    EXPECT_FALSE(demand.hit);
+    drainMiss(cache);
+
+    const auto& stats = cache.getStats();
+    EXPECT_EQ(stats.prefetch_requests, 1u);
+    EXPECT_EQ(stats.prefetch_issued, 0u);
+    EXPECT_EQ(stats.prefetch_useful_hits, 0u);
+    EXPECT_EQ(stats.prefetch_unused_evictions, 0u);
+    EXPECT_EQ(stats.prefetch_dropped_already_resident, 1u);
+}
+
+TEST(BlockingCacheTest, NextLinePrefetchTracksUnusedEviction) {
+    BlockingCacheConfig cfg = makeDefaultConfig();
+    cfg.size_bytes = 128;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.enable_next_line_prefetch = true;
+
+    auto memory = std::make_shared<Memory>(256);
+    memory->writeWord(0x0, 0x11111111);
+    memory->writeWord(0x40, 0x22222222);
+    memory->writeWord(0xC0, 0x44444444);
+
+    BlockingCache cache(cfg);
+
+    const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+    drainMiss(cache);
+
+    const auto second = cache.access(memory, 0xC0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(second.blocked);
+    EXPECT_FALSE(second.hit);
+    drainMiss(cache);
+
+    const auto& stats = cache.getStats();
+    EXPECT_EQ(stats.prefetch_requests, 2u);
+    EXPECT_EQ(stats.prefetch_issued, 1u);
+    EXPECT_EQ(stats.prefetch_useful_hits, 0u);
+    EXPECT_EQ(stats.prefetch_unused_evictions, 1u);
+    EXPECT_EQ(stats.prefetch_dropped_already_resident, 0u);
+}
+
 } // namespace riscv

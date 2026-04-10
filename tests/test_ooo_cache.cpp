@@ -138,4 +138,32 @@ TEST(OutOfOrderCacheTest, DCacheStoreRecoversAfterBlockedByInflightLoadMiss) {
     EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.stall_cycles_store"), 21u);
 }
 
+TEST(OutOfOrderCacheTest, DCacheNextLinePrefetchStatsAreObservable) {
+    auto memory = std::make_shared<Memory>(4096);
+    auto cpu = std::make_unique<OutOfOrderCPU>(memory);
+
+    memory->writeWord(0x200, 0x12345678);
+    memory->writeWord(0x240, 0xAABBCCDD);
+
+    memory->writeWord(0x0, createIType(Opcode::OP_IMM, 1, 0, 0x200, Funct3::ADD_SUB));   // addi x1, x0, 0x200
+    memory->writeWord(0x4, createIType(Opcode::LOAD, 2, 1, 0, Funct3::LW));               // lw x2, 0(x1)
+    memory->writeWord(0x8, createIType(Opcode::OP_IMM, 1, 1, 0x40, Funct3::ADD_SUB));     // addi x1, x1, 0x40
+    memory->writeWord(0xC, createIType(Opcode::LOAD, 3, 1, 0, Funct3::LW));               // lw x3, 0(x1)
+    memory->writeWord(0x10, 0x00000073);                                                   // ECALL
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 500 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    EXPECT_TRUE(cpu->isHalted());
+    EXPECT_EQ(cpu->getRegister(2), 0x12345678u);
+    EXPECT_EQ(cpu->getRegister(3), 0xFFFFFFFFAABBCCDDULL);
+
+    const auto stats = cpu->getStats();
+    EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.prefetch_requests"), 1u);
+    EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.prefetch_issued"), 1u);
+    EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.prefetch_useful_hits"), 1u);
+}
+
 } // namespace riscv

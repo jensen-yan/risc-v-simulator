@@ -74,6 +74,11 @@ class RunRecord:
     l1d_misses: Optional[int]
     l1d_stall_cycles_load: Optional[int]
     l1d_stall_cycles_store: Optional[int]
+    l1d_prefetch_requests: Optional[int]
+    l1d_prefetch_issued: Optional[int]
+    l1d_prefetch_useful_hits: Optional[int]
+    l1d_prefetch_unused_evictions: Optional[int]
+    l1d_prefetch_dropped_already_resident: Optional[int]
     load_replays: Optional[int]
     load_replays_rob_store_addr_unknown: Optional[int]
     load_replays_rob_store_overlap: Optional[int]
@@ -99,6 +104,11 @@ DETAIL_INT_FIELDS = {
     "l1d_misses": "cpu.cache.l1d.misses",
     "l1d_stall_cycles_load": "cpu.cache.l1d.stall_cycles_load",
     "l1d_stall_cycles_store": "cpu.cache.l1d.stall_cycles_store",
+    "l1d_prefetch_requests": "cpu.cache.l1d.prefetch_requests",
+    "l1d_prefetch_issued": "cpu.cache.l1d.prefetch_issued",
+    "l1d_prefetch_useful_hits": "cpu.cache.l1d.prefetch_useful_hits",
+    "l1d_prefetch_unused_evictions": "cpu.cache.l1d.prefetch_unused_evictions",
+    "l1d_prefetch_dropped_already_resident": "cpu.cache.l1d.prefetch_dropped_already_resident",
     "load_replays": "cpu.memory.load_replays",
     "load_replays_rob_store_addr_unknown": "cpu.memory.load_replays.rob_store_addr_unknown",
     "load_replays_rob_store_overlap": "cpu.memory.load_replays.rob_store_overlap",
@@ -373,6 +383,13 @@ def run_one(
             l1d_misses=detail_stats["selected_metrics"]["l1d_misses"],
             l1d_stall_cycles_load=detail_stats["selected_metrics"]["l1d_stall_cycles_load"],
             l1d_stall_cycles_store=detail_stats["selected_metrics"]["l1d_stall_cycles_store"],
+            l1d_prefetch_requests=detail_stats["selected_metrics"]["l1d_prefetch_requests"],
+            l1d_prefetch_issued=detail_stats["selected_metrics"]["l1d_prefetch_issued"],
+            l1d_prefetch_useful_hits=detail_stats["selected_metrics"]["l1d_prefetch_useful_hits"],
+            l1d_prefetch_unused_evictions=detail_stats["selected_metrics"]["l1d_prefetch_unused_evictions"],
+            l1d_prefetch_dropped_already_resident=detail_stats["selected_metrics"][
+                "l1d_prefetch_dropped_already_resident"
+            ],
             load_replays=detail_stats["selected_metrics"]["load_replays"],
             load_replays_rob_store_addr_unknown=detail_stats["selected_metrics"][
                 "load_replays_rob_store_addr_unknown"
@@ -432,6 +449,11 @@ def run_one(
             l1d_misses=None,
             l1d_stall_cycles_load=None,
             l1d_stall_cycles_store=None,
+            l1d_prefetch_requests=None,
+            l1d_prefetch_issued=None,
+            l1d_prefetch_useful_hits=None,
+            l1d_prefetch_unused_evictions=None,
+            l1d_prefetch_dropped_already_resident=None,
             load_replays=None,
             load_replays_rob_store_addr_unknown=None,
             load_replays_rob_store_overlap=None,
@@ -481,6 +503,11 @@ def write_csv(path: Path, records: List[RunRecord]) -> None:
         "l1d_misses",
         "l1d_stall_cycles_load",
         "l1d_stall_cycles_store",
+        "l1d_prefetch_requests",
+        "l1d_prefetch_issued",
+        "l1d_prefetch_useful_hits",
+        "l1d_prefetch_unused_evictions",
+        "l1d_prefetch_dropped_already_resident",
         "load_replays",
         "load_replays_rob_store_addr_unknown",
         "load_replays_rob_store_overlap",

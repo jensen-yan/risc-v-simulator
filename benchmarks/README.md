@@ -193,6 +193,7 @@ python3 tools/benchmarks/run_perf_suite.py ... --ooo-l1d-prefetch off|on
 - `l1d_prefetch_useful_hits`
 - `l1d_prefetch_unused_evictions`
 - `l1d_prefetch_dropped_already_resident`
+- `l1d_prefetch_dropped_set_throttle`
 - `load_replays`
 - `load_replays_rob_store_addr_unknown`
 - `load_replays_rob_store_overlap`

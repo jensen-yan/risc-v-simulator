@@ -298,4 +298,70 @@ TEST(BlockingCacheTest, NextLinePrefetchTracksUnusedEviction) {
     EXPECT_EQ(stats.prefetch_dropped_already_resident, 0u);
 }
 
+TEST(BlockingCacheTest, NextLinePrefetchIsThrottledWhenSetAlreadyHasUnusedPrefetch) {
+    BlockingCacheConfig cfg = makeDefaultConfig();
+    cfg.size_bytes = 64 * 3;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 3;
+    cfg.enable_next_line_prefetch = true;
+
+    auto memory = std::make_shared<Memory>(512);
+    memory->writeWord(0x0, 0x11111111);
+    memory->writeWord(0x80, 0x33333333);
+
+    BlockingCache cache(cfg);
+
+    const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+    drainMiss(cache);
+
+    const auto second = cache.access(memory, 0x80, 4, CacheAccessType::Read);
+    EXPECT_FALSE(second.blocked);
+    EXPECT_FALSE(second.hit);
+    drainMiss(cache);
+
+    const auto& stats = cache.getStats();
+    EXPECT_EQ(stats.prefetch_requests, 2u);
+    EXPECT_EQ(stats.prefetch_issued, 1u);
+    EXPECT_EQ(stats.prefetch_dropped_set_throttle, 1u);
+    EXPECT_EQ(stats.prefetch_unused_evictions, 0u);
+}
+
+TEST(BlockingCacheTest, UsefulPrefetchHitClearsSetThrottleState) {
+    BlockingCacheConfig cfg = makeDefaultConfig();
+    cfg.size_bytes = 64 * 3;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 3;
+    cfg.enable_next_line_prefetch = true;
+
+    auto memory = std::make_shared<Memory>(512);
+    memory->writeWord(0x0, 0x11111111);
+    memory->writeWord(0x40, 0x22222222);
+    memory->writeWord(0x80, 0x33333333);
+    memory->writeWord(0xC0, 0x44444444);
+
+    BlockingCache cache(cfg);
+
+    const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+    drainMiss(cache);
+
+    const auto useful = cache.access(memory, 0x40, 4, CacheAccessType::Read);
+    EXPECT_FALSE(useful.blocked);
+    EXPECT_TRUE(useful.hit);
+
+    const auto second = cache.access(memory, 0x80, 4, CacheAccessType::Read);
+    EXPECT_FALSE(second.blocked);
+    EXPECT_FALSE(second.hit);
+    drainMiss(cache);
+
+    const auto& stats = cache.getStats();
+    EXPECT_EQ(stats.prefetch_requests, 2u);
+    EXPECT_EQ(stats.prefetch_issued, 2u);
+    EXPECT_EQ(stats.prefetch_useful_hits, 1u);
+    EXPECT_EQ(stats.prefetch_dropped_set_throttle, 0u);
+}
+
 } // namespace riscv

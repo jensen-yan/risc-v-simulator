@@ -43,6 +43,7 @@ struct BlockingCacheStats {
     uint64_t prefetch_useful_hits = 0;
     uint64_t prefetch_unused_evictions = 0;
     uint64_t prefetch_dropped_already_resident = 0;
+    uint64_t prefetch_dropped_set_throttle = 0;
 };
 
 class BlockingCache {
@@ -118,6 +119,7 @@ private:
                            bool& dirty_eviction,
                            bool mark_prefetched);
     void maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory, uint64_t demand_line_address);
+    size_t countUnusedPrefetchedLinesInSet(size_t set_index) const;
     void touchLine(CacheLine& line);
 
     static uint64_t readMemoryValue(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size);

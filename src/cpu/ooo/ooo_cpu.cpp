@@ -437,6 +437,9 @@ ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
         stats.push_back({"cpu.cache.l1d.prefetch_dropped_already_resident",
                          prefetch_stats.prefetch_dropped_already_resident,
                          "Prefetch requests dropped because the target line was already resident"});
+        stats.push_back({"cpu.cache.l1d.prefetch_dropped_set_throttle",
+                         prefetch_stats.prefetch_dropped_set_throttle,
+                         "Prefetch requests dropped because the target set still holds unused prefetched lines"});
     }
 
     return stats;
@@ -470,6 +473,9 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
         os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_dropped_already_resident"
            << std::right << std::setw(16) << prefetch_stats.prefetch_dropped_already_resident
            << " # Prefetch requests dropped because the target line was already resident\n";
+        os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_dropped_set_throttle"
+           << std::right << std::setw(16) << prefetch_stats.prefetch_dropped_set_throttle
+           << " # Prefetch requests dropped because the target set still holds unused prefetched lines\n";
     }
 
     const uint64_t cycles = cpu_state_.perf_counters.value(PerfCounterId::CYCLES);

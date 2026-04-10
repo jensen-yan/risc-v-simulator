@@ -79,6 +79,7 @@ class RunRecord:
     l1d_prefetch_useful_hits: Optional[int]
     l1d_prefetch_unused_evictions: Optional[int]
     l1d_prefetch_dropped_already_resident: Optional[int]
+    l1d_prefetch_dropped_set_throttle: Optional[int]
     load_replays: Optional[int]
     load_replays_rob_store_addr_unknown: Optional[int]
     load_replays_rob_store_overlap: Optional[int]
@@ -109,6 +110,7 @@ DETAIL_INT_FIELDS = {
     "l1d_prefetch_useful_hits": "cpu.cache.l1d.prefetch_useful_hits",
     "l1d_prefetch_unused_evictions": "cpu.cache.l1d.prefetch_unused_evictions",
     "l1d_prefetch_dropped_already_resident": "cpu.cache.l1d.prefetch_dropped_already_resident",
+    "l1d_prefetch_dropped_set_throttle": "cpu.cache.l1d.prefetch_dropped_set_throttle",
     "load_replays": "cpu.memory.load_replays",
     "load_replays_rob_store_addr_unknown": "cpu.memory.load_replays.rob_store_addr_unknown",
     "load_replays_rob_store_overlap": "cpu.memory.load_replays.rob_store_overlap",
@@ -393,6 +395,9 @@ def run_one(
             l1d_prefetch_dropped_already_resident=detail_stats["selected_metrics"][
                 "l1d_prefetch_dropped_already_resident"
             ],
+            l1d_prefetch_dropped_set_throttle=detail_stats["selected_metrics"][
+                "l1d_prefetch_dropped_set_throttle"
+            ],
             load_replays=detail_stats["selected_metrics"]["load_replays"],
             load_replays_rob_store_addr_unknown=detail_stats["selected_metrics"][
                 "load_replays_rob_store_addr_unknown"
@@ -457,6 +462,7 @@ def run_one(
             l1d_prefetch_useful_hits=None,
             l1d_prefetch_unused_evictions=None,
             l1d_prefetch_dropped_already_resident=None,
+            l1d_prefetch_dropped_set_throttle=None,
             load_replays=None,
             load_replays_rob_store_addr_unknown=None,
             load_replays_rob_store_overlap=None,
@@ -511,6 +517,7 @@ def write_csv(path: Path, records: List[RunRecord]) -> None:
         "l1d_prefetch_useful_hits",
         "l1d_prefetch_unused_evictions",
         "l1d_prefetch_dropped_already_resident",
+        "l1d_prefetch_dropped_set_throttle",
         "load_replays",
         "load_replays_rob_store_addr_unknown",
         "load_replays_rob_store_overlap",

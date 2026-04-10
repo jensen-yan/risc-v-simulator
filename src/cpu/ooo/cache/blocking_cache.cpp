@@ -389,11 +389,28 @@ void BlockingCache::maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& me
         return;
     }
 
+    const size_t target_set_index = lineToSetIndex(next_line_address);
+    if (countUnusedPrefetchedLinesInSet(target_set_index) >= 1) {
+        stats_.prefetch_dropped_set_throttle++;
+        return;
+    }
+
     bool dirty_eviction = false;
     CacheLine& prefetched_line =
         installLine(memory, next_line_address, dirty_eviction, /*mark_prefetched=*/true);
     touchLine(prefetched_line);
     stats_.prefetch_issued++;
+}
+
+size_t BlockingCache::countUnusedPrefetchedLinesInSet(size_t set_index) const {
+    size_t count = 0;
+    const auto& set = sets_.at(set_index);
+    for (const auto& line : set) {
+        if (line.valid && line.prefetched) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 void BlockingCache::touchLine(CacheLine& line) {

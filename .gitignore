@@ -50,6 +50,7 @@ benchmarks/build/
 benchmarks/results/
 
 .cache/
+.humanize/
 
 # Python 缓存
 __pycache__/

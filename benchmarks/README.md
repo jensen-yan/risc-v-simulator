@@ -108,6 +108,24 @@ python3 ./tools/benchmarks/run_perf_suite.py \
 ./tools/benchmarks/run_memory_learning.sh --phase lsu-foundation
 ```
 
+如果要固定第一轮 `memory-first` baseline，建议直接用：
+
+```bash
+./tools/benchmarks/run_memory_learning.sh --phase baseline
+```
+
+这个 baseline 会固定到：
+- `dhrystone`
+- `memcpy`
+- `coremark`（若已构建）
+- `lsu_store_forward`
+- `lsu_stride_walk`
+- `stream_copy`
+- `stream_triad`
+
+默认结果目录为：
+- `benchmarks/results/memory-first-baseline`
+
 只看 STREAM-style kernel：
 
 ```bash

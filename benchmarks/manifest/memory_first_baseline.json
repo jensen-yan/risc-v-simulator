@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "description": "memory-first baseline：固定的首轮性能探索入口，覆盖 Dhrystone、CoreMark 与代表性 LSU / STREAM 微基准",
+  "benchmarks": [
+    {
+      "suite": "riscv-tests",
+      "name": "dhrystone",
+      "path": "riscv-tests/benchmarks/dhrystone.riscv"
+    },
+    {
+      "suite": "riscv-tests",
+      "name": "memcpy",
+      "path": "riscv-tests/benchmarks/memcpy.riscv"
+    },
+    {
+      "suite": "coremark",
+      "name": "coremark",
+      "path": "benchmarks/build/coremark/coremark.riscv",
+      "optional": true
+    },
+    {
+      "suite": "custom-lsu",
+      "name": "lsu_store_forward",
+      "path": "benchmarks/build/lsu/lsu_store_forward.riscv",
+      "optional": true
+    },
+    {
+      "suite": "custom-lsu",
+      "name": "lsu_stride_walk",
+      "path": "benchmarks/build/lsu/lsu_stride_walk.riscv",
+      "optional": true
+    },
+    {
+      "suite": "custom-lsu",
+      "name": "stream_copy",
+      "path": "benchmarks/build/lsu/stream_copy.riscv",
+      "optional": true
+    },
+    {
+      "suite": "custom-lsu",
+      "name": "stream_triad",
+      "path": "benchmarks/build/lsu/stream_triad.riscv",
+      "optional": true
+    }
+  ]
+}

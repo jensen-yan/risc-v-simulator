@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SIMULATOR="${ROOT_DIR}/build/risc-v-sim"
 OUTPUT_DIR="${ROOT_DIR}/benchmarks/results/memory-learning"
+OUTPUT_DIR_EXPLICIT=0
 MANIFEST_REL="benchmarks/manifest/lsu_foundation.json"
 CPU_MODE="ooo"
 MAX_INSTRUCTIONS=0
@@ -19,7 +20,7 @@ usage() {
 用法: $0 [选项]
 
 选项:
-  --phase <name>             运行阶段：lsu-foundation | stream | full（默认: ${PHASE}）
+  --phase <name>             运行阶段：baseline | lsu-foundation | stream | full（默认: ${PHASE}）
   --cpu-mode <mode>          CPU 模式：in-order | ooo | both（默认: ${CPU_MODE}）
   --max-instructions <N>     In-order 指令上限（默认: ${MAX_INSTRUCTIONS}）
   --max-ooo-cycles <N>       OOO 周期上限（默认: ${MAX_OOO_CYCLES}）
@@ -29,6 +30,10 @@ usage() {
   --filter <glob>            benchmark 名称过滤（默认: ${FILTER}）
   --no-build-lsu             跳过 LSU 微基准构建
   -h, --help                 显示帮助
+
+说明:
+  --phase baseline 时，若未显式传入 --output-dir，则默认输出到
+  ${ROOT_DIR}/benchmarks/results/memory-first-baseline
 EOF
 }
 
@@ -60,6 +65,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --output-dir)
       OUTPUT_DIR="$2"
+      OUTPUT_DIR_EXPLICIT=1
       shift 2
       ;;
     --filter)
@@ -88,6 +94,12 @@ if [[ ! -x "${SIMULATOR}" ]]; then
 fi
 
 case "${PHASE}" in
+  baseline)
+    MANIFEST_REL="benchmarks/manifest/memory_first_baseline.json"
+    if [[ ${OUTPUT_DIR_EXPLICIT} -eq 0 ]]; then
+      OUTPUT_DIR="${ROOT_DIR}/benchmarks/results/memory-first-baseline"
+    fi
+    ;;
   lsu-foundation)
     MANIFEST_REL="benchmarks/manifest/lsu_foundation.json"
     ;;

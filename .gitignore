@@ -4,6 +4,9 @@ build-codex/
 build-debug/
 build_coverage/
 cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
 
 # 编译输出
 *.o
@@ -51,6 +54,7 @@ benchmarks/results/
 
 .cache/
 .humanize/
+.codex
 
 # Python 缓存
 __pycache__/

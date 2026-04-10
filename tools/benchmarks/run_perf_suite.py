@@ -5,6 +5,7 @@
 - 从 manifest 读取基准项（本地 path 或 glob）
 - 运行模拟器（in-order / ooo / both）
 - 解析关键统计（Instructions/Cycles/IPC/branch_mispredicts/pipeline_stalls）
+- 为每个 benchmark/mode 自动落盘详细 stats 文件
 - 输出 CSV + JSON，便于后续做趋势分析
 """
 
@@ -31,6 +32,7 @@ RE_BRANCH_MISPREDICTS = re.compile(
     r"(?:branch_mispredicts|Branch\s+Mispredicts):\s*(\d+)"
 )
 RE_PIPELINE_STALLS = re.compile(r"(?:pipeline_stalls|Pipeline\s+Stalls):\s*(\d+)")
+RE_DETAIL_SCALAR = re.compile(r"^(\S+)\s+([0-9]+(?:\.[0-9]+)?)\s+#", re.MULTILINE)
 
 
 @dataclass
@@ -55,6 +57,71 @@ class RunRecord:
     ipc: Optional[float]
     branch_mispredicts: Optional[int]
     pipeline_stalls: Optional[int]
+    stats_path: Optional[str]
+    topdown_executing_pct: Optional[float]
+    topdown_frontend_bound_pct: Optional[float]
+    topdown_backend_bound_pct: Optional[float]
+    issue_slots: Optional[int]
+    issue_utilized_slots: Optional[int]
+    commit_slots: Optional[int]
+    commit_utilized_slots: Optional[int]
+    rob_occupancy_avg: Optional[float]
+    store_buffer_occupancy_avg: Optional[float]
+    l1i_hits: Optional[int]
+    l1i_misses: Optional[int]
+    l1i_stall_cycles: Optional[int]
+    l1d_hits: Optional[int]
+    l1d_misses: Optional[int]
+    l1d_stall_cycles_load: Optional[int]
+    l1d_stall_cycles_store: Optional[int]
+    load_replays: Optional[int]
+    load_replays_rob_store_addr_unknown: Optional[int]
+    load_replays_rob_store_overlap: Optional[int]
+    load_replays_store_buffer_overlap: Optional[int]
+    loads_blocked_by_store: Optional[int]
+    predictor_control_incorrect: Optional[int]
+    predictor_jalr_mispredicts: Optional[int]
+    branch_profile_top0: Optional[str]
+    jalr_profile_top0: Optional[str]
+    load_profile_top0: Optional[str]
+    store_profile_top0: Optional[str]
+
+
+DETAIL_INT_FIELDS = {
+    "issue_slots": "cpu.issue.slots",
+    "issue_utilized_slots": "cpu.issue.utilized_slots",
+    "commit_slots": "cpu.commit.slots",
+    "commit_utilized_slots": "cpu.commit.utilized_slots",
+    "l1i_hits": "cpu.cache.l1i.hits",
+    "l1i_misses": "cpu.cache.l1i.misses",
+    "l1i_stall_cycles": "cpu.cache.l1i.stall_cycles",
+    "l1d_hits": "cpu.cache.l1d.hits",
+    "l1d_misses": "cpu.cache.l1d.misses",
+    "l1d_stall_cycles_load": "cpu.cache.l1d.stall_cycles_load",
+    "l1d_stall_cycles_store": "cpu.cache.l1d.stall_cycles_store",
+    "load_replays": "cpu.memory.load_replays",
+    "load_replays_rob_store_addr_unknown": "cpu.memory.load_replays.rob_store_addr_unknown",
+    "load_replays_rob_store_overlap": "cpu.memory.load_replays.rob_store_overlap",
+    "load_replays_store_buffer_overlap": "cpu.memory.load_replays.store_buffer_overlap",
+    "loads_blocked_by_store": "cpu.memory.loads_blocked_by_store",
+    "predictor_control_incorrect": "cpu.predictor.control.incorrect",
+    "predictor_jalr_mispredicts": "cpu.predictor.jalr.mispredicts",
+}
+
+DETAIL_FLOAT_FIELDS = {
+    "topdown_executing_pct": "cpu.topdown.cycles.executing_pct",
+    "topdown_frontend_bound_pct": "cpu.topdown.cycles.frontend_bound_pct",
+    "topdown_backend_bound_pct": "cpu.topdown.cycles.backend_bound_pct",
+    "rob_occupancy_avg": "cpu.rob.occupancy_avg",
+    "store_buffer_occupancy_avg": "cpu.store_buffer.occupancy_avg",
+}
+
+DETAIL_PROFILE_FIELDS = {
+    "branch_profile_top0": "cpu.branch_profile.top[0].pc",
+    "jalr_profile_top0": "cpu.jalr_profile.top[0].pc",
+    "load_profile_top0": "cpu.load_profile.top[0].pc",
+    "store_profile_top0": "cpu.store_profile.top[0].pc",
+}
 
 
 def _extract_last_int(pattern: re.Pattern[str], text: str) -> Optional[int]:
@@ -88,6 +155,72 @@ def parse_stats(output: str) -> Dict[str, Optional[float]]:
         "branch_mispredicts": branch_mispredicts,
         "pipeline_stalls": pipeline_stalls,
     }
+
+
+def _maybe_int(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    return int(float(value))
+
+
+def _maybe_float(value: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    return float(value)
+
+
+def parse_detailed_stats_text(text: str) -> Dict[str, Any]:
+    scalar_values: Dict[str, str] = {}
+    for key, value in RE_DETAIL_SCALAR.findall(text):
+        scalar_values[key] = value
+
+    profile_values: Dict[str, Optional[str]] = {}
+    lines = text.splitlines()
+    for field_name, prefix in DETAIL_PROFILE_FIELDS.items():
+        profile_values[field_name] = next((line for line in lines if line.startswith(prefix)), None)
+
+    selected_metrics: Dict[str, Any] = {}
+    for field_name, detail_key in DETAIL_INT_FIELDS.items():
+        selected_metrics[field_name] = _maybe_int(scalar_values.get(detail_key))
+    for field_name, detail_key in DETAIL_FLOAT_FIELDS.items():
+        selected_metrics[field_name] = _maybe_float(scalar_values.get(detail_key))
+    selected_metrics.update(profile_values)
+
+    basic_fallback = {
+        "instructions": _maybe_int(scalar_values.get("cpu.commit.retired")),
+        "cycles": _maybe_int(scalar_values.get("cpu.cycles")),
+        "ipc": _maybe_float(scalar_values.get("cpu.ipc")),
+        "branch_mispredicts": _maybe_int(
+            scalar_values.get("cpu.branch.conditional_mispredicts")
+        ),
+        "pipeline_stalls": _maybe_int(scalar_values.get("cpu.stall.total")),
+    }
+
+    return {
+        "scalars": scalar_values,
+        "selected_metrics": selected_metrics,
+        "basic_fallback": basic_fallback,
+    }
+
+
+def merge_basic_stats(
+    basic_stats: Dict[str, Optional[float]], detail_stats: Dict[str, Any]
+) -> Dict[str, Optional[float]]:
+    merged = dict(basic_stats)
+    fallback = detail_stats.get("basic_fallback", {})
+    for key in ("instructions", "cycles", "ipc", "branch_mispredicts", "pipeline_stalls"):
+        if merged.get(key) is None:
+            merged[key] = fallback.get(key)
+    if merged.get("ipc") is None and merged.get("instructions") is not None and merged.get("cycles"):
+        cycles = merged["cycles"]
+        if cycles:
+            merged["ipc"] = float(merged["instructions"]) / float(cycles)
+    return merged
+
+
+def sanitize_path_component(value: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value)
+    return sanitized.strip("._") or "item"
 
 
 def load_manifest(manifest_path: Path, repo_root: Path) -> List[BenchmarkTarget]:
@@ -154,6 +287,7 @@ def run_one(
     max_instructions: int,
     max_ooo_cycles: int,
     timeout_sec: int,
+    stats_path: Path,
 ) -> RunRecord:
     cmd = [
         str(simulator),
@@ -163,8 +297,10 @@ def run_one(
         f"--max-instructions={max_instructions}",
         f"--max-ooo-cycles={max_ooo_cycles}",
         "--ooo" if mode == "ooo" else "--in-order",
-        str(target.path),
     ]
+    if mode == "ooo":
+        cmd.append(f"--stats-file={stats_path}")
+    cmd.append(str(target.path))
 
     start = time.perf_counter()
     try:
@@ -180,7 +316,13 @@ def run_one(
         if proc.stderr:
             merged_output += "\n" + proc.stderr
 
-        stats = parse_stats(merged_output)
+        if mode != "ooo":
+            stats_path.write_text(merged_output, encoding="utf-8")
+        elif not stats_path.exists():
+            stats_path.write_text(merged_output, encoding="utf-8")
+
+        detail_stats = parse_detailed_stats_text(stats_path.read_text(encoding="utf-8"))
+        stats = merge_basic_stats(parse_stats(merged_output), detail_stats)
 
         has_pass_marker = "=== TEST RESULT: PASS ===" in merged_output
         has_fail_marker = "=== TEST RESULT: FAIL ===" in merged_output
@@ -214,9 +356,52 @@ def run_one(
                 if stats["pipeline_stalls"] is not None
                 else None
             ),
+            stats_path=str(stats_path),
+            topdown_executing_pct=detail_stats["selected_metrics"]["topdown_executing_pct"],
+            topdown_frontend_bound_pct=detail_stats["selected_metrics"]["topdown_frontend_bound_pct"],
+            topdown_backend_bound_pct=detail_stats["selected_metrics"]["topdown_backend_bound_pct"],
+            issue_slots=detail_stats["selected_metrics"]["issue_slots"],
+            issue_utilized_slots=detail_stats["selected_metrics"]["issue_utilized_slots"],
+            commit_slots=detail_stats["selected_metrics"]["commit_slots"],
+            commit_utilized_slots=detail_stats["selected_metrics"]["commit_utilized_slots"],
+            rob_occupancy_avg=detail_stats["selected_metrics"]["rob_occupancy_avg"],
+            store_buffer_occupancy_avg=detail_stats["selected_metrics"]["store_buffer_occupancy_avg"],
+            l1i_hits=detail_stats["selected_metrics"]["l1i_hits"],
+            l1i_misses=detail_stats["selected_metrics"]["l1i_misses"],
+            l1i_stall_cycles=detail_stats["selected_metrics"]["l1i_stall_cycles"],
+            l1d_hits=detail_stats["selected_metrics"]["l1d_hits"],
+            l1d_misses=detail_stats["selected_metrics"]["l1d_misses"],
+            l1d_stall_cycles_load=detail_stats["selected_metrics"]["l1d_stall_cycles_load"],
+            l1d_stall_cycles_store=detail_stats["selected_metrics"]["l1d_stall_cycles_store"],
+            load_replays=detail_stats["selected_metrics"]["load_replays"],
+            load_replays_rob_store_addr_unknown=detail_stats["selected_metrics"][
+                "load_replays_rob_store_addr_unknown"
+            ],
+            load_replays_rob_store_overlap=detail_stats["selected_metrics"][
+                "load_replays_rob_store_overlap"
+            ],
+            load_replays_store_buffer_overlap=detail_stats["selected_metrics"][
+                "load_replays_store_buffer_overlap"
+            ],
+            loads_blocked_by_store=detail_stats["selected_metrics"]["loads_blocked_by_store"],
+            predictor_control_incorrect=detail_stats["selected_metrics"][
+                "predictor_control_incorrect"
+            ],
+            predictor_jalr_mispredicts=detail_stats["selected_metrics"][
+                "predictor_jalr_mispredicts"
+            ],
+            branch_profile_top0=detail_stats["selected_metrics"]["branch_profile_top0"],
+            jalr_profile_top0=detail_stats["selected_metrics"]["jalr_profile_top0"],
+            load_profile_top0=detail_stats["selected_metrics"]["load_profile_top0"],
+            store_profile_top0=detail_stats["selected_metrics"]["store_profile_top0"],
         )
     except subprocess.TimeoutExpired:
         elapsed = time.perf_counter() - start
+        if not stats_path.exists():
+            stats_path.write_text(
+                f"# timeout after {timeout_sec}s while running {target.name} ({mode})\n",
+                encoding="utf-8",
+            )
         return RunRecord(
             suite=target.suite,
             benchmark=target.name,
@@ -230,6 +415,34 @@ def run_one(
             ipc=None,
             branch_mispredicts=None,
             pipeline_stalls=None,
+            stats_path=str(stats_path),
+            topdown_executing_pct=None,
+            topdown_frontend_bound_pct=None,
+            topdown_backend_bound_pct=None,
+            issue_slots=None,
+            issue_utilized_slots=None,
+            commit_slots=None,
+            commit_utilized_slots=None,
+            rob_occupancy_avg=None,
+            store_buffer_occupancy_avg=None,
+            l1i_hits=None,
+            l1i_misses=None,
+            l1i_stall_cycles=None,
+            l1d_hits=None,
+            l1d_misses=None,
+            l1d_stall_cycles_load=None,
+            l1d_stall_cycles_store=None,
+            load_replays=None,
+            load_replays_rob_store_addr_unknown=None,
+            load_replays_rob_store_overlap=None,
+            load_replays_store_buffer_overlap=None,
+            loads_blocked_by_store=None,
+            predictor_control_incorrect=None,
+            predictor_jalr_mispredicts=None,
+            branch_profile_top0=None,
+            jalr_profile_top0=None,
+            load_profile_top0=None,
+            store_profile_top0=None,
         )
 
 
@@ -251,6 +464,34 @@ def write_csv(path: Path, records: List[RunRecord]) -> None:
         "ipc",
         "branch_mispredicts",
         "pipeline_stalls",
+        "stats_path",
+        "topdown_executing_pct",
+        "topdown_frontend_bound_pct",
+        "topdown_backend_bound_pct",
+        "issue_slots",
+        "issue_utilized_slots",
+        "commit_slots",
+        "commit_utilized_slots",
+        "rob_occupancy_avg",
+        "store_buffer_occupancy_avg",
+        "l1i_hits",
+        "l1i_misses",
+        "l1i_stall_cycles",
+        "l1d_hits",
+        "l1d_misses",
+        "l1d_stall_cycles_load",
+        "l1d_stall_cycles_store",
+        "load_replays",
+        "load_replays_rob_store_addr_unknown",
+        "load_replays_rob_store_overlap",
+        "load_replays_store_buffer_overlap",
+        "loads_blocked_by_store",
+        "predictor_control_incorrect",
+        "predictor_jalr_mispredicts",
+        "branch_profile_top0",
+        "jalr_profile_top0",
+        "load_profile_top0",
+        "store_profile_top0",
     ]
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -392,12 +633,22 @@ def main() -> int:
         print("[ERROR] 没有可运行 benchmark")
         return 1
 
+    ensure_output_dir(output_dir)
+    stats_dir = output_dir / "stats"
+    ensure_output_dir(stats_dir)
+
     records: List[RunRecord] = []
     for mode in modes:
         for idx, target in enumerate(runnable_targets, start=1):
             print(
                 f"[RUN] ({mode}) {idx}/{len(runnable_targets)} "
                 f"{target.suite}:{target.name}"
+            )
+            stats_path = stats_dir / (
+                f"{mode}-"
+                f"{idx:03d}-"
+                f"{sanitize_path_component(target.suite)}-"
+                f"{sanitize_path_component(target.name)}.stats"
             )
             rec = run_one(
                 simulator=simulator_path,
@@ -407,6 +658,7 @@ def main() -> int:
                 max_instructions=args.max_instructions,
                 max_ooo_cycles=args.max_ooo_cycles,
                 timeout_sec=args.timeout,
+                stats_path=stats_path,
             )
             records.append(rec)
             print(
@@ -414,7 +666,6 @@ def main() -> int:
                 f"rc={rec.return_code} elapsed={rec.elapsed_sec:.2f}s"
             )
 
-    ensure_output_dir(output_dir)
     csv_path = output_dir / "results.csv"
     json_path = output_dir / "results.json"
 

@@ -108,20 +108,25 @@ python3 ./tools/benchmarks/run_perf_suite.py \
 ./tools/benchmarks/run_memory_learning.sh --phase lsu-foundation
 ```
 
-如果要固定第一轮 `memory-first` baseline，建议直接用：
+如果要固定第一轮 `memory-first` canonical baseline，建议直接用：
 
 ```bash
 ./tools/benchmarks/run_memory_learning.sh --phase baseline
 ```
 
-这个 baseline 会固定到：
+这条 baseline 是首轮唯一的 canonical 入口，覆盖：
 - `dhrystone`
 - `memcpy`
+- `mm`
+- `spmv`
 - `coremark`（若已构建）
 - `lsu_store_forward`
 - `lsu_stride_walk`
+- `lsu_mlp`
 - `stream_copy`
 - `stream_triad`
+
+其中前 5 项与 `benchmarks/manifest/memory_learning.json` 保持一致，后 5 项是固定追加的代表性 LSU / STREAM 微基准，便于后续做 memory-first 对照分析。
 
 默认结果目录为：
 - `benchmarks/results/memory-first-baseline`
@@ -143,17 +148,49 @@ python3 ./tools/benchmarks/run_perf_suite.py \
 `results.csv` / `results.json` 包含字段：
 - `suite`
 - `benchmark`
+- `file`
 - `mode`
 - `status`
+- `return_code`
+- `elapsed_sec`
 - `instructions`
 - `cycles`
 - `ipc`
 - `branch_mispredicts`
 - `pipeline_stalls`
+- `stats_path`
+- `topdown_executing_pct`
+- `topdown_frontend_bound_pct`
+- `topdown_backend_bound_pct`
+- `issue_slots`
+- `issue_utilized_slots`
+- `commit_slots`
+- `commit_utilized_slots`
+- `rob_occupancy_avg`
+- `store_buffer_occupancy_avg`
+- `l1i_hits`
+- `l1i_misses`
+- `l1i_stall_cycles`
+- `l1d_hits`
+- `l1d_misses`
+- `l1d_stall_cycles_load`
+- `l1d_stall_cycles_store`
+- `load_replays`
+- `load_replays_rob_store_addr_unknown`
+- `load_replays_rob_store_overlap`
+- `load_replays_store_buffer_overlap`
+- `loads_blocked_by_store`
+- `predictor_control_incorrect`
+- `predictor_jalr_mispredicts`
+- `branch_profile_top0`
+- `jalr_profile_top0`
+- `load_profile_top0`
+- `store_profile_top0`
 
 ## 说明
 
 - `CoreMark` 在本工程中用 `mcycle` 作为计时 tick（用于相对趋势比较）。
 - 自定义 LSU 微基准会输出 `=== TEST RESULT: PASS ===`，可直接纳入 `run_perf_suite.py`。
 - `run_memory_learning.sh` 会默认先构建 `benchmarks/custom/lsu/*.c`，再执行对应 manifest。
+- `stats_path` 指向每个 benchmark/mode 自动落盘的详细 stats 文件；OOO 模式会通过模拟器的 `--stats-file=` 导出 detailed stats，便于后续报告回溯。
 - 若要做严格可发表的绝对分数，请固定模拟器频率模型与编译参数，并记录完整环境。

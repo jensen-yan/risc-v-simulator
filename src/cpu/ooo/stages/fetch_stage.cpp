@@ -253,14 +253,13 @@ void FetchStage::execute(CPUState& state) {
         state.perf_counters.increment(PerfCounterId::FETCH_UTILIZED_SLOTS, fetched_this_cycle);
     }
     
-    // 每个周期结束时检查是否应该停机
-    // 如果没有更多指令可取，且流水线为空，则停机
-    if (state.pc >= state.memory->getSize() || 
-        (state.reorder_buffer->is_empty() && 
-         state.fetch_buffer.empty() && 
-         state.cdb_queue.empty())) {
-        
-        // 检查是否还有任何正在执行的指令
+    // 每个周期结束时仅在流水线完全排空时停机。
+    // 不能再用 pc >= memory_size 之类的物理地址假设，因为 Sv39/高虚拟地址
+    // checkpoint 在合法执行过程中也会出现远大于 memory_size 的 PC。
+    if (state.reorder_buffer->is_empty() &&
+        state.fetch_buffer.empty() &&
+        state.cdb_queue.empty() &&
+        !state.icache.hasMissWait()) {
         bool has_busy_units = false;
         for (const auto& unit : state.alu_units) {
             if (unit.busy) has_busy_units = true;
@@ -274,8 +273,8 @@ void FetchStage::execute(CPUState& state) {
         for (const auto& unit : state.store_units) {
             if (unit.busy) has_busy_units = true;
         }
-        
-        if (!has_busy_units && state.reorder_buffer->is_empty()) {
+
+        if (!has_busy_units) {
             state.halted = true;
             LOGT(FETCH, "all instructions completed, halt cpu");
         }

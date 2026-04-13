@@ -13,9 +13,18 @@ namespace {
                                        Address virtual_address,
                                        size_t size,
                                        const TranslationResult& result) {
-    throw MemoryException(std::string(access_type) + " translation failed for va=0x" +
-                          std::to_string(virtual_address) + " size=" + std::to_string(size) +
-                          ": " + result.message);
+    MemoryAccessType access_kind = MemoryAccessType::Load;
+    if (std::string(access_type) == "store") {
+        access_kind = MemoryAccessType::Store;
+    }
+
+    throw TranslationException(access_kind,
+                               result.failure_reason,
+                               virtual_address,
+                               size,
+                               std::string(access_type) + " translation failed for va=0x" +
+                                   std::to_string(virtual_address) + " size=" + std::to_string(size) +
+                                   ": " + result.message);
 }
 
 Address translateLoadAddress(const CPUState& state, Address virtual_address, size_t size) {
@@ -373,6 +382,10 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                 break;
         }
 
+    } catch (const TranslationException& e) {
+        instruction->set_trap(e.trapCause(), e.virtualAddress());
+        unit.has_exception = false;
+        unit.exception_msg.clear();
     } catch (const SimulatorException& e) {
         unit.has_exception = true;
         unit.exception_msg = e.what();

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "core/csr_utils.h"
 #include "system/checkpoint_types.h"
 #include "system/elf_loader.h"
 #include "system/simulator.h"
@@ -62,6 +63,16 @@ uint32_t createStoreInstruction(int16_t imm, uint8_t rs2, uint8_t rs1, uint8_t f
 uint32_t createSystemInstruction(uint16_t imm12, uint8_t rs1, uint8_t funct3, uint8_t rd) {
     return (static_cast<uint32_t>(imm12) << 20) | (static_cast<uint32_t>(rs1) << 15) |
            (static_cast<uint32_t>(funct3) << 12) | (static_cast<uint32_t>(rd) << 7) | 0x73U;
+}
+
+uint32_t createJTypeInstruction(int32_t imm, uint8_t rd) {
+    const uint32_t imm21 = static_cast<uint32_t>(imm) & 0x1FFFFFu;
+    const uint32_t bit20 = (imm21 >> 20) & 0x1u;
+    const uint32_t bits10_1 = (imm21 >> 1) & 0x3FFu;
+    const uint32_t bit11 = (imm21 >> 11) & 0x1u;
+    const uint32_t bits19_12 = (imm21 >> 12) & 0xFFu;
+    return (bit20 << 31) | (bits19_12 << 12) | (bit11 << 20) | (bits10_1 << 21) |
+           (static_cast<uint32_t>(rd) << 7) | 0x6FU;
 }
 
 void appendWord(std::vector<uint8_t>& program, uint32_t instruction) {
@@ -385,6 +396,63 @@ TEST(SimulatorTest, LoadSnapshotWithSv39HighVirtualPcDoesNotAutoHaltInOrderCpu) 
     EXPECT_EQ(simulator.getCpu()->getPC(), kHighVirtualPc + 4);
 }
 
+TEST(SimulatorTest, LoadSnapshotWithSv39HighVirtualPcPreservesFullWidthJalLinkAddressInOrderCpu) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::IN_ORDER, /*memoryBaseAddress=*/0);
+
+    constexpr uint64_t kHighVirtualPc = 0xffffffff80100000ULL;
+
+    SnapshotBundle snapshot;
+    snapshot.pc = kHighVirtualPc;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+    snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/kHighVirtualPc, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    writeWord(segment.bytes, /*address=*/0x4000, createJTypeInstruction(/*imm=*/8, /*rd=*/1));
+    writeWord(segment.bytes, /*address=*/0x4008, createECallInstruction());
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    EXPECT_NO_THROW(simulator.step());
+    EXPECT_EQ(simulator.getCpu()->getRegister(1), kHighVirtualPc + 4);
+}
+
+TEST(SimulatorTest, LoadSnapshotWithSv39HighVirtualPcDoesNotAutoHaltOutOfOrderCpu) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
+    simulator.setMaxOutOfOrderCycles(200);
+
+    constexpr uint64_t kHighVirtualPc = 0xffffffff80100000ULL;
+
+    SnapshotBundle snapshot;
+    snapshot.pc = kHighVirtualPc;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+    snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/kHighVirtualPc, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    writeWord(segment.bytes, /*address=*/0x4000, createITypeInstruction(42, 0, 0x0, 5, 0x13));
+    writeWord(segment.bytes, /*address=*/0x4004, createECallInstruction());
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    bool executed_high_virtual_instruction = false;
+    for (int i = 0; i < 40 && !simulator.getCpu()->isHalted(); ++i) {
+        EXPECT_NO_THROW(simulator.step());
+        if (simulator.getCpu()->getRegister(5) == 42u) {
+            executed_high_virtual_instruction = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(executed_high_virtual_instruction);
+    EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
+}
+
 TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderLoadStore) {
     Simulator simulator(/*memorySize=*/0x20000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
     simulator.setMaxOutOfOrderCycles(200);
@@ -481,6 +549,43 @@ TEST(SimulatorTest, LoadSnapshotWithSv39SynchronizesOutOfOrderTranslationAfterSa
     ASSERT_TRUE(result.success) << result.message;
     EXPECT_EQ(simulator.getCpu()->getCSR(0x180), (kSv39Mode << 60) | (kRootPageTable >> 12));
     EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
+}
+
+TEST(SimulatorTest, LoadPageFaultInOutOfOrderCpuEntersMachineTrapInsteadOfHalting) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
+    simulator.setMaxOutOfOrderCycles(400);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x1000;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
+    snapshot.integer_regs[1] = 0x2000;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+    snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
+    snapshot.csr_values.push_back({0x305, 0x1800});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/0x1000, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    writeWord(segment.bytes, /*address=*/0x4000, createLoadInstruction(0, 1, 0x2, 6));
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    bool entered_machine_trap = false;
+    for (int i = 0; i < 200 && !simulator.getCpu()->isHalted(); ++i) {
+        simulator.step();
+        if (simulator.getCpu()->getPC() == 0x1800 &&
+            simulator.getCpu()->getPrivilegeMode() == PrivilegeMode::MACHINE) {
+            entered_machine_trap = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(entered_machine_trap);
+    EXPECT_FALSE(simulator.getCpu()->isHalted());
+    EXPECT_EQ(simulator.getCpu()->getCSR(0x341), 0x1000u);
+    EXPECT_EQ(simulator.getCpu()->getCSR(0x342), csr::kLoadPageFaultCause);
+    EXPECT_EQ(simulator.getCpu()->getCSR(0x343), 0x2000u);
 }
 
 TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderCrossPageInstructionFetch) {

@@ -475,7 +475,7 @@ void CPU::executeJType(const DecodedInstruction& inst) {
 
         // JAL: Jump and Link
         // 1. 保存返回地址（根据指令长度确定增量）
-        uint32_t return_addr = pc_ + (inst.is_compressed ? 2 : 4);
+        const uint64_t return_addr = pc_ + (inst.is_compressed ? 2ULL : 4ULL);
         setRegister(inst.rd, return_addr);
         
         // 2. 跳转到 PC + 符号扩展的立即数

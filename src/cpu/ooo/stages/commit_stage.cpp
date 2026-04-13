@@ -790,7 +790,21 @@ void CommitStage::enter_machine_trap(CPUState& state,
                                      uint64_t instruction_pc,
                                      uint64_t cause,
                                      uint64_t tval) {
-    state.pc = csr::enterMachineTrap(state.csr_registers, instruction_pc, cause, tval);
+    PrivilegeMode current_mode = PrivilegeMode::MACHINE;
+    if (state.cpu_interface) {
+        current_mode = state.cpu_interface->getPrivilegeMode();
+    } else if (state.privilege_state) {
+        current_mode = state.privilege_state->getMode();
+    }
+
+    state.pc = csr::enterMachineTrap(state.csr_registers, instruction_pc, cause, tval, current_mode);
+    if (state.cpu_interface) {
+        state.cpu_interface->setPrivilegeMode(PrivilegeMode::MACHINE);
+        state.cpu_interface->setCSR(csr::kMstatus, csr::read(state.csr_registers, csr::kMstatus));
+    } else if (state.privilege_state) {
+        state.privilege_state->setMode(PrivilegeMode::MACHINE);
+        state.privilege_state->setMstatus(csr::read(state.csr_registers, csr::kMstatus));
+    }
     flush_pipeline_after_commit(state, FlushReason::Trap);
 }
 

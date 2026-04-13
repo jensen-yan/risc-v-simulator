@@ -21,9 +21,20 @@ constexpr uint32_t kMstatusCsrAddress = 0x300;
                                        Address virtual_address,
                                        size_t size,
                                        const TranslationResult& result) {
-    throw MemoryException(std::string(access_type) + " translation failed for va=0x" +
-                          std::to_string(virtual_address) + " size=" + std::to_string(size) +
-                          ": " + result.message);
+    MemoryAccessType access_kind = MemoryAccessType::Load;
+    if (std::string(access_type) == "instruction fetch") {
+        access_kind = MemoryAccessType::InstructionFetch;
+    } else if (std::string(access_type) == "store") {
+        access_kind = MemoryAccessType::Store;
+    }
+
+    throw TranslationException(access_kind,
+                               result.failure_reason,
+                               virtual_address,
+                               size,
+                               std::string(access_type) + " translation failed for va=0x" +
+                                   std::to_string(virtual_address) + " size=" + std::to_string(size) +
+                                   ": " + result.message);
 }
 
 } // namespace
@@ -34,6 +45,8 @@ CPU::CPU(std::shared_ptr<Memory> memory)
                          static_cast<uint32_t>(Extension::A) | static_cast<uint32_t>(Extension::F) |
                          static_cast<uint32_t>(Extension::D) |
                          static_cast<uint32_t>(Extension::C)),
+      last_halt_pc_(0),
+      last_halt_message_(),
       last_instruction_compressed_(false), reservation_valid_(false), reservation_addr_(0) {
     // 初始化寄存器，x0寄存器始终为0
     registers_.fill(0);
@@ -157,9 +170,20 @@ void CPU::step() {
             halted_ = true;
         }
         
+    } catch (const TranslationException& e) {
+        const uint64_t trap_vector = getCSR(csr::kMtvec) & ~0x3ULL;
+        if (trap_vector == 0) {
+            halted_ = true;
+            last_halt_pc_ = pc_;
+            last_halt_message_ = e.what();
+        } else {
+            enterMachineTrap(e.trapCause(), e.virtualAddress());
+        }
     } catch (const MemoryException& e) {
         // PC超出范围或访问无效内存
         halted_ = true;
+        last_halt_pc_ = pc_;
+        last_halt_message_ = e.what();
         throw;
     }
 }
@@ -177,6 +201,8 @@ void CPU::reset() {
     pc_ = 0;
     halted_ = false;
     instruction_count_ = 0;
+    last_halt_pc_ = 0;
+    last_halt_message_.clear();
     reservation_valid_ = false;
     reservation_addr_ = 0;
     setPrivilegeMode(PrivilegeMode::MACHINE);
@@ -252,7 +278,7 @@ void CPU::setCSR(uint32_t addr, uint64_t value) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
     csr::write(csr_registers_, addr, value);
-    if (addr == kSatpCsrAddress) {
+    if (addr == kSatpCsrAddress || addr == kMstatusCsrAddress) {
         syncAddressTranslationStateFromCsrs();
     }
 }
@@ -529,7 +555,9 @@ void CPU::handleEbreak() {
 }
 
 void CPU::enterMachineTrap(uint64_t cause, uint64_t tval) {
-    pc_ = csr::enterMachineTrap(csr_registers_, pc_, cause, tval);
+    pc_ = csr::enterMachineTrap(csr_registers_, pc_, cause, tval, getPrivilegeMode());
+    setPrivilegeMode(PrivilegeMode::MACHINE);
+    syncAddressTranslationStateFromCsrs();
 }
 
 bool CPU::isExtensionEnabled(Extension extension) const {
@@ -596,7 +624,9 @@ void CPU::syncAddressTranslationStateFromCsrs() {
     }
 
     const uint64_t satp = csr::read(csr_registers_, kSatpCsrAddress);
+    const uint64_t mstatus = csr::read(csr_registers_, kMstatusCsrAddress);
     privilege_state_->setSatp(satp);
+    privilege_state_->setMstatus(mstatus);
 }
 
 void CPU::executeMExtension(const DecodedInstruction& inst) {

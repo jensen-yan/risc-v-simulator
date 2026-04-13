@@ -23,6 +23,7 @@ constexpr uint64_t kPteX = 1ULL << 3;
 constexpr uint64_t kPteU = 1ULL << 4;
 constexpr uint64_t kPteA = 1ULL << 6;
 constexpr uint64_t kPteD = 1ULL << 7;
+constexpr uint64_t kPtePpnShift = 10;
 
 bool isLeafPte(uint64_t pte) {
     return (pte & (kPteR | kPteX)) != 0;
@@ -54,12 +55,29 @@ TranslationResult writePte(std::shared_ptr<Memory> memory, Address pteAddress, u
     }
 }
 
+TranslationResult composeLeafPhysicalAddress(uint64_t pte, Address virtualAddress, int level) {
+    const uint64_t ppn = pte >> kPtePpnShift;
+    const uint64_t lower_ppn_mask = (1ULL << (static_cast<uint64_t>(level) * 9U)) - 1ULL;
+    if ((ppn & lower_ppn_mask) != 0) {
+        return failure(TranslationFailureReason::InvalidPte, "misaligned Sv39 superpage leaf PPN");
+    }
+
+    const uint64_t page_shift = kPageShift + static_cast<uint64_t>(level) * 9U;
+    const uint64_t page_offset_mask = (1ULL << page_shift) - 1ULL;
+    const uint64_t physical_page_base = (ppn >> (static_cast<uint64_t>(level) * 9U)) << page_shift;
+    const uint64_t physical_address = physical_page_base | (virtualAddress & page_offset_mask);
+    return TranslationResult{true, physical_address, TranslationFailureReason::None, {}};
+}
+
 } // namespace
 
 Sv39PageWalker::Sv39PageWalker(std::shared_ptr<Memory> memory, PrivilegeState* privilegeState)
     : memory_(std::move(memory)), privilege_state_(privilegeState) {}
 
-TranslationResult Sv39PageWalker::walk(Address virtualAddress, MemoryAccessType accessType, size_t accessSize) const {
+TranslationResult Sv39PageWalker::walk(Address virtualAddress,
+                                       MemoryAccessType accessType,
+                                       size_t accessSize,
+                                       PrivilegeMode effectiveMode) const {
     if (memory_ == nullptr || privilege_state_ == nullptr) {
         return failure(TranslationFailureReason::AccessFault, "missing translation dependencies");
     }
@@ -98,13 +116,19 @@ TranslationResult Sv39PageWalker::walk(Address virtualAddress, MemoryAccessType 
             continue;
         }
 
-        if (level != 0) {
-            return failure(TranslationFailureReason::UnsupportedPageSize, "only 4 KiB Sv39 leaf pages are supported");
-        }
-
         const bool userPage = (pte & kPteU) != 0;
-        if (privilege_state_->getMode() == PrivilegeMode::USER && !userPage) {
+        if (effectiveMode == PrivilegeMode::USER && !userPage) {
             return failure(TranslationFailureReason::PermissionDenied, "user access to supervisor page");
+        }
+        if (effectiveMode == PrivilegeMode::SUPERVISOR && userPage) {
+            if (accessType == MemoryAccessType::InstructionFetch) {
+                return failure(
+                    TranslationFailureReason::PermissionDenied, "supervisor fetch from user page requires U=0");
+            }
+            if (!privilege_state_->isSumEnabled()) {
+                return failure(
+                    TranslationFailureReason::PermissionDenied, "supervisor data access to user page requires SUM=1");
+            }
         }
 
         if (accessType == MemoryAccessType::InstructionFetch && (pte & kPteX) == 0) {
@@ -128,8 +152,7 @@ TranslationResult Sv39PageWalker::walk(Address virtualAddress, MemoryAccessType 
             }
         }
 
-        const Address physicalAddress = ((pte >> 10) << kPageShift) | pageOffset;
-        return TranslationResult{true, physicalAddress, TranslationFailureReason::None, {}};
+        return composeLeafPhysicalAddress(pte, virtualAddress, level);
     }
 
     return failure(TranslationFailureReason::InvalidPte, "page walk terminated unexpectedly");

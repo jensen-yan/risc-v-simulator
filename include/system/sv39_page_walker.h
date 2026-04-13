@@ -13,7 +13,10 @@ class Sv39PageWalker {
 public:
     Sv39PageWalker(std::shared_ptr<Memory> memory, PrivilegeState* privilegeState);
 
-    TranslationResult walk(Address virtualAddress, MemoryAccessType accessType, size_t accessSize) const;
+    TranslationResult walk(Address virtualAddress,
+                           MemoryAccessType accessType,
+                           size_t accessSize,
+                           PrivilegeMode effectiveMode) const;
 
 private:
     std::shared_ptr<Memory> memory_;

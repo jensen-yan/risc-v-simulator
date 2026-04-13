@@ -18,9 +18,16 @@ public:
     void setSatp(uint64_t satp) { satp_ = satp; }
     uint64_t getSatp() const { return satp_; }
 
+    void setMstatus(uint64_t mstatus) { mstatus_ = mstatus; }
+    uint64_t getMstatus() const { return mstatus_; }
+
+    std::optional<PrivilegeMode> getEffectiveDataMode() const;
+    bool isSumEnabled() const;
+
 private:
     PrivilegeMode mode_ = PrivilegeMode::MACHINE;
     uint64_t satp_ = 0;
+    uint64_t mstatus_ = 0;
 };
 
 } // namespace riscv

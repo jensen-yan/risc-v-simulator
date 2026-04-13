@@ -52,8 +52,8 @@ public:
     void dumpDetailedStats(std::ostream& os) const override { (void)os; }
     void setNextStepRetireLimit(size_t limit) override { (void)limit; }
     void clearNextStepRetireLimit() override {}
-    std::string getLastHaltMessage() const override { return {}; }
-    uint64_t getLastHaltPC() const override { return cpu_->getPC(); }
+    std::string getLastHaltMessage() const override { return cpu_->getLastHaltMessage(); }
+    uint64_t getLastHaltPC() const override { return cpu_->getLastHaltPC(); }
 };
 
 /**

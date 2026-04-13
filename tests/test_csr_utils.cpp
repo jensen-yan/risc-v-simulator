@@ -45,13 +45,17 @@ TEST(CsrUtilsTest, EnterMachineTrapWritesCauseStateAndReturnsAlignedVectorBase) 
     csr::CsrFile csr_file{};
     csr_file.fill(0);
     csr_file[csr::kMtvec] = 0x101;
+    csr_file[csr::kMstatus] = csr::kMstatusMieMask;
 
     const uint64_t next_pc = csr::enterMachineTrap(
-        csr_file, 0x88, csr::kBreakpointCause, 0x99);
+        csr_file, 0x88, csr::kBreakpointCause, 0x99, PrivilegeMode::SUPERVISOR);
 
     EXPECT_EQ(csr_file[csr::kMepc], 0x88);
     EXPECT_EQ(csr_file[csr::kMcause], csr::kBreakpointCause);
     EXPECT_EQ(csr_file[csr::kMtval], 0x99);
+    EXPECT_EQ(csr::read(csr_file, csr::kMstatus) & csr::kMstatusMieMask, 0U);
+    EXPECT_NE(csr::read(csr_file, csr::kMstatus) & csr::kMstatusMpieMask, 0U);
+    EXPECT_EQ((csr::read(csr_file, csr::kMstatus) & csr::kMstatusMppMask) >> 11, 1U);
     EXPECT_EQ(next_pc, 0x100);
 }
 

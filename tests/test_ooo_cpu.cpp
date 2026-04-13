@@ -718,7 +718,9 @@ TEST_F(OutOfOrderCPUTest, LoadCanSpeculatePastAddressUnknownStoreWhenNoOverlapEx
 
     // ADDI x13, x0, 20
     // ADDI x14, x0, 16
-    // MUL  x1, x13, x14    ; x1 <- 0x140，故意放慢 older store 的地址准备
+    // MUL  x15, x13, x14   ; x15 <- 0x140
+    // DIV  x16, x13, x13   ; x16 <- 1，进一步拉长依赖链
+    // MUL  x1, x15, x16    ; x1 <- 0x140，确保 younger load 发射时 older store 仍地址未知
     // ADDI x11, x0, 0x34
     // ADDI x12, x0, 0x100
     // SW   x11, 0(x1)      ; older store, 地址执行前未知
@@ -727,13 +729,15 @@ TEST_F(OutOfOrderCPUTest, LoadCanSpeculatePastAddressUnknownStoreWhenNoOverlapEx
     // ECALL
     writeInstruction(0x0, createITypeInstruction(20, 0, 0x0, 13, 0x13));
     writeInstruction(0x4, createITypeInstruction(16, 0, 0x0, 14, 0x13));
-    writeInstruction(0x8, createRTypeInstruction(0x01, 14, 13, 0x0, 1, 0x33));
-    writeInstruction(0xC, createITypeInstruction(0x34, 0, 0x0, 11, 0x13));
-    writeInstruction(0x10, createITypeInstruction(0x100, 0, 0x0, 12, 0x13));
-    writeInstruction(0x14, createSTypeInstruction(0, 11, 1, 0x2, 0x23));
-    writeInstruction(0x18, createITypeInstruction(0, 12, 0x2, 3, 0x03));
-    writeInstruction(0x1C, createITypeInstruction(93, 0, 0x0, 17, 0x13));
-    writeInstruction(0x20, createECallInstruction());
+    writeInstruction(0x8, createRTypeInstruction(0x01, 14, 13, 0x0, 15, 0x33));
+    writeInstruction(0xC, createRTypeInstruction(0x01, 13, 13, 0x4, 16, 0x33));
+    writeInstruction(0x10, createRTypeInstruction(0x01, 16, 15, 0x0, 1, 0x33));
+    writeInstruction(0x14, createITypeInstruction(0x34, 0, 0x0, 11, 0x13));
+    writeInstruction(0x18, createITypeInstruction(0x100, 0, 0x0, 12, 0x13));
+    writeInstruction(0x1C, createSTypeInstruction(0, 11, 1, 0x2, 0x23));
+    writeInstruction(0x20, createITypeInstruction(0, 12, 0x2, 3, 0x03));
+    writeInstruction(0x24, createITypeInstruction(93, 0, 0x0, 17, 0x13));
+    writeInstruction(0x28, createECallInstruction());
 
     cpu->setPC(0x0);
     for (int i = 0; i < 500 && !cpu->isHalted(); ++i) {
@@ -763,7 +767,9 @@ TEST_F(OutOfOrderCPUTest, LoadOrderViolationRecoveryIsAttributedToLoadAndStorePr
 
     // ADDI x13, x0, 20
     // ADDI x14, x0, 16
-    // MUL  x1, x13, x14    ; x1 <- 0x140，故意推迟 older store 地址解析
+    // MUL  x15, x13, x14   ; x15 <- 0x140
+    // DIV  x16, x13, x13   ; x16 <- 1，进一步拉长依赖链
+    // MUL  x1, x15, x16    ; x1 <- 0x140，故意推迟 older store 地址解析
     // ADDI x11, x0, 0x34
     // ADDI x12, x0, 0x140
     // SW   x11, 0(x1)      ; older store
@@ -772,13 +778,15 @@ TEST_F(OutOfOrderCPUTest, LoadOrderViolationRecoveryIsAttributedToLoadAndStorePr
     // ECALL
     writeInstruction(0x0, createITypeInstruction(20, 0, 0x0, 13, 0x13));
     writeInstruction(0x4, createITypeInstruction(16, 0, 0x0, 14, 0x13));
-    writeInstruction(0x8, createRTypeInstruction(0x01, 14, 13, 0x0, 1, 0x33));
-    writeInstruction(0xC, createITypeInstruction(0x34, 0, 0x0, 11, 0x13));
-    writeInstruction(0x10, createITypeInstruction(0x140, 0, 0x0, 12, 0x13));
-    writeInstruction(0x14, createSTypeInstruction(0, 11, 1, 0x2, 0x23));
-    writeInstruction(0x18, createITypeInstruction(0, 12, 0x2, 3, 0x03));
-    writeInstruction(0x1C, createITypeInstruction(93, 0, 0x0, 17, 0x13));
-    writeInstruction(0x20, createECallInstruction());
+    writeInstruction(0x8, createRTypeInstruction(0x01, 14, 13, 0x0, 15, 0x33));
+    writeInstruction(0xC, createRTypeInstruction(0x01, 13, 13, 0x4, 16, 0x33));
+    writeInstruction(0x10, createRTypeInstruction(0x01, 16, 15, 0x0, 1, 0x33));
+    writeInstruction(0x14, createITypeInstruction(0x34, 0, 0x0, 11, 0x13));
+    writeInstruction(0x18, createITypeInstruction(0x140, 0, 0x0, 12, 0x13));
+    writeInstruction(0x1C, createSTypeInstruction(0, 11, 1, 0x2, 0x23));
+    writeInstruction(0x20, createITypeInstruction(0, 12, 0x2, 3, 0x03));
+    writeInstruction(0x24, createITypeInstruction(93, 0, 0x0, 17, 0x13));
+    writeInstruction(0x28, createECallInstruction());
 
     cpu->setPC(0x0);
     for (int i = 0; i < 800 && !cpu->isHalted(); ++i) {

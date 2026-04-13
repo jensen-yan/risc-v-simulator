@@ -22,6 +22,7 @@ namespace {
 
 bool g_enable_l1d_next_line_prefetch = true;
 constexpr uint32_t kSatpCsrAddress = 0x180;
+constexpr uint32_t kMstatusCsrAddress = 0x300;
 
 template <typename T>
 void clearQueue(std::queue<T>& q) {
@@ -344,7 +345,7 @@ void OutOfOrderCPU::setCSR(uint32_t addr, uint64_t value) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
     csr::write(cpu_state_.csr_registers, addr, value);
-    if (addr == kSatpCsrAddress) {
+    if (addr == kSatpCsrAddress || addr == kMstatusCsrAddress) {
         syncAddressTranslationStateFromCsrs();
     }
 }
@@ -435,7 +436,9 @@ void OutOfOrderCPU::syncAddressTranslationStateFromCsrs() {
     }
 
     const uint64_t satp = csr::read(cpu_state_.csr_registers, kSatpCsrAddress);
+    const uint64_t mstatus = csr::read(cpu_state_.csr_registers, kMstatusCsrAddress);
     cpu_state_.privilege_state->setSatp(satp);
+    cpu_state_.privilege_state->setMstatus(mstatus);
 }
 
 int32_t OutOfOrderCPU::signExtend(uint32_t value, int bits) const {

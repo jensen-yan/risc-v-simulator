@@ -59,6 +59,8 @@ public:
     bool isHalted() const override { return halted_; }
     uint64_t getInstructionCount() const override { return instruction_count_; }
     void requestHalt() override { halted_ = true; }
+    std::string getLastHaltMessage() const override { return last_halt_message_; }
+    uint64_t getLastHaltPC() const override { return last_halt_pc_; }
     
     // 扩展支持
     void setEnabledExtensions(uint32_t extensions) override { enabled_extensions_ = extensions; }
@@ -81,6 +83,8 @@ private:
     bool halted_;                   // 停机标志
     uint64_t instruction_count_;    // 指令计数器
     uint32_t enabled_extensions_;   // 启用的扩展
+    uint64_t last_halt_pc_;         // 最近一次停止/异常PC
+    std::string last_halt_message_; // 最近一次停止/异常消息
     bool last_instruction_compressed_; // 上一条指令是否为压缩指令
     bool reservation_valid_;        // LR/SC 预留标志
     uint64_t reservation_addr_;     // LR 预留地址

@@ -4,6 +4,8 @@
 #include "common/types.h"
 #include "core/instruction_executor.h"
 #include <algorithm>
+#include <optional>
+#include <vector>
 
 namespace riscv {
 
@@ -42,26 +44,68 @@ void clearQueue(Queue& queue) {
     }
 }
 
-bool markBlockedAddrUnknownPairIfNeeded(CPUState& state, const DynamicInstPtr& instruction) {
+struct AddrUnknownStoreSnapshotEntry {
+    uint64_t instruction_id = 0;
+    uint64_t pc = 0;
+};
+
+std::vector<AddrUnknownStoreSnapshotEntry> captureAddrUnknownStoreSnapshot(const CPUState& state) {
+    std::vector<AddrUnknownStoreSnapshotEntry> snapshot;
+    if (!state.reorder_buffer) {
+        return snapshot;
+    }
+
+    for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
+        const auto rob_entry = static_cast<ROBEntry>(i);
+        if (!state.reorder_buffer->is_entry_valid(rob_entry)) {
+            continue;
+        }
+
+        const auto instruction = state.reorder_buffer->get_entry(rob_entry);
+        if (!instruction || !instruction->is_store_instruction() || instruction->is_completed()) {
+            continue;
+        }
+
+        const auto& memory_info = instruction->get_memory_info();
+        if (memory_info.address_ready && memory_info.memory_size != 0) {
+            continue;
+        }
+
+        snapshot.push_back({instruction->get_instruction_id(), instruction->get_pc()});
+    }
+    return snapshot;
+}
+
+std::optional<uint64_t> findFirstOlderAddrUnknownStorePc(
+    const std::vector<AddrUnknownStoreSnapshotEntry>& snapshot, uint64_t instruction_id) {
+    for (const auto& entry : snapshot) {
+        if (entry.instruction_id < instruction_id) {
+            return entry.pc;
+        }
+    }
+    return std::nullopt;
+}
+
+bool markBlockedAddrUnknownPairIfNeeded(CPUState& state,
+                                        const DynamicInstPtr& instruction,
+                                        const std::vector<AddrUnknownStoreSnapshotEntry>& snapshot) {
     if (!instruction || !instruction->is_load_instruction() || !state.reorder_buffer) {
         return false;
     }
 
     auto& memory_info = instruction->get_memory_info();
-    const auto older_unknown_stores = state.reorder_buffer->get_earlier_address_unknown_stores(
-        instruction->get_instruction_id());
-    if (older_unknown_stores.empty()) {
-        return false;
-    }
-
     const uint64_t load_pc = instruction->get_pc();
-    const auto blocked_store_it = std::find_if(
-        older_unknown_stores.begin(),
-        older_unknown_stores.end(),
-        [&](const DynamicInstPtr& older_unknown_store) {
-            return state.isBlockedAddrUnknownPair(load_pc, older_unknown_store->get_pc());
-        });
-    if (blocked_store_it == older_unknown_stores.end()) {
+    std::optional<uint64_t> blocked_store_pc;
+    for (const auto& entry : snapshot) {
+        if (entry.instruction_id >= instruction->get_instruction_id()) {
+            break;
+        }
+        if (state.isBlockedAddrUnknownPair(load_pc, entry.pc)) {
+            blocked_store_pc = entry.pc;
+            break;
+        }
+    }
+    if (!blocked_store_pc.has_value()) {
         return false;
     }
 
@@ -76,7 +120,7 @@ bool markBlockedAddrUnknownPairIfNeeded(CPUState& state, const DynamicInstPtr& i
          " store_pc=0x%" PRIx64,
          instruction->get_instruction_id(),
          load_pc,
-         (*blocked_store_it)->get_pc());
+         *blocked_store_pc);
     return true;
 }
 
@@ -91,11 +135,12 @@ void ExecuteStage::execute(CPUState& state) {
     update_execution_units(state);
 
     state.perf_counters.increment(PerfCounterId::DISPATCH_SLOTS, OOOPipelineConfig::DISPATCH_WIDTH);
+    const auto addr_unknown_store_snapshot = captureAddrUnknownStoreSnapshot(state);
 
     const auto dispatch_results = state.reservation_station->dispatch_instructions(
         OOOPipelineConfig::DISPATCH_WIDTH,
         [&](const DynamicInstPtr& instruction) {
-            return !markBlockedAddrUnknownPairIfNeeded(state, instruction);
+            return !markBlockedAddrUnknownPairIfNeeded(state, instruction, addr_unknown_store_snapshot);
         });
     if (dispatch_results.empty()) {
         LOGT(EXECUTE, "no ready instruction in reservation station");
@@ -163,20 +208,19 @@ void ExecuteStage::execute(CPUState& state) {
 
         if (dispatch_result.unit_type == ExecutionUnitType::LOAD) {
             auto& memory_info = dispatch_result.instruction->get_memory_info();
-            if (markBlockedAddrUnknownPairIfNeeded(state, dispatch_result.instruction)) {
+            if (markBlockedAddrUnknownPairIfNeeded(state, dispatch_result.instruction, addr_unknown_store_snapshot)) {
                 dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
                 state.reservation_station->release_execution_unit(
                     ExecutionUnitType::LOAD, dispatch_result.unit_id);
                 continue;
             }
-            const auto older_unknown_stores = state.reorder_buffer->get_earlier_address_unknown_stores(
-                dispatch_result.instruction->get_instruction_id());
-            if (!older_unknown_stores.empty()) {
+            const auto older_unknown_store_pc = findFirstOlderAddrUnknownStorePc(
+                addr_unknown_store_snapshot, dispatch_result.instruction->get_instruction_id());
+            if (older_unknown_store_pc.has_value()) {
                 const uint64_t load_pc = dispatch_result.instruction->get_pc();
                 if (!memory_info.speculated_past_addr_unknown_store &&
-                           state.shouldSpeculatePastAddrUnknownStore(
-                               load_pc, older_unknown_stores.front()->get_pc())) {
-                    const uint64_t store_pc = older_unknown_stores.front()->get_pc();
+                    state.shouldSpeculatePastAddrUnknownStore(load_pc, *older_unknown_store_pc)) {
+                    const uint64_t store_pc = *older_unknown_store_pc;
                     memory_info.speculated_past_addr_unknown_store = true;
                     memory_info.has_speculated_addr_unknown_source = true;
                     memory_info.speculated_addr_unknown_store_pc = store_pc;

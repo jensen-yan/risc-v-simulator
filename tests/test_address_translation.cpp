@@ -21,6 +21,9 @@ constexpr uint64_t kPteX = 1ULL << 3;
 constexpr uint64_t kPteU = 1ULL << 4;
 constexpr uint64_t kPteA = 1ULL << 6;
 constexpr uint64_t kPteD = 1ULL << 7;
+constexpr uint64_t kMstatusMppSupervisor = 0x1ULL << 11;
+constexpr uint64_t kMstatusMprv = 0x1ULL << 17;
+constexpr uint64_t kMstatusSum = 0x1ULL << 18;
 
 uint64_t makePte(Address target, uint64_t flags) {
     return ((target >> 12) << 10) | flags;
@@ -124,16 +127,32 @@ TEST_F(AddressTranslationTest, OutOfBoundsPageTableAccessReturnsAccessFault) {
     EXPECT_EQ(result.failure_reason, TranslationFailureReason::AccessFault);
 }
 
-TEST_F(AddressTranslationTest, Sv39RejectsUnsupportedLargeLeafPage) {
+TEST_F(AddressTranslationTest, Sv39WalkResolves1GiBSuperpageLeaf) {
     privilegeState.setMode(PrivilegeMode::SUPERVISOR);
-    memory->write64(kRootPageTable, makePte(kLevel1PageTable, kPteV));
-    memory->write64(kLevel1PageTable, makePte(kPhysicalAddress, kPteV | kPteR | kPteA));
+    constexpr Address kSuperpageVirtualAddress = 0x40001234ULL;
+    constexpr Address kSuperpagePhysicalAddress = 0x80000000ULL;
+    const uint64_t vpn2 = (kSuperpageVirtualAddress >> 30) & 0x1FF;
+    memory->write64(
+        kRootPageTable + vpn2 * 8, makePte(kSuperpagePhysicalAddress, kPteV | kPteR | kPteW));
     privilegeState.setSatp((kSv39Mode << 60) | (kRootPageTable >> 12));
 
-    const TranslationResult result = translation->translateLoadAddress(kVirtualAddress, 8);
+    const TranslationResult result = translation->translateStoreAddress(kSuperpageVirtualAddress, 8);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(result.physical_address, kSuperpagePhysicalAddress | (kSuperpageVirtualAddress & ((1ULL << 30) - 1)));
+}
+
+TEST_F(AddressTranslationTest, Sv39RejectsMisalignedSuperpageLeafPpn) {
+    privilegeState.setMode(PrivilegeMode::SUPERVISOR);
+    constexpr Address kSuperpageVirtualAddress = 0x40001234ULL;
+    const uint64_t vpn2 = (kSuperpageVirtualAddress >> 30) & 0x1FF;
+    memory->write64(kRootPageTable + vpn2 * 8, makePte(kPhysicalAddress, kPteV | kPteR | kPteW));
+    privilegeState.setSatp((kSv39Mode << 60) | (kRootPageTable >> 12));
+
+    const TranslationResult result = translation->translateStoreAddress(kSuperpageVirtualAddress, 8);
 
     EXPECT_FALSE(result.success);
-    EXPECT_EQ(result.failure_reason, TranslationFailureReason::UnsupportedPageSize);
+    EXPECT_EQ(result.failure_reason, TranslationFailureReason::InvalidPte);
 }
 
 TEST_F(AddressTranslationTest, Sv39RejectsWriteOnlyLeafPteAsInvalidPte) {
@@ -158,4 +177,36 @@ TEST_F(AddressTranslationTest, Sv39FetchAlsoSetsAccessedBit) {
     const uint64_t updatedPte = memory->read64(kLevel0PageTable + 8);
     EXPECT_NE(updatedPte & kPteA, 0U);
     EXPECT_EQ(updatedPte & kPteD, 0U);
+}
+
+TEST_F(AddressTranslationTest, MachineModeMprvUsesMppForDataTranslation) {
+    privilegeState.setMode(PrivilegeMode::MACHINE);
+    privilegeState.setMstatus(kMstatusMprv | kMstatusMppSupervisor);
+    installSv39Mapping4K(kVirtualAddress, kPhysicalAddress, kPteV | kPteR | kPteW);
+
+    const TranslationResult result = translation->translateStoreAddress(kVirtualAddress, 8);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(result.physical_address, kPhysicalAddress);
+
+    const uint64_t updatedPte = memory->read64(kLevel0PageTable + 8);
+    EXPECT_NE(updatedPte & kPteA, 0U);
+    EXPECT_NE(updatedPte & kPteD, 0U);
+}
+
+TEST_F(AddressTranslationTest, MachineModeMprvSupervisorNeedsSumForUserPageLoad) {
+    privilegeState.setMode(PrivilegeMode::MACHINE);
+    privilegeState.setMstatus(kMstatusMprv | kMstatusMppSupervisor);
+    installSv39Mapping4K(kVirtualAddress, kPhysicalAddress, kPteV | kPteR | kPteU);
+
+    const TranslationResult blocked = translation->translateLoadAddress(kVirtualAddress, 8);
+
+    EXPECT_FALSE(blocked.success);
+    EXPECT_EQ(blocked.failure_reason, TranslationFailureReason::PermissionDenied);
+
+    privilegeState.setMstatus(kMstatusMprv | kMstatusMppSupervisor | kMstatusSum);
+    const TranslationResult allowed = translation->translateLoadAddress(kVirtualAddress, 8);
+
+    ASSERT_TRUE(allowed.success);
+    EXPECT_EQ(allowed.physical_address, kPhysicalAddress);
 }

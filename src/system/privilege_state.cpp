@@ -7,6 +7,8 @@ namespace {
 constexpr uint64_t kMstatusMieMask = 1ULL << 3;
 constexpr uint64_t kMstatusMpieMask = 1ULL << 7;
 constexpr uint64_t kMstatusMppMask = 0x3ULL << 11;
+constexpr uint64_t kMstatusMprvMask = 1ULL << 17;
+constexpr uint64_t kMstatusSumMask = 1ULL << 18;
 
 } // namespace
 
@@ -38,6 +40,17 @@ std::optional<PrivilegeMode> applyMretPrivilegeMode(uint64_t& mstatus) {
     mstatus |= kMstatusMpieMask;
     mstatus &= ~kMstatusMppMask;
     return restored_mode;
+}
+
+std::optional<PrivilegeMode> PrivilegeState::getEffectiveDataMode() const {
+    if (mode_ != PrivilegeMode::MACHINE || (mstatus_ & kMstatusMprvMask) == 0) {
+        return mode_;
+    }
+    return decodePrivilegeModeFromMstatusMpp(mstatus_);
+}
+
+bool PrivilegeState::isSumEnabled() const {
+    return (mstatus_ & kMstatusSumMask) != 0;
 }
 
 } // namespace riscv

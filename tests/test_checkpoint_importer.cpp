@@ -3,8 +3,10 @@
 #include "system/checkpoint_importer.h"
 
 #include <array>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -35,6 +37,34 @@ void writeBinaryFile(const std::filesystem::path& path, const std::vector<uint8_
     std::ofstream stream(path.string(), std::ios::binary);
     stream.write(reinterpret_cast<const char*>(bytes.data()),
                  static_cast<std::streamsize>(bytes.size()));
+}
+
+bool hasZstdBinary() {
+    return std::system("zstd --version >/dev/null 2>&1") == 0;
+}
+
+void writeU64(std::vector<uint8_t>& bytes, size_t offset, uint64_t value) {
+    ASSERT_LE(offset + sizeof(uint64_t), bytes.size());
+    for (size_t i = 0; i < sizeof(uint64_t); ++i) {
+        bytes[offset + i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFFU);
+    }
+}
+
+void writeU32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value) {
+    ASSERT_LE(offset + sizeof(uint32_t), bytes.size());
+    for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+        bytes[offset + i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFFU);
+    }
+}
+
+void writeZstdFile(const std::filesystem::path& raw_path, const std::filesystem::path& zstd_path) {
+    std::ostringstream command;
+    command << "zstd -q -f "
+            << raw_path.string()
+            << " -o "
+            << zstd_path.string()
+            << " >/dev/null 2>&1";
+    ASSERT_EQ(std::system(command.str().c_str()), 0);
 }
 
 void writeExecutableScript(const std::filesystem::path& path, const std::string& body) {
@@ -199,6 +229,120 @@ TEST(CheckpointImporterTest, ImportFailsWhenManifestHasNoMemorySegment) {
                                                           restorer_path,
                                                           temp_dir / "output")),
                  SimulatorException);
+}
+
+TEST(CheckpointImporterTest, BuiltinZstdImporterParsesDefaultGcptLayout) {
+    if (!hasZstdBinary()) {
+        GTEST_SKIP() << "缺少 zstd 命令";
+    }
+
+    const auto temp_dir = resetTempDir("checkpoint_importer_builtin_zstd");
+    const auto checkpoint_path =
+        temp_dir / "bzip2_source" / "555" / "_555_0.026526_.zstd";
+    const auto recipe_path = temp_dir / "scripts" / "bzip2_source_initramfs-spec.txt";
+    const auto raw_path = temp_dir / "image.bin";
+
+    std::vector<uint8_t> image(1024 * 1024, 0);
+    writeU32(image, 0x100, 0x00100093U); // addi x1, x0, 1
+    writeU64(image, 0xECDB0, 0xBEEFULL);
+    writeU64(image, 0xECDB8, 0x100ULL);
+    writeU64(image, 0xEDDE0 + 1 * 8, 0x123ULL);
+    writeU64(image, 0xEDDE0 + 2 * 8, 0x456ULL);
+    writeU64(image, 0xEDFF0 + 0x301 * 8, 0x800000000014112DULL); // misa with IMAC
+    writeBinaryFile(raw_path, image);
+
+    std::filesystem::create_directories(checkpoint_path.parent_path());
+    writeZstdFile(raw_path, checkpoint_path);
+    writeRecipeFile(recipe_path);
+
+    CheckpointRunConfig config;
+    config.checkpoint_path = checkpoint_path.string();
+    config.recipe_path = recipe_path.string();
+    config.importer_name = "builtin-zstd";
+    config.output_dir = (temp_dir / "output").string();
+
+    auto importer = createCheckpointImporter(config.importer_name);
+    const SnapshotBundle snapshot = importer->importCheckpoint(config);
+
+    ASSERT_EQ(snapshot.memory_segments.size(), 1u);
+    EXPECT_EQ(snapshot.memory_segments[0].base, 0x0ULL);
+    EXPECT_TRUE(snapshot.memory_segments[0].isFileBacked());
+    EXPECT_EQ(snapshot.memory_segments[0].size, image.size());
+    EXPECT_TRUE(std::filesystem::exists(snapshot.memory_segments[0].file_path));
+    EXPECT_EQ(snapshot.pc, 0x100ULL);
+    EXPECT_EQ(snapshot.integer_regs[1], 0x123ULL);
+    EXPECT_EQ(snapshot.integer_regs[2], 0x456ULL);
+    EXPECT_EQ(snapshot.recipe.workload_name, "bzip2_source");
+    EXPECT_EQ(snapshot.recipe.point_id, "555");
+    EXPECT_TRUE((snapshot.enabled_extensions & static_cast<uint32_t>(Extension::I)) != 0);
+    EXPECT_TRUE((snapshot.enabled_extensions & static_cast<uint32_t>(Extension::M)) != 0);
+    EXPECT_TRUE((snapshot.enabled_extensions & static_cast<uint32_t>(Extension::A)) != 0);
+    EXPECT_TRUE((snapshot.enabled_extensions & static_cast<uint32_t>(Extension::C)) != 0);
+}
+
+TEST(CheckpointImporterTest, BuiltinZstdImporterCanAutoDiscoverRecipePath) {
+    if (!hasZstdBinary()) {
+        GTEST_SKIP() << "缺少 zstd 命令";
+    }
+
+    const auto temp_dir = resetTempDir("checkpoint_importer_builtin_autorecipe");
+    const auto root_dir = temp_dir / "spec06_gcpt";
+    const auto checkpoint_path =
+        root_dir / "checkpoint-0-0-0" / "mcf" / "99" / "_99_0.500000_.zstd";
+    const auto recipe_path = root_dir / "scripts" / "mcf_initramfs-spec.txt";
+    const auto raw_path = temp_dir / "image.bin";
+
+    std::vector<uint8_t> image(1024 * 1024, 0);
+    writeU64(image, 0xECDB0, 0xBEEFULL);
+    writeU64(image, 0xECDB8, 0x0ULL);
+    writeBinaryFile(raw_path, image);
+
+    std::filesystem::create_directories(checkpoint_path.parent_path());
+    writeZstdFile(raw_path, checkpoint_path);
+    writeRecipeFile(recipe_path);
+
+    CheckpointRunConfig config;
+    config.checkpoint_path = checkpoint_path.string();
+    config.importer_name = "builtin-zstd";
+    config.output_dir = (temp_dir / "output").string();
+
+    auto importer = createCheckpointImporter(config.importer_name);
+    const SnapshotBundle snapshot = importer->importCheckpoint(config);
+
+    EXPECT_EQ(snapshot.recipe.recipe_path, recipe_path.string());
+    EXPECT_EQ(snapshot.recipe.workload_name, "mcf");
+    EXPECT_EQ(snapshot.recipe.point_id, "99");
+}
+
+TEST(CheckpointImporterTest, BuiltinZstdImporterRejectsVirtualMemoryCheckpoint) {
+    if (!hasZstdBinary()) {
+        GTEST_SKIP() << "缺少 zstd 命令";
+    }
+
+    const auto temp_dir = resetTempDir("checkpoint_importer_builtin_vm_reject");
+    const auto checkpoint_path =
+        temp_dir / "perlbench_splitmail" / "12" / "_12_0.100000_.zstd";
+    const auto recipe_path = temp_dir / "scripts" / "perlbench_splitmail_initramfs-spec.txt";
+    const auto raw_path = temp_dir / "image.bin";
+
+    std::vector<uint8_t> image(1024 * 1024, 0);
+    writeU64(image, 0xECDB0, 0xBEEFULL);
+    writeU64(image, 0xECDB8, 0x1000ULL);
+    writeU64(image, 0xEDFF0 + 0x180 * 8, 0x8000000000001001ULL); // satp != 0
+    writeBinaryFile(raw_path, image);
+
+    std::filesystem::create_directories(checkpoint_path.parent_path());
+    writeZstdFile(raw_path, checkpoint_path);
+    writeRecipeFile(recipe_path);
+
+    CheckpointRunConfig config;
+    config.checkpoint_path = checkpoint_path.string();
+    config.recipe_path = recipe_path.string();
+    config.importer_name = "builtin-zstd";
+    config.output_dir = (temp_dir / "output").string();
+
+    auto importer = createCheckpointImporter(config.importer_name);
+    EXPECT_THROW(importer->importCheckpoint(config), SimulatorException);
 }
 
 } // namespace riscv

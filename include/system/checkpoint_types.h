@@ -12,6 +12,12 @@ namespace riscv {
 struct MemorySegment {
     Address base = 0;
     std::vector<uint8_t> bytes;
+    std::string file_path;
+    uint64_t size = 0;
+    bool ephemeral = false;
+
+    bool isFileBacked() const { return !file_path.empty(); }
+    uint64_t byteSize() const { return isFileBacked() ? size : static_cast<uint64_t>(bytes.size()); }
 };
 
 struct CheckpointRecipeSpec {

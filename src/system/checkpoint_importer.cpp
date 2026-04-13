@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <sys/wait.h>
@@ -19,6 +20,23 @@ namespace {
 struct ProcessResult {
     int exit_code = -1;
     std::string output;
+};
+
+struct BuiltinImageInfo {
+    std::filesystem::path path;
+    uint64_t size = 0;
+};
+
+constexpr const char* kBuiltinZstdImporterName = "builtin-zstd";
+constexpr Address kDefaultGcptGuestBase = 0x0ULL;
+constexpr uint64_t kGcptMagicNumber = 0xBEEFULL;
+
+struct DefaultGcptLayout {
+    size_t magic_number_cpt_addr = 0xECDB0;
+    size_t pc_cpt_addr = 0xECDB8;
+    size_t int_reg_cpt_addr = 0xEDDE0;
+    size_t float_reg_cpt_addr = 0xEDEE8;
+    size_t csr_reg_cpt_addr = 0xEDFF0;
 };
 
 std::string trim(const std::string& value) {
@@ -104,6 +122,27 @@ uint32_t parseExtensions(const std::string& value) {
     return bits;
 }
 
+uint32_t parseExtensionsFromMisa(uint64_t misa) {
+    uint32_t extensions = static_cast<uint32_t>(Extension::I);
+
+    const auto hasMisaBit = [misa](char extension) {
+        const unsigned bit = static_cast<unsigned>(std::toupper(static_cast<unsigned char>(extension)) - 'A');
+        return bit < 64 && ((misa >> bit) & 0x1ULL) != 0;
+    };
+    const auto addIfPresent = [&](char misa_extension, Extension extension) {
+        if (hasMisaBit(misa_extension)) {
+            extensions |= static_cast<uint32_t>(extension);
+        }
+    };
+
+    addIfPresent('M', Extension::M);
+    addIfPresent('A', Extension::A);
+    addIfPresent('F', Extension::F);
+    addIfPresent('D', Extension::D);
+    addIfPresent('C', Extension::C);
+    return extensions;
+}
+
 std::vector<uint8_t> readBinaryFile(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream.is_open()) {
@@ -125,6 +164,36 @@ std::vector<uint8_t> readBinaryFile(const std::filesystem::path& path) {
         }
     }
     return bytes;
+}
+
+uint64_t readLittleEndian64FromFile(const std::filesystem::path& path,
+                                    uint64_t file_size,
+                                    size_t offset,
+                                    const std::string& field_name) {
+    if (offset > file_size || file_size - offset < sizeof(uint64_t)) {
+        throw SimulatorException("checkpoint 镜像缺少字段: " + field_name);
+    }
+
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream.is_open()) {
+        throw SimulatorException("无法打开 checkpoint 原始镜像: " + path.string());
+    }
+    stream.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    if (!stream) {
+        throw SimulatorException("checkpoint 镜像 seek 失败: " + field_name);
+    }
+
+    std::array<uint8_t, sizeof(uint64_t)> bytes{};
+    stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!stream) {
+        throw SimulatorException("checkpoint 镜像读取失败: " + field_name);
+    }
+
+    uint64_t value = 0;
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        value |= static_cast<uint64_t>(bytes[i]) << (i * 8);
+    }
+    return value;
 }
 
 ProcessResult runProcess(const std::string& executable, const std::vector<std::string>& args) {
@@ -265,7 +334,95 @@ std::string formatProcessFailure(const std::string& kind,
     return oss.str();
 }
 
+BuiltinImageInfo loadBuiltinZstdImage(const CheckpointRunConfig& config) {
+    const std::filesystem::path output_dir(config.output_dir);
+    std::filesystem::create_directories(output_dir);
+
+    const std::filesystem::path raw_image_path = output_dir / "checkpoint.raw.bin";
+    const ProcessResult decompress_result =
+        runProcess("zstd",
+                   {"-d", "-q", "-f", "--sparse", config.checkpoint_path, "-o", raw_image_path.string()});
+    if (decompress_result.exit_code != 0) {
+        throw SimulatorException(formatProcessFailure("zstd 解压", "zstd", decompress_result));
+    }
+
+    const uint64_t raw_size = static_cast<uint64_t>(std::filesystem::file_size(raw_image_path));
+    return {raw_image_path, raw_size};
+}
+
+SnapshotBundle parseBuiltinZstdSnapshot(const CheckpointRecipeSpec& recipe,
+                                        const BuiltinImageInfo& image) {
+    const DefaultGcptLayout layout;
+
+    const uint64_t magic =
+        readLittleEndian64FromFile(image.path, image.size, layout.magic_number_cpt_addr, "magic_number");
+    if (magic != kGcptMagicNumber) {
+        std::ostringstream oss;
+        oss << "checkpoint 不是受支持的 default_qemu_memlayout 格式，magic=0x" << std::hex << magic;
+        throw SimulatorException(oss.str());
+    }
+
+    SnapshotBundle snapshot;
+    snapshot.recipe = recipe;
+    snapshot.pc = readLittleEndian64FromFile(image.path, image.size, layout.pc_cpt_addr, "pc");
+
+    for (size_t i = 0; i < snapshot.integer_regs.size(); ++i) {
+        snapshot.integer_regs[i] =
+            readLittleEndian64FromFile(
+                image.path, image.size, layout.int_reg_cpt_addr + i * sizeof(uint64_t), "gpr");
+    }
+    for (size_t i = 0; i < snapshot.fp_regs.size(); ++i) {
+        snapshot.fp_regs[i] =
+            readLittleEndian64FromFile(
+                image.path, image.size, layout.float_reg_cpt_addr + i * sizeof(uint64_t), "fpr");
+    }
+    for (uint32_t csr_index = 0; csr_index < 4096; ++csr_index) {
+        const uint64_t csr_value =
+            readLittleEndian64FromFile(
+                image.path,
+                image.size,
+                layout.csr_reg_cpt_addr + static_cast<size_t>(csr_index) * sizeof(uint64_t),
+                "csr");
+        if (csr_value != 0) {
+            snapshot.csr_values.push_back({csr_index, csr_value});
+        }
+    }
+
+    const uint64_t satp =
+        readLittleEndian64FromFile(
+            image.path, image.size, layout.csr_reg_cpt_addr + 0x180ULL * sizeof(uint64_t), "satp");
+    if (satp != 0) {
+        std::ostringstream oss;
+        oss << "checkpoint 依赖虚拟内存地址翻译(satp=0x" << std::hex << satp
+            << ")，当前模拟器尚未支持 MMU/Sv39 checkpoint restore";
+        throw SimulatorException(oss.str());
+    }
+
+    const uint64_t misa =
+        readLittleEndian64FromFile(
+            image.path, image.size, layout.csr_reg_cpt_addr + 0x301ULL * sizeof(uint64_t), "misa");
+    snapshot.enabled_extensions = parseExtensionsFromMisa(misa);
+
+    MemorySegment segment;
+    segment.base = kDefaultGcptGuestBase;
+    segment.file_path = image.path.string();
+    segment.size = image.size;
+    segment.ephemeral = true;
+    snapshot.memory_segments.push_back(std::move(segment));
+    return snapshot;
+}
+
 } // namespace
+
+class BuiltinZstdCheckpointImporter : public ICheckpointImporter {
+public:
+    SnapshotBundle importCheckpoint(const CheckpointRunConfig& config) const override {
+        const CheckpointRecipeSpec recipe =
+            loadCheckpointRecipeSpec(config.checkpoint_path, config.recipe_path);
+        const BuiltinImageInfo image = loadBuiltinZstdImage(config);
+        return parseBuiltinZstdSnapshot(recipe, image);
+    }
+};
 
 ExternalProcessCheckpointImporter::ExternalProcessCheckpointImporter(std::string importer_command)
     : importer_command_(std::move(importer_command)) {}
@@ -307,8 +464,8 @@ SnapshotBundle ExternalProcessCheckpointImporter::importCheckpoint(
 }
 
 std::unique_ptr<ICheckpointImporter> createCheckpointImporter(const std::string& importer_name) {
-    if (trim(importer_name).empty()) {
-        throw SimulatorException("checkpoint importer_name 不能为空");
+    if (trim(importer_name).empty() || importer_name == kBuiltinZstdImporterName) {
+        return std::make_unique<BuiltinZstdCheckpointImporter>();
     }
     return std::make_unique<ExternalProcessCheckpointImporter>(importer_name);
 }

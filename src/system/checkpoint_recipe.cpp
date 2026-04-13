@@ -47,6 +47,39 @@ bool parseRecipeFileEntry(const std::string& line, RecipeFileEntry& entry) {
 
 } // namespace
 
+std::string resolveCheckpointRecipePath(const std::string& checkpoint_path,
+                                        const std::string& recipe_path) {
+    namespace fs = std::filesystem;
+
+    if (!recipe_path.empty()) {
+        if (!fs::exists(recipe_path)) {
+            throw SimulatorException("checkpoint recipe 不存在: " + recipe_path);
+        }
+        return recipe_path;
+    }
+
+    const fs::path checkpoint_fs_path(checkpoint_path);
+    const fs::path point_dir = checkpoint_fs_path.parent_path();
+    const fs::path workload_dir = point_dir.parent_path();
+    if (point_dir.empty() || workload_dir.empty()) {
+        throw SimulatorException("checkpoint 路径无法解析 workload/point: " + checkpoint_path);
+    }
+
+    const std::string workload_name = workload_dir.filename().string();
+    for (fs::path current = workload_dir; !current.empty(); current = current.parent_path()) {
+        const fs::path candidate = current.parent_path() / "scripts" /
+                                   (workload_name + "_initramfs-spec.txt");
+        if (!candidate.empty() && fs::exists(candidate)) {
+            return candidate.string();
+        }
+        if (current == current.root_path()) {
+            break;
+        }
+    }
+
+    throw SimulatorException("无法自动找到 checkpoint recipe: " + checkpoint_path);
+}
+
 CheckpointRecipeSpec loadCheckpointRecipeSpec(const std::string& checkpoint_path,
                                               const std::string& recipe_path) {
     namespace fs = std::filesystem;
@@ -54,9 +87,7 @@ CheckpointRecipeSpec loadCheckpointRecipeSpec(const std::string& checkpoint_path
     if (!fs::exists(checkpoint_path)) {
         throw SimulatorException("checkpoint 不存在: " + checkpoint_path);
     }
-    if (!fs::exists(recipe_path)) {
-        throw SimulatorException("checkpoint recipe 不存在: " + recipe_path);
-    }
+    const std::string resolved_recipe_path = resolveCheckpointRecipePath(checkpoint_path, recipe_path);
 
     const fs::path checkpoint_fs_path(checkpoint_path);
     const fs::path point_dir = checkpoint_fs_path.parent_path();
@@ -67,7 +98,7 @@ CheckpointRecipeSpec loadCheckpointRecipeSpec(const std::string& checkpoint_path
 
     CheckpointRecipeSpec spec;
     spec.checkpoint_path = checkpoint_path;
-    spec.recipe_path = recipe_path;
+    spec.recipe_path = resolved_recipe_path;
     spec.workload_name = workload_dir.filename().string();
     spec.point_id = point_dir.filename().string();
 
@@ -79,9 +110,9 @@ CheckpointRecipeSpec loadCheckpointRecipeSpec(const std::string& checkpoint_path
     }
     spec.weight = std::stod(match[2].str());
 
-    std::ifstream recipe_stream(recipe_path);
+    std::ifstream recipe_stream(resolved_recipe_path);
     if (!recipe_stream.is_open()) {
-        throw SimulatorException("无法打开 checkpoint recipe: " + recipe_path);
+        throw SimulatorException("无法打开 checkpoint recipe: " + resolved_recipe_path);
     }
 
     std::string line;
@@ -99,10 +130,10 @@ CheckpointRecipeSpec loadCheckpointRecipeSpec(const std::string& checkpoint_path
     }
 
     if (spec.task_script_path.empty()) {
-        throw SimulatorException("recipe 缺少 /spec0/task0.sh 定义: " + recipe_path);
+        throw SimulatorException("recipe 缺少 /spec0/task0.sh 定义: " + resolved_recipe_path);
     }
     if (spec.run_script_path.empty()) {
-        throw SimulatorException("recipe 缺少 /spec0/run.sh 定义: " + recipe_path);
+        throw SimulatorException("recipe 缺少 /spec0/run.sh 定义: " + resolved_recipe_path);
     }
 
     return spec;

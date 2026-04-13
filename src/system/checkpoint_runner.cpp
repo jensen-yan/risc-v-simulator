@@ -143,16 +143,36 @@ uint64_t statValue(const ICpuInterface::StatsList& stats, const std::string& nam
     return 0;
 }
 
-size_t computeRequiredMemorySize(const SnapshotBundle& snapshot, size_t fallback_memory_size) {
+Address computeMemoryBaseAddress(const SnapshotBundle& snapshot) {
+    if (snapshot.memory_segments.empty()) {
+        return 0;
+    }
+
+    Address base = snapshot.memory_segments.front().base;
+    for (const auto& segment : snapshot.memory_segments) {
+        base = std::min(base, segment.base);
+    }
+    return base;
+}
+
+size_t computeRequiredMemorySize(const SnapshotBundle& snapshot,
+                                 size_t fallback_memory_size,
+                                 Address base_address) {
     uint64_t required = fallback_memory_size;
-    required = std::max<uint64_t>(required, snapshot.pc + 4);
+    if (snapshot.pc >= base_address) {
+        required = std::max<uint64_t>(required, snapshot.pc - base_address + 4);
+    }
 
     for (const auto& segment : snapshot.memory_segments) {
-        const uint64_t end = segment.base + segment.bytes.size();
+        const uint64_t segment_size = segment.byteSize();
+        const uint64_t end = segment.base + segment_size;
         if (end < segment.base) {
             throw SimulatorException("checkpoint memory segment 地址溢出");
         }
-        required = std::max(required, end);
+        if (end < base_address) {
+            throw SimulatorException("checkpoint memory segment 基址非法");
+        }
+        required = std::max(required, end - base_address);
     }
 
     if (required > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
@@ -293,6 +313,15 @@ void writeArtifacts(const fs::path& output_dir,
     }
 }
 
+void cleanupEphemeralSegments(const SnapshotBundle& snapshot) {
+    for (const auto& segment : snapshot.memory_segments) {
+        if (segment.isFileBacked() && segment.ephemeral && !segment.file_path.empty()) {
+            std::error_code ec;
+            fs::remove(segment.file_path, ec);
+        }
+    }
+}
+
 } // namespace
 
 CheckpointRunner::CheckpointRunner(CpuType cpu_type,
@@ -337,12 +366,17 @@ CheckpointRunResult CheckpointRunner::run(const CheckpointRunConfig& config) con
         result.success = false;
         result.failure_reason = CheckpointFailureReason::IMPORT_ERROR;
         result.message = e.what();
+        cleanupEphemeralSegments(snapshot);
         writeArtifacts(output_dir, result, simulator.get(), /*write_error_file=*/true);
         return result;
     }
 
     try {
-        simulator = std::make_unique<Simulator>(computeRequiredMemorySize(snapshot, memory_size_), cpu_type_);
+        const Address memory_base_address = computeMemoryBaseAddress(snapshot);
+        simulator = std::make_unique<Simulator>(
+            computeRequiredMemorySize(snapshot, memory_size_, memory_base_address),
+            cpu_type_,
+            memory_base_address);
         simulator->setMaxInOrderInstructions(max_in_order_instructions_);
         simulator->setMaxOutOfOrderCycles(max_out_of_order_cycles_);
     } catch (const std::exception& e) {
@@ -350,6 +384,7 @@ CheckpointRunResult CheckpointRunner::run(const CheckpointRunConfig& config) con
         result.success = false;
         result.failure_reason = CheckpointFailureReason::RESTORE_ERROR;
         result.message = e.what();
+        cleanupEphemeralSegments(snapshot);
         writeArtifacts(output_dir, result, simulator.get(), /*write_error_file=*/true);
         return result;
     }
@@ -359,9 +394,12 @@ CheckpointRunResult CheckpointRunner::run(const CheckpointRunConfig& config) con
         result.success = false;
         result.failure_reason = CheckpointFailureReason::RESTORE_ERROR;
         result.message = "failed to load snapshot";
+        cleanupEphemeralSegments(snapshot);
         writeArtifacts(output_dir, result, simulator.get(), /*write_error_file=*/true);
         return result;
     }
+
+    cleanupEphemeralSegments(snapshot);
 
     try {
         const InstructionWindowResult window_result =

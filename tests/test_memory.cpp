@@ -103,3 +103,18 @@ TEST_F(MemoryTest, ExternalWriteObserverNotification) {
     memory->writeWordExternal(128, 0xAABBCCDDU);
     EXPECT_EQ(notify_count, 1);
 }
+
+TEST(MemoryStandaloneTest, GuestBaseAddressTranslation) {
+    Memory memory(/*size=*/1024, /*baseAddress=*/0x80000000ULL);
+
+    memory.writeWord(0x80000020ULL, 0x12345678U);
+    EXPECT_EQ(memory.readWord(0x80000020ULL), 0x12345678U);
+
+    std::vector<uint8_t> program = {0xAA, 0xBB, 0xCC, 0xDD};
+    memory.loadProgram(program, /*startAddr=*/0x80000100ULL);
+    EXPECT_EQ(memory.readByte(0x80000100ULL), 0xAA);
+    EXPECT_EQ(memory.readByte(0x80000103ULL), 0xDD);
+
+    EXPECT_THROW(memory.readByte(0x7FFFFFFFULL), MemoryException);
+    EXPECT_THROW(memory.readByte(0x80000400ULL), MemoryException);
+}

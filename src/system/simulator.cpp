@@ -35,7 +35,11 @@ CheckpointFailureReason classifyExceptionMessage(const std::string& message) {
         return CheckpointFailureReason::UNIMPLEMENTED_SYSTEM_INSTRUCTION;
     }
     if (containsIgnoreCase(message, "非法指令") ||
-        containsIgnoreCase(message, "illegal")) {
+        containsIgnoreCase(message, "illegal") ||
+        containsIgnoreCase(message, "unsupported instruction type") ||
+        containsIgnoreCase(message, "unsupported i-type instruction") ||
+        containsIgnoreCase(message, "invalid system_type opcode") ||
+        containsIgnoreCase(message, "非法的")) {
         return CheckpointFailureReason::ILLEGAL_INSTRUCTION;
     }
     return CheckpointFailureReason::UNKNOWN;
@@ -116,15 +120,15 @@ StopClassification classifyStoppedState(ICpuInterface* cpu,
 
 } // namespace
 
-Simulator::Simulator(size_t memorySize, CpuType cpuType) 
-    : memory_(std::make_shared<Memory>(memorySize)),
+Simulator::Simulator(size_t memorySize, CpuType cpuType, Address memoryBaseAddress) 
+    : memory_(std::make_shared<Memory>(memorySize, memoryBaseAddress)),
       cpu_(CpuFactory::createCpu(cpuType, memory_)),
       cpuType_(cpuType),
       cycle_count_(0) {
     
     // 如果是乱序CPU，创建独立的参考内存和参考CPU用于DiffTest
     if (cpuType == CpuType::OUT_OF_ORDER) {
-        reference_memory_ = std::make_shared<Memory>(memorySize);
+        reference_memory_ = std::make_shared<Memory>(memorySize, memoryBaseAddress);
         reference_cpu_ = CpuFactory::createCpu(CpuType::IN_ORDER, reference_memory_);
         
         // DiffTest将在loadElfProgram中创建，因为需要两个CPU都加载相同的程序
@@ -671,7 +675,9 @@ bool Simulator::loadSnapshot(const SnapshotBundle& snapshot) {
         cpu_->setEnabledExtensions(snapshot.enabled_extensions);
 
         for (const auto& segment : snapshot.memory_segments) {
-            if (!segment.bytes.empty()) {
+            if (segment.isFileBacked()) {
+                memory_->loadProgramFromFile(segment.file_path, segment.base, segment.size);
+            } else if (!segment.bytes.empty()) {
                 memory_->loadProgram(segment.bytes, segment.base);
             }
         }
@@ -694,7 +700,9 @@ bool Simulator::loadSnapshot(const SnapshotBundle& snapshot) {
             reference_cpu_->setEnabledExtensions(snapshot.enabled_extensions);
 
             for (const auto& segment : snapshot.memory_segments) {
-                if (!segment.bytes.empty()) {
+                if (segment.isFileBacked()) {
+                    reference_memory_->loadProgramFromFile(segment.file_path, segment.base, segment.size);
+                } else if (!segment.bytes.empty()) {
                     reference_memory_->loadProgram(segment.bytes, segment.base);
                 }
             }

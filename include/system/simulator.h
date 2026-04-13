@@ -37,7 +37,9 @@ struct InstructionWindowResult {
  */
 class Simulator {
 public:
-    explicit Simulator(size_t memorySize = Memory::DEFAULT_SIZE, CpuType cpuType = CpuType::IN_ORDER);
+    explicit Simulator(size_t memorySize = Memory::DEFAULT_SIZE,
+                       CpuType cpuType = CpuType::IN_ORDER,
+                       Address memoryBaseAddress = 0);
     ~Simulator();
     
     // 禁用拷贝构造和赋值

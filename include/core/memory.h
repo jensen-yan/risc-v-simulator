@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <cstdlib>
+#include <string>
 
 namespace riscv {
 
@@ -19,7 +20,7 @@ public:
 
     static constexpr size_t DEFAULT_SIZE = 1 * 1024 * 1024; // 默认1MB内存
     
-    explicit Memory(size_t size = DEFAULT_SIZE);
+    explicit Memory(size_t size = DEFAULT_SIZE, Address baseAddress = 0);
     ~Memory() = default;
     
     // 禁用拷贝构造和赋值
@@ -55,9 +56,11 @@ public:
     // 内存管理
     void clear();
     size_t getSize() const { return memory_size_; }
+    Address getBaseAddress() const { return base_address_; }
     
     // 加载程序到内存
     void loadProgram(const std::vector<uint8_t>& program, Address startAddr = 0);
+    void loadProgramFromFile(const std::string& path, Address startAddr, uint64_t size);
     
     // 调试功能
     void dump(Address startAddr, size_t length) const;
@@ -84,6 +87,7 @@ private:
 
     std::unique_ptr<uint8_t, decltype(&std::free)> memory_;
     size_t memory_size_;
+    Address base_address_ = 0;
     
     // tohost/fromhost 特殊地址（默认值可被ELF环境覆盖）
     static constexpr Address DEFAULT_TOHOST_ADDR = 0x80001000;
@@ -106,6 +110,7 @@ private:
     void write64Raw(Address addr, uint64_t value);
     void handleTohost(uint64_t value);
     void processSyscall(Address magic_mem_addr);
+    size_t translateAddress(Address addr, size_t accessSize) const;
 };
 
 } // namespace riscv

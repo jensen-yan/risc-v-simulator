@@ -5,6 +5,7 @@
 #include "system/simulator.h"
 
 #include <filesystem>
+#include <fstream>
 #include <vector>
 
 namespace riscv {
@@ -134,6 +135,41 @@ TEST(SimulatorTest, LoadSnapshotRestoresGprDependenciesForOutOfOrderCpu) {
     ASSERT_TRUE(result.success);
     EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
     EXPECT_EQ(simulator.getCpu()->getRegister(6), 43u);
+}
+
+TEST(SimulatorTest, LoadSnapshotSupportsFileBackedMemorySegments) {
+    const auto temp_dir = std::filesystem::temp_directory_path() / "simulator_file_backed_snapshot";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+
+    const auto segment_path = temp_dir / "segment.bin";
+    std::vector<uint8_t> code_bytes;
+    appendWord(code_bytes, createITypeInstruction(5, 1, 0x0, 5, 0x13));
+    appendWord(code_bytes, createECallInstruction());
+
+    {
+        std::ofstream stream(segment_path, std::ios::binary);
+        stream.write(reinterpret_cast<const char*>(code_bytes.data()),
+                     static_cast<std::streamsize>(code_bytes.size()));
+    }
+
+    Simulator simulator(/*memorySize=*/4096, CpuType::IN_ORDER);
+
+    SnapshotBundle snapshot;
+    MemorySegment code_segment;
+    code_segment.base = 0x100;
+    code_segment.file_path = segment_path.string();
+    code_segment.size = code_bytes.size();
+
+    snapshot.pc = 0x100;
+    snapshot.integer_regs[1] = 37;
+    snapshot.integer_regs[17] = 93;
+    snapshot.memory_segments = {code_segment};
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+    simulator.step();
+
+    EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
 }
 
 TEST(SimulatorTest, RunWithWarmupTriggersCallbackOnceAndKeepsSteadyStateWindow) {

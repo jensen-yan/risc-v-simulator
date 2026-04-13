@@ -220,4 +220,39 @@ TEST(CheckpointRunnerTest, InOrderCyclesMeasureDoesNotIncludeWarmupCycles) {
     EXPECT_EQ(result.cycles_measure, 1u);
 }
 
+TEST(CheckpointRunnerTest, HighGuestAddressSnapshotUsesGuestBaseMappedMemory) {
+    auto temp_dir = resetTempDir("checkpoint_runner_high_guest_base");
+
+    std::vector<uint8_t> program;
+    appendWord(program, createITypeInstruction(1, 1, 0x0, 1, 0x13));
+    appendWord(program, createECallInstruction());
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x80000100ULL;
+    snapshot.integer_regs[1] = 41;
+    snapshot.integer_regs[17] = 93;
+    snapshot.integer_regs[10] = 0;
+    snapshot.recipe.workload_name = "high_base";
+    snapshot.recipe.point_id = "7";
+    snapshot.recipe.weight = 0.5;
+
+    MemorySegment code_segment;
+    code_segment.base = 0x80000100ULL;
+    code_segment.bytes = std::move(program);
+    snapshot.memory_segments.push_back(std::move(code_segment));
+
+    CheckpointRunner runner(
+        CpuType::IN_ORDER,
+        /*memory_size=*/4096,
+        [snapshot = std::move(snapshot)](const std::string&) mutable {
+            return std::make_unique<StaticSnapshotImporter>(std::move(snapshot));
+        });
+
+    const CheckpointRunResult result = runner.run(makeRunConfig(temp_dir / "output", 0, 1));
+
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(result.instructions_measure, 1u);
+    EXPECT_TRUE(std::filesystem::exists(temp_dir / "output" / "completed"));
+}
+
 } // namespace riscv

@@ -167,6 +167,56 @@ python3 ./tools/benchmarks/run_perf_suite.py \
   --output-dir benchmarks/results/latest
 ```
 
+## SPEC06 Checkpoint 批跑
+
+单切片 checkpoint 已支持 `5M warmup + 5M measure`。在此基础上，仓库提供了一个轻量批跑脚本，用于读取 GEM5 风格的 `checkpoint.lst / spec06_0.3c.lst` 并并行调度多个切片。
+
+```bash
+python3 ./tools/benchmarks/run_checkpoint_batch.py \
+  --simulator ./build/risc-v-sim \
+  --checkpoint-list /nfs/home/share/gem5_ci/spec06_cpts/gcc15/spec06_0.3c.lst \
+  --checkpoint-root /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0 \
+  --output-dir /tmp/spec06-gcc15-0.3c \
+  --jobs 32 \
+  --warmup-instructions 5000000 \
+  --measure-instructions 5000000 \
+  --cpu-mode in-order \
+  --cluster-config /nfs/home/share/gem5_ci/spec06_cpts/gcc15/gcc15-spec06-0.3.json
+```
+
+第一版约定：
+
+- list 文件默认只消费前两列：`entry_name` 与 `workload/slice_id`
+- 每个切片独立输出到 `output_dir/<entry_name>/`
+- 每个切片额外保留 `command.txt`、`stdout.log`、`stderr.log`
+- 批次根目录生成：
+  - `batch_summary.csv`
+  - `batch_summary.json`
+  - `aggregate.json`
+- 若任一切片失败，脚本最终以非零退出码返回，但不会中断其他切片
+
+常用筛选与附加参数：
+
+```bash
+# 只跑部分 benchmark
+python3 ./tools/benchmarks/run_checkpoint_batch.py \
+  --simulator ./build/risc-v-sim \
+  --checkpoint-list /nfs/home/share/gem5_ci/spec06_cpts/gcc15/spec06_0.3c.lst \
+  --checkpoint-root /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0 \
+  --output-dir /tmp/spec06-subset \
+  --specific-benchmarks 'bzip2_*,perlbench_*' \
+  --jobs 8
+
+# 传递额外模拟器参数
+python3 ./tools/benchmarks/run_checkpoint_batch.py \
+  --simulator ./build/risc-v-sim \
+  --checkpoint-list /nfs/home/share/gem5_ci/spec06_cpts/gcc15/spec06_0.3c.lst \
+  --checkpoint-root /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0 \
+  --output-dir /tmp/spec06-debug \
+  --extra-sim-arg=--debug \
+  --extra-sim-arg=--debug-preset=memory
+```
+
 ## RISCOF 架构测试（DUT vs Spike）
 
 仓库已提供最小可用配置，目录：`tools/riscof/`。

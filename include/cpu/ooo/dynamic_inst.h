@@ -125,7 +125,8 @@ public:
         bool acquire_reservation = false;
         bool release_reservation = false;
         bool do_store = false;
-        uint64_t address = 0;
+        uint64_t virtual_address = 0;
+        uint64_t physical_address = 0;
         uint64_t store_value = 0;
         Funct3 width = Funct3::LW;
     };

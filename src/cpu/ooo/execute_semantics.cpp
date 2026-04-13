@@ -80,14 +80,15 @@ void executeAtomicOperation(ExecutionUnit& unit, const DynamicInstPtr& instructi
     atomic_info.acquire_reservation = amo_result.acquire_reservation;
     atomic_info.release_reservation = amo_result.release_reservation;
     atomic_info.do_store = amo_result.do_store;
-    atomic_info.address = virtual_addr;
+    atomic_info.virtual_address = virtual_addr;
+    atomic_info.physical_address = translateStoreAddress(state, virtual_addr, inst.memory_access_size);
     atomic_info.store_value = amo_result.store_value;
     atomic_info.width = inst.funct3;
 
     if (amo_result.do_store) {
         state.store_buffer->add_store(
             instruction,
-            translateStoreAddress(state, virtual_addr, inst.memory_access_size),
+            atomic_info.physical_address,
             amo_result.store_value,
             inst.memory_access_size);
         state.perf_counters.increment(PerfCounterId::STORES_TO_BUFFER);

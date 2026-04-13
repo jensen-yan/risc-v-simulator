@@ -36,6 +36,38 @@ Instruction fetchTranslatedInstruction(const CPUState& state, Address virtual_pc
     return static_cast<Instruction>(first_half) | (static_cast<Instruction>(second_half) << 16);
 }
 
+CacheAccessResult fetchInstructionFromCache(const CPUState& state, Address virtual_pc, Instruction& instruction) {
+    uint64_t first_half_raw = 0;
+    const Address first_half_pa = translateInstructionAddress(state, virtual_pc, /*size=*/2);
+    auto first_result = state.l1i_cache->load(state.memory, first_half_pa, /*size=*/2, first_half_raw);
+    if (first_result.blocked) {
+        return first_result;
+    }
+
+    const uint16_t first_half = static_cast<uint16_t>(first_half_raw & 0xFFFFU);
+    if ((first_half & 0x03U) != 0x03U) {
+        instruction = static_cast<Instruction>(first_half);
+        return first_result;
+    }
+
+    uint64_t second_half_raw = 0;
+    const Address second_half_pa = translateInstructionAddress(state, virtual_pc + 2, /*size=*/2);
+    auto second_result = state.l1i_cache->load(state.memory, second_half_pa, /*size=*/2, second_half_raw);
+    if (second_result.blocked) {
+        return second_result;
+    }
+
+    const uint16_t second_half = static_cast<uint16_t>(second_half_raw & 0xFFFFU);
+    instruction = static_cast<Instruction>(first_half) | (static_cast<Instruction>(second_half) << 16U);
+
+    CacheAccessResult merged{};
+    merged.hit = first_result.hit && second_result.hit;
+    merged.latency_cycles = std::max(first_result.latency_cycles, second_result.latency_cycles);
+    merged.blocked = false;
+    merged.dirty_eviction = first_result.dirty_eviction || second_result.dirty_eviction;
+    return merged;
+}
+
 } // namespace
 
 FetchStage::FetchStage() {
@@ -89,9 +121,7 @@ void FetchStage::execute(CPUState& state) {
                     LOGT(FETCH, "reuse resolved icache miss request, pc=0x%" PRIx64, fetch_pc);
                 } else if (state.l1i_cache) {
                     Instruction fetched_inst = 0;
-                    const Address physical_fetch_pc = translateInstructionAddress(state, fetch_pc, /*size=*/2);
-                    const auto cache_result =
-                        state.l1i_cache->fetchInstruction(state.memory, physical_fetch_pc, fetched_inst);
+                    const auto cache_result = fetchInstructionFromCache(state, fetch_pc, fetched_inst);
                     if (cache_result.blocked) {
                         state.perf_counters.increment(PerfCounterId::CACHE_L1I_STALL_CYCLES);
                         state.pc = next_fetch_pc;

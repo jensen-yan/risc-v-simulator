@@ -59,6 +59,14 @@ bool isLinkRegister(RegNum reg) {
     return reg == 1 || reg == 5;
 }
 
+void writeCommittedCsr(CPUState& state, uint32_t csr_addr, uint64_t value) {
+    if (state.cpu_interface) {
+        state.cpu_interface->setCSR(csr_addr, value);
+        return;
+    }
+    csr::write(state.csr_registers, csr_addr, value);
+}
+
 JalrProfileKind classifyJalrKind(const DecodedInstruction& decoded) {
     if (decoded.rd == 0 && decoded.imm == 0 && isLinkRegister(decoded.rs1)) {
         return JalrProfileKind::ReturnLike;
@@ -252,7 +260,7 @@ void CommitStage::execute(CPUState& state) {
                 const auto& atomic_info = committed_inst->get_atomic_execute_info();
                 if (atomic_info.acquire_reservation) {
                     state.reservation_valid = true;
-                    state.reservation_addr = atomic_info.address;
+                    state.reservation_addr = atomic_info.virtual_address;
                 }
                 if (atomic_info.release_reservation) {
                     state.reservation_valid = false;
@@ -261,12 +269,18 @@ void CommitStage::execute(CPUState& state) {
                     if (state.l1d_cache) {
                         const uint8_t store_size = atomicWidthToSize(atomic_info.width);
                         state.l1d_cache->commitStore(
-                            state.memory, atomic_info.address, store_size, atomic_info.store_value);
+                            state.memory, atomic_info.physical_address, store_size, atomic_info.store_value);
                     } else {
-                        writeAtomicMemoryValue(state.memory, atomic_info.address, atomic_info.width, atomic_info.store_value);
+                        writeAtomicMemoryValue(
+                            state.memory,
+                            atomic_info.physical_address,
+                            atomic_info.width,
+                            atomic_info.store_value);
                     }
                     LOGT(COMMIT, "inst=%" PRId64 " commit amo store addr=0x%" PRIx64 " value=0x%" PRIx64,
-                         committed_inst->get_instruction_id(), atomic_info.address, atomic_info.store_value);
+                         committed_inst->get_instruction_id(),
+                         atomic_info.physical_address,
+                         atomic_info.store_value);
                 }
                 state.perf_counters.increment(PerfCounterId::AMOS_COMMITTED);
             }
@@ -622,7 +636,7 @@ void CommitStage::execute(CPUState& state) {
                 const uint32_t csr_addr = static_cast<uint32_t>(sys_inst.imm) & 0xFFFU;
                 const auto csr_result = InstructionExecutor::executeCsrInstruction(
                     sys_inst, committed_inst->get_src1_value(), csr::read(state.csr_registers, csr_addr));
-                csr::write(state.csr_registers, csr_addr, csr_result.write_value);
+                writeCommittedCsr(state, csr_addr, csr_result.write_value);
                 LOGT(COMMIT, "inst=%" PRId64 " commit csr[0x%03x]: old=0x%" PRIx64 ", new=0x%" PRIx64,
                      committed_inst->get_instruction_id(), csr_addr,
                      csr_result.read_value, csr_result.write_value);

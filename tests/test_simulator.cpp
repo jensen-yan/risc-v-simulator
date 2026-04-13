@@ -40,6 +40,12 @@ uint32_t createSTypeInstruction(int16_t imm, uint8_t rs2, uint8_t rs1, uint8_t f
            (imm_low << 7) | opcode;
 }
 
+uint32_t createAMOTypeInstruction(uint8_t funct5, uint8_t rs2, uint8_t rs1, uint8_t funct3, uint8_t rd) {
+    return (static_cast<uint32_t>(funct5) << 27) | (static_cast<uint32_t>(rs2) << 20) |
+           (static_cast<uint32_t>(rs1) << 15) | (static_cast<uint32_t>(funct3) << 12) |
+           (static_cast<uint32_t>(rd) << 7) | 0x2FU;
+}
+
 uint32_t createECallInstruction() {
     return 0x00000073U;
 }
@@ -50,6 +56,11 @@ uint32_t createLoadInstruction(int16_t imm, uint8_t rs1, uint8_t funct3, uint8_t
 
 uint32_t createStoreInstruction(int16_t imm, uint8_t rs2, uint8_t rs1, uint8_t funct3) {
     return createSTypeInstruction(imm, rs2, rs1, funct3, 0x23);
+}
+
+uint32_t createSystemInstruction(uint16_t imm12, uint8_t rs1, uint8_t funct3, uint8_t rd) {
+    return (static_cast<uint32_t>(imm12) << 20) | (static_cast<uint32_t>(rs1) << 15) |
+           (static_cast<uint32_t>(funct3) << 12) | (static_cast<uint32_t>(rd) << 7) | 0x73U;
 }
 
 void appendWord(std::vector<uint8_t>& program, uint32_t instruction) {
@@ -69,6 +80,12 @@ void writeWord(std::vector<uint8_t>& image, Address address, uint32_t value) {
     image[static_cast<size_t>(address + 1)] = static_cast<uint8_t>((value >> 8) & 0xFFU);
     image[static_cast<size_t>(address + 2)] = static_cast<uint8_t>((value >> 16) & 0xFFU);
     image[static_cast<size_t>(address + 3)] = static_cast<uint8_t>((value >> 24) & 0xFFU);
+}
+
+void writeHalfWord(std::vector<uint8_t>& image, Address address, uint16_t value) {
+    ASSERT_LE(address + 2, image.size());
+    image[static_cast<size_t>(address)] = static_cast<uint8_t>(value & 0xFFU);
+    image[static_cast<size_t>(address + 1)] = static_cast<uint8_t>((value >> 8) & 0xFFU);
 }
 
 void writeDoubleWord(std::vector<uint8_t>& image, Address address, uint64_t value) {
@@ -286,6 +303,90 @@ TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderLoadStore) {
     EXPECT_EQ(simulator.getCpu()->getRegister(6), 0x1122334455667788ULL);
     EXPECT_EQ(simulator.getCpu()->getRegister(8), 0x1122334455667788ULL);
     EXPECT_EQ(simulator.getCpu()->getRegister(7), 0x1122334455667789ULL);
+}
+
+TEST(SimulatorTest, LoadSnapshotWithSv39SynchronizesOutOfOrderTranslationAfterSatpCsrWrite) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
+    simulator.setMaxOutOfOrderCycles(200);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x0;
+    snapshot.integer_regs[1] = (kSv39Mode << 60) | (kRootPageTable >> 12);
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(segment.bytes, /*virtualAddress=*/0x0, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    writeWord(segment.bytes, /*address=*/0x0, createSystemInstruction(/*satp=*/0x180, /*rs1=*/1, /*funct3=*/0x1, /*rd=*/0));
+    writeWord(segment.bytes, /*address=*/0x4004, createITypeInstruction(42, 0, 0x0, 5, 0x13));
+    writeWord(segment.bytes, /*address=*/0x4008, createECallInstruction());
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/2);
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_EQ(simulator.getCpu()->getCSR(0x180), (kSv39Mode << 60) | (kRootPageTable >> 12));
+    EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
+}
+
+TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderCrossPageInstructionFetch) {
+    Simulator simulator(/*memorySize=*/0x30000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
+    simulator.setMaxOutOfOrderCycles(200);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x1FFE;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(segment.bytes, /*virtualAddress=*/0x1000, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    installSv39Mapping4K(segment.bytes, /*virtualAddress=*/0x2000, /*physicalAddress=*/0x8000, kPteV | kPteX);
+
+    const uint32_t addi = createITypeInstruction(42, 0, 0x0, 5, 0x13);
+    writeHalfWord(segment.bytes, /*address=*/0x4FFE, static_cast<uint16_t>(addi & 0xFFFFU));
+    writeHalfWord(segment.bytes, /*address=*/0x8000, static_cast<uint16_t>((addi >> 16) & 0xFFFFU));
+    writeWord(segment.bytes, /*address=*/0x8002, createECallInstruction());
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/1);
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
+}
+
+TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderAmoCommitAddress) {
+    Simulator simulator(/*memorySize=*/0x30000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
+    simulator.setMaxOutOfOrderCycles(200);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x1000;
+    snapshot.enabled_extensions =
+        static_cast<uint32_t>(Extension::I) | static_cast<uint32_t>(Extension::A);
+    snapshot.integer_regs[1] = 0x2000;
+    snapshot.integer_regs[2] = 0x8877665544332211ULL;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(segment.bytes, /*virtualAddress=*/0x1000, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/0x2000, /*physicalAddress=*/0x5000, kPteV | kPteR | kPteW);
+    writeWord(segment.bytes, /*address=*/0x4000, createAMOTypeInstruction(/*funct5=*/0x01, /*rs2=*/2, /*rs1=*/1, /*funct3=*/0x3, /*rd=*/6));
+    writeWord(segment.bytes, /*address=*/0x4004, createLoadInstruction(0, 1, 0x3, 8));
+    writeWord(segment.bytes, /*address=*/0x4008, createECallInstruction());
+    writeDoubleWord(segment.bytes, /*address=*/0x5000, 0x1122334455667788ULL);
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/2);
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_EQ(simulator.getCpu()->getRegister(6), 0x1122334455667788ULL);
+    EXPECT_EQ(simulator.getCpu()->getRegister(8), 0x8877665544332211ULL);
 }
 
 TEST(SimulatorTest, RunWithWarmupTriggersCallbackOnceAndKeepsSteadyStateWindow) {

@@ -136,6 +136,16 @@ TEST_F(AddressTranslationTest, Sv39RejectsUnsupportedLargeLeafPage) {
     EXPECT_EQ(result.failure_reason, TranslationFailureReason::UnsupportedPageSize);
 }
 
+TEST_F(AddressTranslationTest, Sv39RejectsWriteOnlyLeafPteAsInvalidPte) {
+    privilegeState.setMode(PrivilegeMode::SUPERVISOR);
+    installSv39Mapping4K(kVirtualAddress, kPhysicalAddress, kPteV | kPteW);
+
+    const TranslationResult result = translation->translateLoadAddress(kVirtualAddress, 8);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.failure_reason, TranslationFailureReason::InvalidPte);
+}
+
 TEST_F(AddressTranslationTest, Sv39FetchAlsoSetsAccessedBit) {
     privilegeState.setMode(PrivilegeMode::SUPERVISOR);
     installSv39Mapping4K(kVirtualAddress, kPhysicalAddress, kPteV | kPteX);

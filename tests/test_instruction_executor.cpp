@@ -378,6 +378,23 @@ TEST_F(InstructionExecutorTest, Register32BitOperations) {
     EXPECT_EQ(sh3add_uw_result, 0x40000000FULL) << "SH3ADD.UW 应执行 (zext.w(rs1) << 3) + rs2";
 }
 
+TEST_F(InstructionExecutorTest, RegisterZbaShiftAddOperations) {
+    auto sh1add_inst =
+        createDecodedInst(Opcode::OP, static_cast<Funct3>(0x2), static_cast<Funct7>(0x10), 1, 2, 3);
+    uint64_t sh1add_result = InstructionExecutor::executeRegisterOperation(sh1add_inst, 5ULL, 7ULL);
+    EXPECT_EQ(sh1add_result, 17ULL) << "SH1ADD 应执行 (rs1 << 1) + rs2";
+
+    auto sh2add_inst =
+        createDecodedInst(Opcode::OP, Funct3::XOR, static_cast<Funct7>(0x10), 1, 2, 3);
+    uint64_t sh2add_result = InstructionExecutor::executeRegisterOperation(sh2add_inst, 5ULL, 7ULL);
+    EXPECT_EQ(sh2add_result, 27ULL) << "SH2ADD 应执行 (rs1 << 2) + rs2";
+
+    auto sh3add_inst =
+        createDecodedInst(Opcode::OP, Funct3::OR, static_cast<Funct7>(0x10), 1, 2, 3);
+    uint64_t sh3add_result = InstructionExecutor::executeRegisterOperation(sh3add_inst, 5ULL, 7ULL);
+    EXPECT_EQ(sh3add_result, 47ULL) << "SH3ADD 应执行 (rs1 << 3) + rs2";
+}
+
 // ========== M扩展指令测试 ==========
 
 TEST_F(InstructionExecutorTest, MExtensionMultiplication) {

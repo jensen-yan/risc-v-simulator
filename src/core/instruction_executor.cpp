@@ -331,11 +331,25 @@ uint64_t InstructionExecutor::executeRegisterOperation(const DecodedInstruction&
             return performArithmeticOperation(rs1_val, rs2_val, inst.funct3, inst.funct7);
             
         case Funct3::SLT:
+            if (inst.funct7 == static_cast<Funct7>(0x10)) {  // SH1ADD (Zba)
+                return (rs1_val << 1) + rs2_val;
+            }
+            return performComparisonOperation(rs1_val, rs2_val, inst.funct3);
+
         case Funct3::SLTU:
             return performComparisonOperation(rs1_val, rs2_val, inst.funct3);
             
         case Funct3::XOR:
+            if (inst.funct7 == static_cast<Funct7>(0x10)) {  // SH2ADD (Zba)
+                return (rs1_val << 2) + rs2_val;
+            }
+            return performLogicalOperation(rs1_val, rs2_val, inst.funct3);
+
         case Funct3::OR:
+            if (inst.funct7 == static_cast<Funct7>(0x10)) {  // SH3ADD (Zba)
+                return (rs1_val << 3) + rs2_val;
+            }
+
         case Funct3::AND:
             return performLogicalOperation(rs1_val, rs2_val, inst.funct3);
             

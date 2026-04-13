@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "cpu/ooo/ooo_cpu.h"
+#include "core/csr_utils.h"
 #include "core/memory.h"
 #include <memory>
 #include <sstream>
@@ -881,6 +882,32 @@ TEST_F(OutOfOrderCPUTest, SystemCSRInstructions) {
     EXPECT_EQ(cpu->getRegister(3), 5) << "CSRRS读取应拿到CSRRW写入后的值";
     EXPECT_EQ(cpu->getRegister(4), 5) << "CSRRWI应返回写入前CSR值";
     EXPECT_EQ(cpu->getRegister(5), 7) << "CSRRS读取应拿到CSRRWI写入后的值";
+}
+
+TEST_F(OutOfOrderCPUTest, MretRestoresPrivilegeModeFromMstatusMpp) {
+    constexpr uint64_t kMstatusMpie = 0x1ULL << 7;
+    constexpr uint64_t kMstatusMie = 0x1ULL << 3;
+
+    writeInstruction(0x0, createSystemInstruction(0x302, 0, 0x0, 0));
+    writeInstruction(0x20, createITypeInstruction(9, 0, 0x0, 1, 0x13));
+    writeInstruction(0x24, createECallInstruction());
+
+    cpu->setPC(0x0);
+    cpu->setPrivilegeMode(PrivilegeMode::MACHINE);
+    cpu->setCSR(csr::kMepc, 0x20);
+    cpu->setCSR(0x300, kMstatusMpie);
+
+    for (int i = 0; i < 200 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted()) << "程序应该已经停机";
+    EXPECT_EQ(cpu->getRegister(1), 9u);
+    EXPECT_EQ(cpu->getPrivilegeMode(), PrivilegeMode::USER);
+    const uint64_t mstatus = cpu->getCSR(0x300);
+    EXPECT_EQ((mstatus >> 11) & 0x3ULL, 0ULL);
+    EXPECT_EQ(mstatus & kMstatusMie, kMstatusMie);
+    EXPECT_EQ(mstatus & kMstatusMpie, kMstatusMpie);
 }
 
 // 测试7：CPU状态重置

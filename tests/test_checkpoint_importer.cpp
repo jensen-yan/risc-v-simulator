@@ -315,6 +315,166 @@ TEST(CheckpointImporterTest, BuiltinZstdImporterCanAutoDiscoverRecipePath) {
     EXPECT_EQ(snapshot.recipe.point_id, "99");
 }
 
+TEST(CheckpointImporterTest, BuiltinZstdImporterUsesExplicitFlatRestorerBeforeAutoDiscovery) {
+    if (!hasZstdBinary()) {
+        GTEST_SKIP() << "缺少 zstd 命令";
+    }
+
+    const auto temp_dir = resetTempDir("checkpoint_importer_builtin_assisted_explicit");
+    const auto dataset_root = temp_dir / "spec06_gcpt";
+    const auto checkpoint_path =
+        dataset_root / "checkpoint-0-0-0" / "bzip2_source" / "555" / "_555_0.026526_.zstd";
+    const auto recipe_path = dataset_root / "scripts" / "bzip2_source_initramfs-spec.txt";
+    const auto explicit_restorer_path = temp_dir / "explicit_restorer.bin";
+    const auto auto_restorer_path = dataset_root / "gcpt_bins" / "bzip2_source";
+    const auto raw_path = temp_dir / "image.bin";
+
+    std::vector<uint8_t> image(1024 * 1024, 0);
+    writeU64(image, 0xECDB0, 0xBEEFULL);
+    writeU64(image, 0xECDB8, 0x100ULL);
+    writeU64(image, 0xEDDE0 + 1 * 8, 0x123ULL);
+    writeU64(image, 0xEDFF0 + 0x301 * 8, 0x800000000014112DULL); // misa with IMAC
+    writeBinaryFile(raw_path, image);
+
+    std::filesystem::create_directories(checkpoint_path.parent_path());
+    writeZstdFile(raw_path, checkpoint_path);
+    writeRecipeFile(recipe_path);
+    writeBinaryFile(explicit_restorer_path, {0x13, 0x05, 0x70, 0x00});
+    writeBinaryFile(auto_restorer_path, {0x37, 0x05, 0x00, 0x80});
+
+    CheckpointRunConfig config;
+    config.checkpoint_path = checkpoint_path.string();
+    config.recipe_path = recipe_path.string();
+    config.importer_name = "builtin-zstd";
+    config.restorer_path = explicit_restorer_path.string();
+    config.output_dir = (temp_dir / "output").string();
+
+    auto importer = createCheckpointImporter(config.importer_name);
+    const SnapshotBundle snapshot = importer->importCheckpoint(config);
+
+    ASSERT_EQ(snapshot.memory_segments.size(), 2u);
+    EXPECT_EQ(snapshot.pc, 0ULL);
+    ASSERT_TRUE(snapshot.privilege_mode.has_value());
+    EXPECT_EQ(*snapshot.privilege_mode, PrivilegeMode::MACHINE);
+    EXPECT_EQ(snapshot.integer_regs[1], 0ULL);
+    EXPECT_TRUE(snapshot.csr_values.empty());
+
+    const auto low_it = std::find_if(snapshot.memory_segments.begin(),
+                                     snapshot.memory_segments.end(),
+                                     [](const auto& segment) { return segment.base == 0x0ULL; });
+    ASSERT_NE(low_it, snapshot.memory_segments.end());
+    const std::vector<uint8_t> expected_explicit_restorer = {0x13, 0x05, 0x70, 0x00};
+    EXPECT_EQ(low_it->bytes, expected_explicit_restorer);
+
+    const auto high_it = std::find_if(snapshot.memory_segments.begin(),
+                                      snapshot.memory_segments.end(),
+                                      [](const auto& segment) { return segment.base == 0x80000000ULL; });
+    ASSERT_NE(high_it, snapshot.memory_segments.end());
+    EXPECT_TRUE(high_it->isFileBacked());
+    EXPECT_EQ(high_it->size, image.size());
+    EXPECT_TRUE(std::filesystem::exists(high_it->file_path));
+
+    EXPECT_TRUE((snapshot.enabled_extensions & static_cast<uint32_t>(Extension::I)) != 0);
+    EXPECT_TRUE((snapshot.enabled_extensions & static_cast<uint32_t>(Extension::M)) != 0);
+    EXPECT_TRUE((snapshot.enabled_extensions & static_cast<uint32_t>(Extension::A)) != 0);
+    EXPECT_TRUE((snapshot.enabled_extensions & static_cast<uint32_t>(Extension::C)) != 0);
+}
+
+TEST(CheckpointImporterTest, BuiltinZstdImporterAutoDiscoversFlatRestorerAndBuildsAssistedSnapshot) {
+    if (!hasZstdBinary()) {
+        GTEST_SKIP() << "缺少 zstd 命令";
+    }
+
+    const auto temp_dir = resetTempDir("checkpoint_importer_builtin_assisted_auto");
+    const auto dataset_root = temp_dir / "spec06_gcpt";
+    const auto checkpoint_path =
+        dataset_root / "checkpoint-0-0-0" / "mcf" / "99" / "_99_0.500000_.zstd";
+    const auto recipe_path = dataset_root / "scripts" / "mcf_initramfs-spec.txt";
+    const auto auto_restorer_path = dataset_root / "gcpt_bins" / "mcf";
+    const auto raw_path = temp_dir / "image.bin";
+
+    std::vector<uint8_t> image(1024 * 1024, 0);
+    writeU64(image, 0xECDB0, 0xBEEFULL);
+    writeU64(image, 0xECDB8, 0x400ULL);
+    writeU64(image, 0xEDDE0 + 2 * 8, 0x456ULL);
+    writeU64(image, 0xEDFF0 + 0x180 * 8, 0x8000000000001001ULL);
+    writeBinaryFile(raw_path, image);
+
+    std::filesystem::create_directories(checkpoint_path.parent_path());
+    writeZstdFile(raw_path, checkpoint_path);
+    writeRecipeFile(recipe_path);
+    writeBinaryFile(auto_restorer_path, {0x93, 0x05, 0x10, 0x00, 0x13, 0x06, 0x20, 0x00});
+
+    CheckpointRunConfig config;
+    config.checkpoint_path = checkpoint_path.string();
+    config.recipe_path = recipe_path.string();
+    config.importer_name = "builtin-zstd";
+    config.output_dir = (temp_dir / "output").string();
+
+    auto importer = createCheckpointImporter(config.importer_name);
+    const SnapshotBundle snapshot = importer->importCheckpoint(config);
+
+    ASSERT_EQ(snapshot.memory_segments.size(), 2u);
+    EXPECT_EQ(snapshot.pc, 0ULL);
+    ASSERT_TRUE(snapshot.privilege_mode.has_value());
+    EXPECT_EQ(*snapshot.privilege_mode, PrivilegeMode::MACHINE);
+    EXPECT_EQ(snapshot.integer_regs[2], 0ULL);
+    EXPECT_TRUE(snapshot.csr_values.empty());
+
+    const auto low_it = std::find_if(snapshot.memory_segments.begin(),
+                                     snapshot.memory_segments.end(),
+                                     [](const auto& segment) { return segment.base == 0x0ULL; });
+    ASSERT_NE(low_it, snapshot.memory_segments.end());
+    const std::vector<uint8_t> expected_auto_restorer = {
+        0x93, 0x05, 0x10, 0x00, 0x13, 0x06, 0x20, 0x00};
+    EXPECT_EQ(low_it->bytes, expected_auto_restorer);
+
+    const auto high_it = std::find_if(snapshot.memory_segments.begin(),
+                                      snapshot.memory_segments.end(),
+                                      [](const auto& segment) { return segment.base == 0x80000000ULL; });
+    ASSERT_NE(high_it, snapshot.memory_segments.end());
+    EXPECT_TRUE(high_it->isFileBacked());
+    EXPECT_EQ(high_it->size, image.size());
+}
+
+TEST(CheckpointImporterTest, BuiltinZstdImporterRejectsElfRestorer) {
+    if (!hasZstdBinary()) {
+        GTEST_SKIP() << "缺少 zstd 命令";
+    }
+
+    const auto temp_dir = resetTempDir("checkpoint_importer_builtin_assisted_elf");
+    const auto checkpoint_path =
+        temp_dir / "bzip2_source" / "555" / "_555_0.026526_.zstd";
+    const auto recipe_path = temp_dir / "scripts" / "bzip2_source_initramfs-spec.txt";
+    const auto restorer_path = temp_dir / "restorer.elf";
+    const auto raw_path = temp_dir / "image.bin";
+
+    std::vector<uint8_t> image(1024 * 1024, 0);
+    writeU64(image, 0xECDB0, 0xBEEFULL);
+    writeBinaryFile(raw_path, image);
+
+    std::filesystem::create_directories(checkpoint_path.parent_path());
+    writeZstdFile(raw_path, checkpoint_path);
+    writeRecipeFile(recipe_path);
+    writeBinaryFile(restorer_path, {0x7F, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00});
+
+    CheckpointRunConfig config;
+    config.checkpoint_path = checkpoint_path.string();
+    config.recipe_path = recipe_path.string();
+    config.importer_name = "builtin-zstd";
+    config.restorer_path = restorer_path.string();
+    config.output_dir = (temp_dir / "output").string();
+
+    auto importer = createCheckpointImporter(config.importer_name);
+    try {
+        static_cast<void>(importer->importCheckpoint(config));
+        FAIL() << "ELF restorer 应被拒绝";
+    } catch (const SimulatorException& ex) {
+        EXPECT_NE(std::string(ex.what()).find("flat binary"), std::string::npos);
+        EXPECT_NE(std::string(ex.what()).find("ELF"), std::string::npos);
+    }
+}
+
 TEST(CheckpointImporterTest, BuiltinZstdImporterAcceptsVirtualMemoryCheckpointAndPreservesSatp) {
     if (!hasZstdBinary()) {
         GTEST_SKIP() << "缺少 zstd 命令";

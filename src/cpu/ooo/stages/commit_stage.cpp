@@ -11,6 +11,7 @@ namespace riscv {
 
 namespace {
 constexpr uint8_t kFenceIFunct3 = 0b001;
+constexpr uint32_t kMstatusCsrAddr = 0x300;
 constexpr uint32_t kMcycleCsrAddr = 0xB00;
 constexpr uint32_t kMinstretCsrAddr = 0xB02;
 constexpr uint32_t kCycleCsrAddr = 0xC00;
@@ -761,6 +762,17 @@ bool CommitStage::handle_ebreak(CPUState& state, uint64_t instruction_pc) {
 }
 
 bool CommitStage::handle_mret(CPUState& state) {
+    uint64_t mstatus = csr::read(state.csr_registers, kMstatusCsrAddr);
+    const auto restored_mode = applyMretPrivilegeMode(mstatus);
+    if (!restored_mode.has_value()) {
+        throw IllegalInstructionException("MRET mstatus.MPP 非法");
+    }
+    writeCommittedCsr(state, kMstatusCsrAddr, mstatus);
+    if (state.cpu_interface) {
+        state.cpu_interface->setPrivilegeMode(*restored_mode);
+    } else if (state.privilege_state) {
+        state.privilege_state->setMode(*restored_mode);
+    }
     state.pc = csr::read(state.csr_registers, csr::kMepc);
     flush_pipeline_after_commit(state, FlushReason::Mret);
     return true;

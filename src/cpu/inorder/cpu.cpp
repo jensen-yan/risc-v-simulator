@@ -15,6 +15,7 @@ namespace riscv {
 namespace {
 
 constexpr uint32_t kSatpCsrAddress = 0x180;
+constexpr uint32_t kMstatusCsrAddress = 0x300;
 
 [[noreturn]] void throwTranslationFault(const char* access_type,
                                        Address virtual_address,
@@ -473,7 +474,14 @@ void CPU::executeSystem(const DecodedInstruction& inst) {
             // EBREAK - 断点
             handleEbreak();
         } else if (InstructionExecutor::isMachineReturn(inst)) {
-            // MRET - 从机器模式异常返回到MEPC
+            // MRET - 恢复当前特权级并跳转到MEPC
+            uint64_t mstatus = getCSR(kMstatusCsrAddress);
+            const auto restored_mode = applyMretPrivilegeMode(mstatus);
+            if (!restored_mode.has_value()) {
+                throw IllegalInstructionException("MRET mstatus.MPP 非法");
+            }
+            setCSR(kMstatusCsrAddress, mstatus);
+            setPrivilegeMode(*restored_mode);
             pc_ = getCSR(csr::kMepc);
         } else if (InstructionExecutor::isSupervisorReturn(inst)) {
             // SRET - 监管模式返回（可选实现）

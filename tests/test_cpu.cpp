@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "cpu/inorder/cpu.h"
+#include "core/csr_utils.h"
 #include "core/memory.h"
 #include <memory>
 
@@ -173,6 +174,28 @@ TEST_F(CPUTest, RegisterX0_AlwaysZero) {
     cpu->step();
     
     EXPECT_EQ(cpu->getRegister(0), 0);
+}
+
+TEST_F(CPUTest, MretRestoresPrivilegeModeFromMstatusMpp) {
+    constexpr uint32_t kMretInstruction = 0x30200073U;
+    constexpr uint64_t kMstatusMppSupervisor = 0x1ULL << 11;
+    constexpr uint64_t kMstatusMpie = 0x1ULL << 7;
+    constexpr uint64_t kMstatusMie = 0x1ULL << 3;
+
+    memory->writeWord(0, kMretInstruction);
+    cpu->setPC(0);
+    cpu->setPrivilegeMode(PrivilegeMode::MACHINE);
+    cpu->setCSR(csr::kMepc, 0x80);
+    cpu->setCSR(0x300, kMstatusMppSupervisor | kMstatusMpie);
+
+    cpu->step();
+
+    EXPECT_EQ(cpu->getPC(), 0x80u);
+    EXPECT_EQ(cpu->getPrivilegeMode(), PrivilegeMode::SUPERVISOR);
+    const uint64_t mstatus = cpu->getCSR(0x300);
+    EXPECT_EQ((mstatus >> 11) & 0x3ULL, 0ULL);
+    EXPECT_EQ(mstatus & kMstatusMie, kMstatusMie);
+    EXPECT_EQ(mstatus & kMstatusMpie, kMstatusMpie);
 }
 
 TEST_F(CPUTest, ADD_Instruction) {

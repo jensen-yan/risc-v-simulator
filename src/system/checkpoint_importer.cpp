@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <sys/wait.h>
@@ -32,6 +33,7 @@ constexpr const char* kBuiltinZstdImporterName = "builtin-zstd";
 constexpr Address kDefaultGcptGuestBase = 0x80000000ULL;
 constexpr uint64_t kGcptMagicNumber = 0xBEEFULL;
 constexpr uint32_t kMstatusCsrAddress = 0x300U;
+constexpr size_t kElfMagicSize = 4;
 
 struct DefaultGcptLayout {
     size_t magic_number_cpt_addr = 0xECDB0;
@@ -166,6 +168,74 @@ std::vector<uint8_t> readBinaryFile(const std::filesystem::path& path) {
         }
     }
     return bytes;
+}
+
+uint64_t readLittleEndian64FromFile(const std::filesystem::path& path,
+                                    uint64_t file_size,
+                                    size_t offset,
+                                    const std::string& field_name);
+
+void validateBuiltinZstdMagic(const BuiltinImageInfo& image) {
+    const DefaultGcptLayout layout;
+    const uint64_t magic =
+        readLittleEndian64FromFile(image.path, image.size, layout.magic_number_cpt_addr, "magic_number");
+    if (magic != kGcptMagicNumber) {
+        std::ostringstream oss;
+        oss << "checkpoint 不是受支持的 default_qemu_memlayout 格式，magic=0x" << std::hex << magic;
+        throw SimulatorException(oss.str());
+    }
+}
+
+uint32_t readBuiltinZstdExtensions(const BuiltinImageInfo& image) {
+    const DefaultGcptLayout layout;
+    const uint64_t misa =
+        readLittleEndian64FromFile(
+            image.path, image.size, layout.csr_reg_cpt_addr + 0x301ULL * sizeof(uint64_t), "misa");
+    return parseExtensionsFromMisa(misa);
+}
+
+std::vector<uint8_t> loadFlatBinaryRestorer(const std::filesystem::path& restorer_path) {
+    if (!std::filesystem::exists(restorer_path)) {
+        throw SimulatorException("restorer 不存在: " + restorer_path.string());
+    }
+    if (!std::filesystem::is_regular_file(restorer_path)) {
+        throw SimulatorException("restorer 不是普通文件: " + restorer_path.string());
+    }
+
+    std::vector<uint8_t> bytes = readBinaryFile(restorer_path);
+    if (bytes.size() >= kElfMagicSize && bytes[0] == 0x7F && bytes[1] == 'E' && bytes[2] == 'L' &&
+        bytes[3] == 'F') {
+        throw SimulatorException("builtin-zstd assisted 模式只支持 flat binary restorer，不支持 ELF: " +
+                                 restorer_path.string());
+    }
+    return bytes;
+}
+
+std::optional<std::filesystem::path> resolveBuiltinRestorerPath(const CheckpointRunConfig& config,
+                                                                const CheckpointRecipeSpec& recipe) {
+    const std::string explicit_restorer = trim(config.restorer_path);
+    if (!explicit_restorer.empty()) {
+        return std::filesystem::path(explicit_restorer);
+    }
+
+    const std::filesystem::path checkpoint_path(config.checkpoint_path);
+    const std::filesystem::path point_dir = checkpoint_path.parent_path();
+    const std::filesystem::path workload_dir = point_dir.parent_path();
+    const std::filesystem::path checkpoint_root = workload_dir.parent_path();
+    if (workload_dir.empty() || checkpoint_root.empty()) {
+        return std::nullopt;
+    }
+
+    const std::filesystem::path dataset_root = checkpoint_root.parent_path();
+    if (dataset_root.empty()) {
+        return std::nullopt;
+    }
+
+    const std::filesystem::path candidate = dataset_root / "gcpt_bins" / recipe.workload_name;
+    if (std::filesystem::exists(candidate)) {
+        return candidate;
+    }
+    return std::nullopt;
 }
 
 uint64_t readLittleEndian64FromFile(const std::filesystem::path& path,
@@ -356,13 +426,7 @@ SnapshotBundle parseBuiltinZstdSnapshot(const CheckpointRecipeSpec& recipe,
                                         const BuiltinImageInfo& image) {
     const DefaultGcptLayout layout;
 
-    const uint64_t magic =
-        readLittleEndian64FromFile(image.path, image.size, layout.magic_number_cpt_addr, "magic_number");
-    if (magic != kGcptMagicNumber) {
-        std::ostringstream oss;
-        oss << "checkpoint 不是受支持的 default_qemu_memlayout 格式，magic=0x" << std::hex << magic;
-        throw SimulatorException(oss.str());
-    }
+    validateBuiltinZstdMagic(image);
 
     SnapshotBundle snapshot;
     snapshot.recipe = recipe;
@@ -390,10 +454,7 @@ SnapshotBundle parseBuiltinZstdSnapshot(const CheckpointRecipeSpec& recipe,
         }
     }
 
-    const uint64_t misa =
-        readLittleEndian64FromFile(
-            image.path, image.size, layout.csr_reg_cpt_addr + 0x301ULL * sizeof(uint64_t), "misa");
-    snapshot.enabled_extensions = parseExtensionsFromMisa(misa);
+    snapshot.enabled_extensions = readBuiltinZstdExtensions(image);
 
     const uint64_t mstatus =
         readLittleEndian64FromFile(
@@ -418,6 +479,31 @@ SnapshotBundle parseBuiltinZstdSnapshot(const CheckpointRecipeSpec& recipe,
     return snapshot;
 }
 
+SnapshotBundle parseBuiltinZstdRestorerSnapshot(const CheckpointRecipeSpec& recipe,
+                                                const BuiltinImageInfo& image,
+                                                const std::filesystem::path& restorer_path) {
+    validateBuiltinZstdMagic(image);
+
+    SnapshotBundle snapshot;
+    snapshot.recipe = recipe;
+    snapshot.pc = 0;
+    snapshot.enabled_extensions = readBuiltinZstdExtensions(image);
+    snapshot.privilege_mode = PrivilegeMode::MACHINE;
+
+    MemorySegment restorer_segment;
+    restorer_segment.base = 0;
+    restorer_segment.bytes = loadFlatBinaryRestorer(restorer_path);
+    snapshot.memory_segments.push_back(std::move(restorer_segment));
+
+    MemorySegment checkpoint_segment;
+    checkpoint_segment.base = kDefaultGcptGuestBase;
+    checkpoint_segment.file_path = image.path.string();
+    checkpoint_segment.size = image.size;
+    checkpoint_segment.ephemeral = true;
+    snapshot.memory_segments.push_back(std::move(checkpoint_segment));
+    return snapshot;
+}
+
 } // namespace
 
 class BuiltinZstdCheckpointImporter : public ICheckpointImporter {
@@ -426,6 +512,10 @@ public:
         const CheckpointRecipeSpec recipe =
             loadCheckpointRecipeSpec(config.checkpoint_path, config.recipe_path);
         const BuiltinImageInfo image = loadBuiltinZstdImage(config);
+        const auto restorer_path = resolveBuiltinRestorerPath(config, recipe);
+        if (restorer_path.has_value()) {
+            return parseBuiltinZstdRestorerSnapshot(recipe, image, *restorer_path);
+        }
         return parseBuiltinZstdSnapshot(recipe, image);
     }
 };

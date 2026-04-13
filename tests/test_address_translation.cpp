@@ -47,6 +47,10 @@ protected:
         privilegeState.setSatp((kSv39Mode << 60) | (kRootPageTable >> 12));
     }
 
+    void installSv39RootOnly(Address rootPageTable) {
+        privilegeState.setSatp((kSv39Mode << 60) | (rootPageTable >> 12));
+    }
+
     std::shared_ptr<Memory> memory;
     PrivilegeState privilegeState;
     std::unique_ptr<AddressTranslation> translation;
@@ -64,13 +68,17 @@ TEST_F(AddressTranslationTest, BareModeBypassesTranslation) {
 
 TEST_F(AddressTranslationTest, Sv39WalkResolves4KLeaf) {
     privilegeState.setMode(PrivilegeMode::SUPERVISOR);
-    installSv39Mapping4K(kVirtualAddress, kPhysicalAddress, kPteV | kPteR | kPteA);
+    installSv39Mapping4K(kVirtualAddress, kPhysicalAddress, kPteV | kPteR);
 
     const TranslationResult result = translation->translateLoadAddress(kVirtualAddress, 8);
 
     EXPECT_TRUE(result.success);
     EXPECT_EQ(result.physical_address, kPhysicalAddress);
     EXPECT_EQ(result.failure_reason, TranslationFailureReason::None);
+
+    const uint64_t updatedPte = memory->read64(kLevel0PageTable + 8);
+    EXPECT_NE(updatedPte & kPteA, 0U);
+    EXPECT_EQ(updatedPte & kPteD, 0U);
 }
 
 TEST_F(AddressTranslationTest, Sv39StoreSetsAccessedAndDirtyBits) {
@@ -95,4 +103,49 @@ TEST_F(AddressTranslationTest, Sv39RejectsUserAccessToSupervisorPage) {
 
     EXPECT_FALSE(result.success);
     EXPECT_EQ(result.failure_reason, TranslationFailureReason::PermissionDenied);
+}
+
+TEST_F(AddressTranslationTest, NullPrivilegeStateReturnsAccessFault) {
+    AddressTranslation translationWithoutPrivilege(memory, nullptr);
+
+    const TranslationResult result = translationWithoutPrivilege.translateLoadAddress(kVirtualAddress, 8);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.failure_reason, TranslationFailureReason::AccessFault);
+}
+
+TEST_F(AddressTranslationTest, OutOfBoundsPageTableAccessReturnsAccessFault) {
+    privilegeState.setMode(PrivilegeMode::SUPERVISOR);
+    installSv39RootOnly(0x10000);
+
+    const TranslationResult result = translation->translateLoadAddress(kVirtualAddress, 8);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.failure_reason, TranslationFailureReason::AccessFault);
+}
+
+TEST_F(AddressTranslationTest, Sv39RejectsUnsupportedLargeLeafPage) {
+    privilegeState.setMode(PrivilegeMode::SUPERVISOR);
+    memory->write64(kRootPageTable, makePte(kLevel1PageTable, kPteV));
+    memory->write64(kLevel1PageTable, makePte(kPhysicalAddress, kPteV | kPteR | kPteA));
+    privilegeState.setSatp((kSv39Mode << 60) | (kRootPageTable >> 12));
+
+    const TranslationResult result = translation->translateLoadAddress(kVirtualAddress, 8);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.failure_reason, TranslationFailureReason::UnsupportedPageSize);
+}
+
+TEST_F(AddressTranslationTest, Sv39FetchAlsoSetsAccessedBit) {
+    privilegeState.setMode(PrivilegeMode::SUPERVISOR);
+    installSv39Mapping4K(kVirtualAddress, kPhysicalAddress, kPteV | kPteX);
+
+    const TranslationResult result = translation->translateInstructionAddress(kVirtualAddress, 4);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(result.physical_address, kPhysicalAddress);
+
+    const uint64_t updatedPte = memory->read64(kLevel0PageTable + 8);
+    EXPECT_NE(updatedPte & kPteA, 0U);
+    EXPECT_EQ(updatedPte & kPteD, 0U);
 }

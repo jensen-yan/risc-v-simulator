@@ -25,11 +25,15 @@ TranslationResult AddressTranslation::translate(Address virtualAddress, size_t s
         return TranslationResult{false, 0, TranslationFailureReason::AccessFault, "memory is null"};
     }
 
+    if (privilege_state_ == nullptr) {
+        return TranslationResult{false, 0, TranslationFailureReason::AccessFault, "privilege state is null"};
+    }
+
     if (size == 0) {
         return TranslationResult{false, 0, TranslationFailureReason::AccessFault, "access size must be non-zero"};
     }
 
-    if (privilege_state_ == nullptr || privilege_state_->getMode() == PrivilegeMode::MACHINE) {
+    if (privilege_state_->getMode() == PrivilegeMode::MACHINE) {
         return TranslationResult{true, virtualAddress, TranslationFailureReason::None, {}};
     }
 

@@ -1,5 +1,6 @@
 #include "system/sv39_page_walker.h"
 
+#include "common/types.h"
 #include "core/memory.h"
 #include "system/privilege_state.h"
 
@@ -31,6 +32,28 @@ TranslationResult failure(TranslationFailureReason reason, std::string message) 
     return TranslationResult{false, 0, reason, std::move(message)};
 }
 
+TranslationResult accessFault(std::string message) {
+    return failure(TranslationFailureReason::AccessFault, std::move(message));
+}
+
+TranslationResult readPte(std::shared_ptr<Memory> memory, Address pteAddress, uint64_t& pteValue) {
+    try {
+        pteValue = memory->read64(pteAddress);
+        return TranslationResult{true, 0, TranslationFailureReason::None, {}};
+    } catch (const MemoryException& e) {
+        return accessFault(e.what());
+    }
+}
+
+TranslationResult writePte(std::shared_ptr<Memory> memory, Address pteAddress, uint64_t pteValue) {
+    try {
+        memory->write64(pteAddress, pteValue);
+        return TranslationResult{true, 0, TranslationFailureReason::None, {}};
+    } catch (const MemoryException& e) {
+        return accessFault(e.what());
+    }
+}
+
 } // namespace
 
 Sv39PageWalker::Sv39PageWalker(std::shared_ptr<Memory> memory, PrivilegeState* privilegeState)
@@ -56,7 +79,11 @@ TranslationResult Sv39PageWalker::walk(Address virtualAddress, MemoryAccessType 
 
     for (int level = 2; level >= 0; --level) {
         const Address pteAddress = tableAddress + vpn[static_cast<size_t>(level)] * sizeof(uint64_t);
-        const uint64_t pte = memory_->read64(pteAddress);
+        uint64_t pte = 0;
+        const TranslationResult readResult = readPte(memory_, pteAddress, pte);
+        if (!readResult.success) {
+            return readResult;
+        }
 
         if ((pte & kPteV) == 0 || ((pte & kPteR) == 0 && (pte & kPteW) != 0)) {
             return failure(TranslationFailureReason::InvalidPte, "invalid Sv39 PTE");
@@ -95,7 +122,10 @@ TranslationResult Sv39PageWalker::walk(Address virtualAddress, MemoryAccessType 
             updatedPte |= kPteD;
         }
         if (updatedPte != pte) {
-            memory_->write64(pteAddress, updatedPte);
+            const TranslationResult writeResult = writePte(memory_, pteAddress, updatedPte);
+            if (!writeResult.success) {
+                return writeResult;
+            }
         }
 
         const Address physicalAddress = ((pte >> 10) << kPageShift) | pageOffset;

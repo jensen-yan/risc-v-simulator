@@ -70,6 +70,8 @@ public:
     // CSR寄存器访问
     uint64_t getCSR(uint32_t addr) const override;
     void setCSR(uint32_t addr, uint64_t value) override;
+    PrivilegeMode getPrivilegeMode() const override;
+    void setPrivilegeMode(PrivilegeMode mode) override;
     
     // 程序计数器
     uint64_t getPC() const override { return cpu_state_.pc; }
@@ -149,7 +151,7 @@ private:
     // 内存访问辅助方法
     uint64_t loadFromMemory(Address addr, Funct3 funct3);
     void storeToMemory(Address addr, uint64_t value, Funct3 funct3);
-    void syncPrivilegeStateFromCsrs();
+    void syncAddressTranslationStateFromCsrs();
     
     // 立即数符号扩展
     int32_t signExtend(uint32_t value, int bits) const;

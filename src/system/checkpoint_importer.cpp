@@ -1,6 +1,7 @@
 #include "system/checkpoint_importer.h"
 
 #include "system/checkpoint_recipe.h"
+#include "system/privilege_state.h"
 
 #include <array>
 #include <cctype>
@@ -30,6 +31,7 @@ struct BuiltinImageInfo {
 constexpr const char* kBuiltinZstdImporterName = "builtin-zstd";
 constexpr Address kDefaultGcptGuestBase = 0x0ULL;
 constexpr uint64_t kGcptMagicNumber = 0xBEEFULL;
+constexpr uint32_t kMstatusCsrAddress = 0x300U;
 
 struct DefaultGcptLayout {
     size_t magic_number_cpt_addr = 0xECDB0;
@@ -392,6 +394,20 @@ SnapshotBundle parseBuiltinZstdSnapshot(const CheckpointRecipeSpec& recipe,
         readLittleEndian64FromFile(
             image.path, image.size, layout.csr_reg_cpt_addr + 0x301ULL * sizeof(uint64_t), "misa");
     snapshot.enabled_extensions = parseExtensionsFromMisa(misa);
+
+    const uint64_t mstatus =
+        readLittleEndian64FromFile(
+            image.path,
+            image.size,
+            layout.csr_reg_cpt_addr + static_cast<size_t>(kMstatusCsrAddress) * sizeof(uint64_t),
+            "mstatus");
+    const auto privilege_mode = decodePrivilegeModeFromMstatusMpp(mstatus);
+    if (!privilege_mode.has_value()) {
+        std::ostringstream oss;
+        oss << "checkpoint mstatus.MPP 非法: mstatus=0x" << std::hex << mstatus;
+        throw SimulatorException(oss.str());
+    }
+    snapshot.privilege_mode = *privilege_mode;
 
     MemorySegment segment;
     segment.base = kDefaultGcptGuestBase;

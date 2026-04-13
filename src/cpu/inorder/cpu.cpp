@@ -15,15 +15,6 @@ namespace riscv {
 namespace {
 
 constexpr uint32_t kSatpCsrAddress = 0x180;
-constexpr uint32_t kMstatusCsrAddress = 0x300;
-
-PrivilegeMode inferPrivilegeMode(uint64_t satp, uint64_t mstatus) {
-    (void)mstatus;
-    if (satp == 0) {
-        return PrivilegeMode::MACHINE;
-    }
-    return PrivilegeMode::SUPERVISOR;
-}
 
 [[noreturn]] void throwTranslationFault(const char* access_type,
                                        Address virtual_address,
@@ -52,7 +43,8 @@ CPU::CPU(std::shared_ptr<Memory> memory)
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
     privilege_state_ = std::make_unique<PrivilegeState>();
     address_translation_ = std::make_unique<AddressTranslation>(memory_, privilege_state_.get());
-    syncPrivilegeStateFromCsrs();
+    setPrivilegeMode(PrivilegeMode::MACHINE);
+    syncAddressTranslationStateFromCsrs();
 }
 
 CPU::~CPU() = default;
@@ -186,7 +178,8 @@ void CPU::reset() {
     instruction_count_ = 0;
     reservation_valid_ = false;
     reservation_addr_ = 0;
-    syncPrivilegeStateFromCsrs();
+    setPrivilegeMode(PrivilegeMode::MACHINE);
+    syncAddressTranslationStateFromCsrs();
 }
 
 uint64_t CPU::getRegister(RegNum reg) const {
@@ -258,9 +251,20 @@ void CPU::setCSR(uint32_t addr, uint64_t value) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
     csr::write(csr_registers_, addr, value);
-    if (addr == kSatpCsrAddress || addr == kMstatusCsrAddress) {
-        syncPrivilegeStateFromCsrs();
+    if (addr == kSatpCsrAddress) {
+        syncAddressTranslationStateFromCsrs();
     }
+}
+
+PrivilegeMode CPU::getPrivilegeMode() const {
+    return privilege_state_ ? privilege_state_->getMode() : PrivilegeMode::MACHINE;
+}
+
+void CPU::setPrivilegeMode(PrivilegeMode mode) {
+    if (!privilege_state_) {
+        return;
+    }
+    privilege_state_->setMode(mode);
 }
 
 void CPU::dumpRegisters() const {
@@ -578,15 +582,13 @@ Address CPU::translateStoreAddress(Address virtual_addr, size_t size) const {
     return result.physical_address;
 }
 
-void CPU::syncPrivilegeStateFromCsrs() {
+void CPU::syncAddressTranslationStateFromCsrs() {
     if (!privilege_state_) {
         return;
     }
 
     const uint64_t satp = csr::read(csr_registers_, kSatpCsrAddress);
-    const uint64_t mstatus = csr::read(csr_registers_, kMstatusCsrAddress);
     privilege_state_->setSatp(satp);
-    privilege_state_->setMode(inferPrivilegeMode(satp, mstatus));
 }
 
 void CPU::executeMExtension(const DecodedInstruction& inst) {

@@ -44,6 +44,10 @@ public:
     // CSR寄存器访问
     virtual uint64_t getCSR(uint32_t addr) const = 0;
     virtual void setCSR(uint32_t addr, uint64_t value) = 0;
+
+    // 当前特权级访问
+    virtual PrivilegeMode getPrivilegeMode() const = 0;
+    virtual void setPrivilegeMode(PrivilegeMode mode) = 0;
     
     // 程序计数器
     virtual uint64_t getPC() const = 0;

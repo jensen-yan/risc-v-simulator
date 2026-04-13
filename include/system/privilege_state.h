@@ -2,7 +2,12 @@
 
 #include "common/types.h"
 
+#include <optional>
+
 namespace riscv {
+
+std::optional<PrivilegeMode> decodePrivilegeModeEncoding(uint64_t encoded_mode);
+std::optional<PrivilegeMode> decodePrivilegeModeFromMstatusMpp(uint64_t mstatus);
 
 class PrivilegeState {
 public:

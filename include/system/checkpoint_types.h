@@ -3,6 +3,7 @@
 #include "common/types.h"
 
 #include <array>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,6 +34,7 @@ struct CheckpointRecipeSpec {
 struct SnapshotBundle {
     uint64_t pc = 0;
     uint32_t enabled_extensions = static_cast<uint32_t>(Extension::I);
+    std::optional<PrivilegeMode> privilege_mode;
     std::array<uint64_t, 32> integer_regs{};
     std::array<uint64_t, 32> fp_regs{};
     std::vector<std::pair<uint32_t, uint64_t>> csr_values;

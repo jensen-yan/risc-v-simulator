@@ -18,9 +18,7 @@ namespace riscv {
 
 namespace {
 
-constexpr uint32_t kSstatusCsrAddress = 0x100;
 constexpr uint32_t kSatpCsrAddress = 0x180;
-constexpr uint32_t kMstatusCsrAddress = 0x300;
 
 std::string toLowerCopy(const std::string& value) {
     std::string lowered = value;
@@ -625,19 +623,17 @@ void Simulator::restoreSnapshotMemory(const SnapshotBundle& snapshot,
     }
 }
 
-void Simulator::synchronizeSharedTranslationState(ICpuInterface* cpu) const {
+void Simulator::synchronizeSharedTranslationState(ICpuInterface* cpu, const SnapshotBundle& snapshot) const {
     if (cpu == nullptr) {
         return;
     }
 
-    const uint64_t mstatus = cpu->getCSR(kMstatusCsrAddress);
-    cpu->setCSR(kMstatusCsrAddress, mstatus);
-
-    const uint64_t sstatus = cpu->getCSR(kSstatusCsrAddress);
-    cpu->setCSR(kSstatusCsrAddress, sstatus);
-
     const uint64_t satp = cpu->getCSR(kSatpCsrAddress);
     cpu->setCSR(kSatpCsrAddress, satp);
+
+    if (snapshot.privilege_mode.has_value()) {
+        cpu->setPrivilegeMode(*snapshot.privilege_mode);
+    }
 }
 
 void Simulator::restoreSnapshotCpuState(ICpuInterface* cpu, const SnapshotBundle& snapshot) const {
@@ -654,8 +650,8 @@ void Simulator::restoreSnapshotCpuState(ICpuInterface* cpu, const SnapshotBundle
     }
     cpu->setPC(snapshot.pc);
 
-    // 以最终 CSR 状态做一次显式收口，保证恢复后的第一条指令就看到正确翻译上下文。
-    synchronizeSharedTranslationState(cpu);
+    // Snapshot restore 需要显式恢复当前特权级，避免把普通 CSR 写语义污染成即时 mode 切换。
+    synchronizeSharedTranslationState(cpu, snapshot);
 }
 
 bool Simulator::loadElfProgram(const std::string& filename) {

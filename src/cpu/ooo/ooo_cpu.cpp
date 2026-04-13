@@ -22,7 +22,6 @@ namespace {
 
 bool g_enable_l1d_next_line_prefetch = true;
 constexpr uint32_t kSatpCsrAddress = 0x180;
-constexpr uint32_t kMstatusCsrAddress = 0x300;
 
 template <typename T>
 void clearQueue(std::queue<T>& q) {
@@ -40,14 +39,6 @@ BlockingCacheConfig createDefaultL1CacheConfig() {
     cfg.miss_penalty = 20;
     cfg.write_policy = CacheWritePolicy::WriteBackWriteAllocate;
     return cfg;
-}
-
-PrivilegeMode inferPrivilegeMode(uint64_t satp, uint64_t mstatus) {
-    (void)mstatus;
-    if (satp == 0) {
-        return PrivilegeMode::MACHINE;
-    }
-    return PrivilegeMode::SUPERVISOR;
 }
 
 void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& memory) {
@@ -164,7 +155,8 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
     // 初始化可变运行态（寄存器、队列、ooo组件等）
     resetCpuStateForReuse(cpu_state_, memory_);
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
-    syncPrivilegeStateFromCsrs();
+    setPrivilegeMode(PrivilegeMode::MACHINE);
+    syncAddressTranslationStateFromCsrs();
 
     if (memory_) {
         memory_external_write_observer_id_ = memory_->addExternalWriteObserver(
@@ -240,7 +232,8 @@ void OutOfOrderCPU::run() {
 void OutOfOrderCPU::reset() {
     resetCpuStateForReuse(cpu_state_, memory_);
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
-    syncPrivilegeStateFromCsrs();
+    setPrivilegeMode(PrivilegeMode::MACHINE);
+    syncAddressTranslationStateFromCsrs();
     
     // 重置DiffTest组件
     difftest_synced_once_ = false;
@@ -351,9 +344,20 @@ void OutOfOrderCPU::setCSR(uint32_t addr, uint64_t value) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
     csr::write(cpu_state_.csr_registers, addr, value);
-    if (addr == kSatpCsrAddress || addr == kMstatusCsrAddress) {
-        syncPrivilegeStateFromCsrs();
+    if (addr == kSatpCsrAddress) {
+        syncAddressTranslationStateFromCsrs();
     }
+}
+
+PrivilegeMode OutOfOrderCPU::getPrivilegeMode() const {
+    return cpu_state_.privilege_state ? cpu_state_.privilege_state->getMode() : PrivilegeMode::MACHINE;
+}
+
+void OutOfOrderCPU::setPrivilegeMode(PrivilegeMode mode) {
+    if (!cpu_state_.privilege_state) {
+        return;
+    }
+    cpu_state_.privilege_state->setMode(mode);
 }
 
 void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint64_t pc) {
@@ -425,15 +429,13 @@ void OutOfOrderCPU::storeToMemory(Address addr, uint64_t value, Funct3 funct3) {
     InstructionExecutor::storeToMemory(memory_, addr, value, funct3);
 }
 
-void OutOfOrderCPU::syncPrivilegeStateFromCsrs() {
+void OutOfOrderCPU::syncAddressTranslationStateFromCsrs() {
     if (!cpu_state_.privilege_state) {
         return;
     }
 
     const uint64_t satp = csr::read(cpu_state_.csr_registers, kSatpCsrAddress);
-    const uint64_t mstatus = csr::read(cpu_state_.csr_registers, kMstatusCsrAddress);
     cpu_state_.privilege_state->setSatp(satp);
-    cpu_state_.privilege_state->setMode(inferPrivilegeMode(satp, mstatus));
 }
 
 int32_t OutOfOrderCPU::signExtend(uint32_t value, int bits) const {

@@ -132,7 +132,7 @@ private:
     std::vector<uint8_t> loadBinaryFile(const std::string& filename);
     void restoreSnapshotMemory(const SnapshotBundle& snapshot, const std::shared_ptr<Memory>& memory) const;
     void restoreSnapshotCpuState(ICpuInterface* cpu, const SnapshotBundle& snapshot) const;
-    void synchronizeSharedTranslationState(ICpuInterface* cpu) const;
+    void synchronizeSharedTranslationState(ICpuInterface* cpu, const SnapshotBundle& snapshot) const;
 };
 
 } // namespace riscv

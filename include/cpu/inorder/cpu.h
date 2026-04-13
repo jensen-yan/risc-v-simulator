@@ -48,6 +48,8 @@ public:
     // CSR寄存器访问
     uint64_t getCSR(uint32_t addr) const override;
     void setCSR(uint32_t addr, uint64_t value) override;
+    PrivilegeMode getPrivilegeMode() const override;
+    void setPrivilegeMode(PrivilegeMode mode) override;
     
     // 程序计数器
     uint64_t getPC() const override { return pc_; }
@@ -114,7 +116,7 @@ private:
     Address translateInstructionAddress(Address virtual_addr, size_t size) const;
     Address translateLoadAddress(Address virtual_addr, size_t size) const;
     Address translateStoreAddress(Address virtual_addr, size_t size) const;
-    void syncPrivilegeStateFromCsrs();
+    void syncAddressTranslationStateFromCsrs();
     
     // 辅助方法
     void incrementPC() { 

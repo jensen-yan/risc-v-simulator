@@ -20,6 +20,7 @@ constexpr uint64_t kPteV = 1ULL << 0;
 constexpr uint64_t kPteR = 1ULL << 1;
 constexpr uint64_t kPteW = 1ULL << 2;
 constexpr uint64_t kPteX = 1ULL << 3;
+constexpr uint64_t kPteU = 1ULL << 4;
 constexpr uint64_t kPteA = 1ULL << 6;
 constexpr uint64_t kPteD = 1ULL << 7;
 
@@ -257,6 +258,7 @@ TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesInstructionFetch) {
 
     SnapshotBundle snapshot;
     snapshot.pc = 0x1000;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
     snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
     snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
 
@@ -278,6 +280,7 @@ TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderLoadStore) {
 
     SnapshotBundle snapshot;
     snapshot.pc = 0x1000;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
     snapshot.integer_regs[1] = 0x2000;
     snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
     snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
@@ -311,6 +314,7 @@ TEST(SimulatorTest, LoadSnapshotWithSv39SynchronizesOutOfOrderTranslationAfterSa
 
     SnapshotBundle snapshot;
     snapshot.pc = 0x0;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
     snapshot.integer_regs[1] = (kSv39Mode << 60) | (kRootPageTable >> 12);
 
     auto segment = makeSv39SnapshotMemoryImage();
@@ -336,6 +340,7 @@ TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderCrossPageInstruction
 
     SnapshotBundle snapshot;
     snapshot.pc = 0x1FFE;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
     snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
 
     auto segment = makeSv39SnapshotMemoryImage();
@@ -363,6 +368,7 @@ TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderAmoCommitAddress) {
 
     SnapshotBundle snapshot;
     snapshot.pc = 0x1000;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
     snapshot.enabled_extensions =
         static_cast<uint32_t>(Extension::I) | static_cast<uint32_t>(Extension::A);
     snapshot.integer_regs[1] = 0x2000;
@@ -469,6 +475,7 @@ TEST(SimulatorTest, RunInstructionWindowClassifiesSv39TranslationFailureAsTrap) 
 
     SnapshotBundle snapshot;
     snapshot.pc = 0x1000;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
     snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
     snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
 
@@ -486,6 +493,38 @@ TEST(SimulatorTest, RunInstructionWindowClassifiesSv39TranslationFailureAsTrap) 
     EXPECT_EQ(result.failure_reason, CheckpointFailureReason::TRAP);
     EXPECT_NE(result.message.find("instruction fetch translation failed"), std::string::npos);
     EXPECT_NE(result.message.find("execute permission"), std::string::npos);
+}
+
+TEST(SimulatorTest, LoadSnapshotRestoresUserPrivilegeModeForTranslation) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::IN_ORDER, /*memoryBaseAddress=*/0);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x1000;
+    snapshot.privilege_mode = PrivilegeMode::USER;
+    snapshot.integer_regs[1] = 0x2000;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+    snapshot.csr_values.push_back({0x300, 0x0000000A00006022ULL});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/0x1000, /*physicalAddress=*/0x4000, kPteV | kPteX | kPteU);
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/0x2000, /*physicalAddress=*/0x5000, kPteV | kPteR);
+    writeWord(segment.bytes, /*address=*/0x4000, createLoadInstruction(0, 1, 0x3, 6));
+    writeWord(segment.bytes, /*address=*/0x4004, createECallInstruction());
+    writeDoubleWord(segment.bytes, /*address=*/0x5000, 0x1122334455667788ULL);
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+    EXPECT_EQ(simulator.getCpu()->getPrivilegeMode(), PrivilegeMode::USER);
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/1);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.failure_reason, CheckpointFailureReason::TRAP);
+    EXPECT_NE(result.message.find("load translation failed"), std::string::npos);
+    EXPECT_NE(result.message.find("user access to supervisor page"), std::string::npos);
 }
 
 TEST(SimulatorTest, CpuInterfaceExposesNextStepRetireLimitHooks) {

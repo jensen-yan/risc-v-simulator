@@ -31,6 +31,8 @@ public:
 
     uint64_t getCSR(uint32_t addr) const override { return cpu_->getCSR(addr); }
     void setCSR(uint32_t addr, uint64_t value) override { cpu_->setCSR(addr, value); }
+    PrivilegeMode getPrivilegeMode() const override { return cpu_->getPrivilegeMode(); }
+    void setPrivilegeMode(PrivilegeMode mode) override { cpu_->setPrivilegeMode(mode); }
     
     uint64_t getPC() const override { return cpu_->getPC(); }
     void setPC(uint64_t pc) override { cpu_->setPC(pc); }
@@ -80,6 +82,8 @@ public:
 
     uint64_t getCSR(uint32_t addr) const override { return cpu_->getCSR(addr); }
     void setCSR(uint32_t addr, uint64_t value) override { cpu_->setCSR(addr, value); }
+    PrivilegeMode getPrivilegeMode() const override { return cpu_->getPrivilegeMode(); }
+    void setPrivilegeMode(PrivilegeMode mode) override { cpu_->setPrivilegeMode(mode); }
     
     uint64_t getPC() const override { return cpu_->getPC(); }
     void setPC(uint64_t pc) override { cpu_->setPC(pc); }

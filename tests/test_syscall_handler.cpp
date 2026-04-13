@@ -17,6 +17,7 @@ private:
     uint64_t pc_ = 0;
     bool halted_ = false;
     uint32_t enabled_extensions_ = 0;
+    PrivilegeMode privilege_mode_ = PrivilegeMode::MACHINE;
 
 public:
     // 基本CPU接口
@@ -28,6 +29,7 @@ public:
         std::fill(csr_registers_, csr_registers_ + 4096, 0);
         pc_ = 0;
         halted_ = false;
+        privilege_mode_ = PrivilegeMode::MACHINE;
     }
     bool isHalted() const override { return halted_; }
     void requestHalt() override { halted_ = true; }
@@ -69,6 +71,8 @@ public:
     void setCSR(uint32_t addr, uint64_t value) override {
         csr_registers_[addr & 0xFFFU] = value;
     }
+    PrivilegeMode getPrivilegeMode() const override { return privilege_mode_; }
+    void setPrivilegeMode(PrivilegeMode mode) override { privilege_mode_ = mode; }
 
     // PC访问
     uint64_t getPC() const override { return pc_; }

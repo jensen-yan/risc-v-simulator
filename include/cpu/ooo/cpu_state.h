@@ -221,6 +221,9 @@ struct CPUState {
     uint64_t instruction_count;     // 指令计数器
     uint64_t cycle_count;          // 周期计数器
     uint32_t enabled_extensions;   // 启用的扩展
+    size_t commit_width_override;  // 临时提交宽度覆盖，0 表示使用默认宽度
+    uint64_t last_halt_pc;         // 最近一次异常/停止对应的 PC
+    std::string last_halt_message; // 最近一次异常/停止消息
     
     // 寄存器文件
     static constexpr size_t NUM_REGISTERS = 32;
@@ -295,6 +298,9 @@ struct CPUState {
                           static_cast<uint32_t>(Extension::F) |
                           static_cast<uint32_t>(Extension::D) |
                           static_cast<uint32_t>(Extension::C)),
+        commit_width_override(0),
+        last_halt_pc(0),
+        last_halt_message(),
         cpu_interface(nullptr),
         branch_mispredicts(0), pipeline_stalls(0),
         reservation_valid(false), reservation_addr(0),

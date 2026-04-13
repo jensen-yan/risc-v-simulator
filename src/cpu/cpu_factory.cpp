@@ -48,6 +48,10 @@ public:
     StatsList getStats() const override { return {}; }
     void resetStats() override {}
     void dumpDetailedStats(std::ostream& os) const override { (void)os; }
+    void setNextStepRetireLimit(size_t limit) override { (void)limit; }
+    void clearNextStepRetireLimit() override {}
+    std::string getLastHaltMessage() const override { return {}; }
+    uint64_t getLastHaltPC() const override { return cpu_->getPC(); }
 };
 
 /**
@@ -104,6 +108,10 @@ public:
     }
     
     void setPipelineTracer(PipelineTracer* tracer) override { cpu_->setPipelineTracer(tracer); }
+    void setNextStepRetireLimit(size_t limit) override { cpu_->setCommitWidthOverride(limit); }
+    void clearNextStepRetireLimit() override { cpu_->clearCommitWidthOverride(); }
+    std::string getLastHaltMessage() const override { return cpu_->getLastHaltMessage(); }
+    uint64_t getLastHaltPC() const override { return cpu_->getLastHaltPC(); }
 
     // 乱序执行CPU特有的功能
     OutOfOrderCPU* getOooCpu() { return cpu_.get(); }

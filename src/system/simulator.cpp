@@ -1,13 +1,120 @@
 #include "system/simulator.h"
-#include "system/difftest.h"
+
 #include "common/debug_types.h"
-#include "cpu/ooo/ooo_cpu.h"
-#include <iostream>
+#include "core/csr_utils.h"
+#include "core/decoder.h"
+#include "core/instruction_executor.h"
+#include "system/difftest.h"
+#include "system/syscall_handler.h"
+
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
 namespace riscv {
+
+namespace {
+
+std::string toLowerCopy(const std::string& value) {
+    std::string lowered = value;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return lowered;
+}
+
+bool containsIgnoreCase(const std::string& haystack, const std::string& needle) {
+    return toLowerCopy(haystack).find(toLowerCopy(needle)) != std::string::npos;
+}
+
+CheckpointFailureReason classifyExceptionMessage(const std::string& message) {
+    if (containsIgnoreCase(message, "不支持的系统指令") ||
+        containsIgnoreCase(message, "unsupported system instruction")) {
+        return CheckpointFailureReason::UNIMPLEMENTED_SYSTEM_INSTRUCTION;
+    }
+    if (containsIgnoreCase(message, "非法指令") ||
+        containsIgnoreCase(message, "illegal")) {
+        return CheckpointFailureReason::ILLEGAL_INSTRUCTION;
+    }
+    return CheckpointFailureReason::UNKNOWN;
+}
+
+struct StopClassification {
+    CheckpointFailureReason reason = CheckpointFailureReason::NONE;
+    std::string message;
+};
+
+StopClassification classifyStoppedState(ICpuInterface* cpu,
+                                        const std::shared_ptr<Memory>& memory,
+                                        bool halted_by_instruction_limit,
+                                        bool halted_by_cycle_limit) {
+    const std::string halt_message = cpu->getLastHaltMessage();
+    const uint64_t halt_pc = cpu->getLastHaltPC() != 0 ? cpu->getLastHaltPC() : cpu->getPC();
+
+    if (!halt_message.empty()) {
+        return {classifyExceptionMessage(halt_message), halt_message};
+    }
+
+    if (memory->shouldExit()) {
+        return {CheckpointFailureReason::PROGRAM_EXIT,
+                "program exited via tohost/fromhost before reaching the instruction window"};
+    }
+    if (halted_by_instruction_limit || halted_by_cycle_limit) {
+        return {CheckpointFailureReason::WINDOW_NOT_REACHED,
+                "execution stopped by simulator instruction/cycle limit before reaching the instruction window"};
+    }
+    if (!cpu->isHalted()) {
+        return {CheckpointFailureReason::WINDOW_NOT_REACHED,
+                "execution stopped before reaching the instruction window"};
+    }
+
+    const uint64_t stop_pc = halt_pc;
+    try {
+        const Instruction raw_inst = memory->fetchInstruction(stop_pc);
+        if (raw_inst == 0) {
+            return {CheckpointFailureReason::WINDOW_NOT_REACHED,
+                    "execution reached a zero instruction before the instruction window target"};
+        }
+
+        Decoder decoder;
+        const uint32_t extensions = cpu->getEnabledExtensions();
+        const DecodedInstruction decoded =
+            ((raw_inst & 0x03U) != 0x03U)
+                ? decoder.decodeCompressed(static_cast<uint16_t>(raw_inst), extensions)
+                : decoder.decode(raw_inst, extensions);
+
+        if (decoded.opcode == Opcode::SYSTEM) {
+            if (InstructionExecutor::isSystemCall(decoded) &&
+                (cpu->getCSR(csr::kMtvec) & ~0x3ULL) == 0 &&
+                cpu->getRegister(17) == SyscallHandler::SYS_EXIT) {
+                return {CheckpointFailureReason::PROGRAM_EXIT,
+                        "program exited via ECALL SYS_exit before reaching the instruction window"};
+            }
+
+            if (!InstructionExecutor::isCsrInstruction(decoded) &&
+                !InstructionExecutor::isSystemCall(decoded) &&
+                !InstructionExecutor::isBreakpoint(decoded) &&
+                !InstructionExecutor::isMachineReturn(decoded) &&
+                !InstructionExecutor::isSupervisorReturn(decoded) &&
+                !InstructionExecutor::isUserReturn(decoded) &&
+                !InstructionExecutor::isSfenceVma(decoded)) {
+                return {CheckpointFailureReason::UNIMPLEMENTED_SYSTEM_INSTRUCTION,
+                        "execution stopped on an unimplemented system instruction"};
+            }
+        }
+    } catch (const IllegalInstructionException& e) {
+        return {CheckpointFailureReason::ILLEGAL_INSTRUCTION, e.what()};
+    } catch (const SimulatorException&) {
+    } catch (const std::exception&) {
+    }
+
+    return {CheckpointFailureReason::WINDOW_NOT_REACHED,
+            "execution halted before reaching the instruction window"};
+}
+
+} // namespace
 
 Simulator::Simulator(size_t memorySize, CpuType cpuType) 
     : memory_(std::make_shared<Memory>(memorySize)),
@@ -35,6 +142,7 @@ bool Simulator::loadProgram(const std::string& filename) {
             return false;
         }
         
+        memory_->resetExitStatus();
         memory_->loadProgram(program);
         cpu_->reset();
         cycle_count_ = 0;
@@ -48,6 +156,7 @@ bool Simulator::loadProgram(const std::string& filename) {
 
 bool Simulator::loadProgramFromBytes(const std::vector<uint8_t>& program, Address startAddr) {
     try {
+        memory_->resetExitStatus();
         memory_->loadProgram(program, startAddr);
         cpu_->reset();
         cpu_->setPC(startAddr);
@@ -67,6 +176,7 @@ bool Simulator::loadRiscvProgram(const std::string& filename, Address loadAddr) 
             return false;
         }
         
+        memory_->resetExitStatus();
         // 加载程序到指定地址
         memory_->loadProgram(program, loadAddr);
         
@@ -206,12 +316,156 @@ bool Simulator::runWithWarmup(uint64_t warmupCycles, const std::function<void()>
     return warmup_triggered;
 }
 
+InstructionWindowResult Simulator::runInstructionWindow(uint64_t warmup_instructions,
+                                                        uint64_t measure_instructions) {
+    auto& debugManager = DebugManager::getInstance();
+    halted_by_instruction_limit_ = false;
+    halted_by_cycle_limit_ = false;
+
+    InstructionWindowResult result;
+    result.stop_pc = cpu_->getPC();
+    const uint64_t start_cycle_count = cycle_count_;
+    uint64_t measure_start_cycle = start_cycle_count;
+
+    auto refreshResultAccounting = [&]() {
+        result.total_instructions =
+            result.warmup_instructions_completed + result.measure_instructions_completed;
+        result.total_cycles = cycle_count_ - start_cycle_count;
+        result.measure_cycles = result.warmup_completed ? (cycle_count_ - measure_start_cycle) : 0;
+        result.stop_pc = cpu_->getPC();
+    };
+
+    auto finalizeFailure = [&](CheckpointFailureReason reason, const std::string& message) {
+        refreshResultAccounting();
+        result.success = false;
+        result.failure_reason = reason;
+        result.message = message;
+        result.warmup_completed = (warmup_instructions == 0) ||
+                                  (result.warmup_instructions_completed >= warmup_instructions);
+        result.measure_completed = (measure_instructions == 0) ||
+                                   (result.measure_instructions_completed >= measure_instructions);
+        return result;
+    };
+
+    auto finalizeSuccess = [&]() {
+        refreshResultAccounting();
+        result.success = true;
+        result.warmup_completed = true;
+        result.measure_completed = true;
+        result.failure_reason = CheckpointFailureReason::NONE;
+        result.message = "instruction window completed";
+        return result;
+    };
+
+    if (warmup_instructions == 0) {
+        result.warmup_completed = true;
+        measure_start_cycle = cycle_count_;
+        cpu_->resetStats();
+    }
+
+    if (measure_instructions == 0) {
+        result.measure_completed = true;
+        return finalizeSuccess();
+    }
+
+    while (true) {
+        if (cpu_->isHalted() || memory_->shouldExit()) {
+            const auto classification =
+                classifyStoppedState(cpu_.get(), memory_, halted_by_instruction_limit_, halted_by_cycle_limit_);
+            return finalizeFailure(classification.reason, classification.message);
+        }
+
+        const uint64_t warmup_remaining_before_step =
+            result.warmup_completed ? 0 : (warmup_instructions - result.warmup_instructions_completed);
+        const uint64_t instructions_before = cpu_->getInstructionCount();
+
+        if (!result.warmup_completed && warmup_remaining_before_step > 0) {
+            cpu_->setNextStepRetireLimit(static_cast<size_t>(warmup_remaining_before_step));
+        } else {
+            cpu_->clearNextStepRetireLimit();
+        }
+
+        try {
+            step();
+        } catch (const IllegalInstructionException& e) {
+            cpu_->clearNextStepRetireLimit();
+            return finalizeFailure(classifyExceptionMessage(e.what()), e.what());
+        } catch (const SimulatorException& e) {
+            cpu_->clearNextStepRetireLimit();
+            return finalizeFailure(classifyExceptionMessage(e.what()), e.what());
+        } catch (const std::exception& e) {
+            cpu_->clearNextStepRetireLimit();
+            return finalizeFailure(CheckpointFailureReason::UNKNOWN, e.what());
+        }
+
+        cpu_->clearNextStepRetireLimit();
+
+        const uint64_t retired = cpu_->getInstructionCount() - instructions_before;
+        const uint64_t warmup_delta = result.warmup_completed
+            ? 0
+            : std::min(retired, warmup_remaining_before_step);
+        result.warmup_instructions_completed += warmup_delta;
+
+        if (!result.warmup_completed && result.warmup_instructions_completed == warmup_instructions) {
+            result.warmup_completed = true;
+            result.measure_cycles = 0;
+            measure_start_cycle = cycle_count_;
+            cpu_->resetStats();
+        }
+
+        const uint64_t measure_delta = retired - warmup_delta;
+        if (measure_delta > 0) {
+            result.measure_instructions_completed += measure_delta;
+        }
+
+        if (result.warmup_completed && result.measure_instructions_completed >= measure_instructions) {
+            return finalizeSuccess();
+        }
+
+        if (cpuType_ == CpuType::IN_ORDER &&
+            max_in_order_instructions_ > 0 &&
+            cpu_->getInstructionCount() > max_in_order_instructions_) {
+            LOGW(SYSTEM, "instruction count exceeds limit (%llu), auto halt",
+                 static_cast<unsigned long long>(max_in_order_instructions_));
+            cpu_->requestHalt();
+            halted_by_instruction_limit_ = true;
+        }
+
+        if (cpuType_ == CpuType::OUT_OF_ORDER &&
+            max_out_of_order_cycles_ > 0 &&
+            cycle_count_ > max_out_of_order_cycles_) {
+            LOGW(SYSTEM, "cycle count exceeds limit (%llu), auto halt",
+                 static_cast<unsigned long long>(max_out_of_order_cycles_));
+            cpu_->requestHalt();
+            halted_by_cycle_limit_ = true;
+        }
+
+        if (cpu_->isHalted() || memory_->shouldExit()) {
+            debugManager.setGlobalContext(cycle_count_, cpu_->getPC());
+            const auto classification =
+                classifyStoppedState(cpu_.get(), memory_, halted_by_instruction_limit_, halted_by_cycle_limit_);
+            return finalizeFailure(classification.reason, classification.message);
+        }
+    }
+}
+
 void Simulator::reset() {
     cpu_->reset();
+    cpu_->clearNextStepRetireLimit();
     memory_->clear();
+    memory_->resetExitStatus();
     cycle_count_ = 0;
     halted_by_instruction_limit_ = false;
     halted_by_cycle_limit_ = false;
+    if (reference_cpu_ && reference_memory_) {
+        reference_cpu_->reset();
+        reference_cpu_->clearNextStepRetireLimit();
+        reference_memory_->clear();
+        reference_memory_->resetExitStatus();
+    }
+    if (difftest_) {
+        difftest_->reset();
+    }
     DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
 }
 
@@ -344,6 +598,7 @@ std::vector<uint8_t> Simulator::loadBinaryFile(const std::string& filename) {
 
 bool Simulator::loadElfProgram(const std::string& filename) {
     try {
+        memory_->resetExitStatus();
         // 加载ELF文件到主CPU内存
         ElfLoader::ElfInfo elfInfo = ElfLoader::loadElfFile(filename, memory_);
         
@@ -405,6 +660,67 @@ bool Simulator::loadElfProgram(const std::string& filename) {
         return true;
     } catch (const std::exception& e) {
         LOGE(SYSTEM, "failed to load elf program: %s", e.what());
+        return false;
+    }
+}
+
+bool Simulator::loadSnapshot(const SnapshotBundle& snapshot) {
+    try {
+        reset();
+        memory_->resetExitStatus();
+        cpu_->setEnabledExtensions(snapshot.enabled_extensions);
+
+        for (const auto& segment : snapshot.memory_segments) {
+            if (!segment.bytes.empty()) {
+                memory_->loadProgram(segment.bytes, segment.base);
+            }
+        }
+
+        for (size_t i = 0; i < snapshot.integer_regs.size(); ++i) {
+            cpu_->setRegister(static_cast<RegNum>(i), snapshot.integer_regs[i]);
+        }
+        for (size_t i = 0; i < snapshot.fp_regs.size(); ++i) {
+            cpu_->setFPRegister(static_cast<RegNum>(i), snapshot.fp_regs[i]);
+        }
+        for (const auto& [csr_addr, csr_value] : snapshot.csr_values) {
+            cpu_->setCSR(csr_addr, csr_value);
+        }
+        cpu_->setPC(snapshot.pc);
+
+        if (reference_memory_ && reference_cpu_) {
+            reference_memory_->clear();
+            reference_memory_->resetExitStatus();
+            reference_cpu_->reset();
+            reference_cpu_->setEnabledExtensions(snapshot.enabled_extensions);
+
+            for (const auto& segment : snapshot.memory_segments) {
+                if (!segment.bytes.empty()) {
+                    reference_memory_->loadProgram(segment.bytes, segment.base);
+                }
+            }
+            for (size_t i = 0; i < snapshot.integer_regs.size(); ++i) {
+                reference_cpu_->setRegister(static_cast<RegNum>(i), snapshot.integer_regs[i]);
+            }
+            for (size_t i = 0; i < snapshot.fp_regs.size(); ++i) {
+                reference_cpu_->setFPRegister(static_cast<RegNum>(i), snapshot.fp_regs[i]);
+            }
+            for (const auto& [csr_addr, csr_value] : snapshot.csr_values) {
+                reference_cpu_->setCSR(csr_addr, csr_value);
+            }
+            reference_cpu_->setPC(snapshot.pc);
+        }
+
+        if (difftest_) {
+            difftest_->reset();
+            cpu_->setDiffTest(difftest_.get());
+        }
+
+        halted_by_instruction_limit_ = false;
+        halted_by_cycle_limit_ = false;
+        DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
+        return true;
+    } catch (const std::exception& e) {
+        LOGE(SYSTEM, "failed to load snapshot: %s", e.what());
         return false;
     }
 }

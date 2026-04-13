@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "system/checkpoint_types.h"
 #include "system/elf_loader.h"
 #include "system/simulator.h"
 
@@ -20,6 +21,10 @@ uint32_t createITypeInstruction(int16_t imm, uint8_t rs1, uint8_t funct3, uint8_
 
 uint32_t createECallInstruction() {
     return 0x00000073U;
+}
+
+uint32_t createLoadInstruction(int16_t imm, uint8_t rs1, uint8_t funct3, uint8_t rd) {
+    return createITypeInstruction(imm, rs1, funct3, rd, 0x03);
 }
 
 void appendWord(std::vector<uint8_t>& program, uint32_t instruction) {
@@ -48,7 +53,88 @@ std::vector<uint8_t> makeWarmupProgram() {
     return program;
 }
 
+std::vector<uint8_t> makeExitProgram(size_t addi_count) {
+    std::vector<uint8_t> program;
+    program.reserve((addi_count + 1) * 4);
+    for (size_t i = 0; i < addi_count; ++i) {
+        appendWord(program, createITypeInstruction(1, 1, 0x0, 1, 0x13));
+    }
+    appendWord(program, createECallInstruction());
+    return program;
+}
+
 } // namespace
+
+TEST(SimulatorTest, LoadSnapshotRestoresPcRegistersMemoryAndExtensions) {
+    Simulator simulator(/*memorySize=*/4096, CpuType::IN_ORDER);
+
+    SnapshotBundle snapshot;
+    std::vector<uint8_t> code_bytes;
+    appendWord(code_bytes, createLoadInstruction(0, 1, 0x2, 5));
+    appendWord(code_bytes, createITypeInstruction(3, 5, 0x0, 6, 0x13));
+    appendWord(code_bytes, createECallInstruction());
+
+    MemorySegment code_segment;
+    code_segment.base = 0x100;
+    code_segment.bytes = code_bytes;
+
+    MemorySegment data_segment;
+    data_segment.base = 0x200;
+    data_segment.bytes = {0x39, 0x00, 0x00, 0x00};
+
+    snapshot.pc = 0x100;
+    snapshot.enabled_extensions =
+        static_cast<uint32_t>(Extension::I) | static_cast<uint32_t>(Extension::M);
+    snapshot.integer_regs[1] = 0x200;
+    snapshot.integer_regs[17] = 93;
+    snapshot.fp_regs[3] = 0x1122334455667788ULL;
+    snapshot.csr_values.push_back({0x001, 0x5});
+    snapshot.memory_segments = {code_segment, data_segment};
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+    EXPECT_EQ(simulator.getCpu()->getPC(), 0x100u);
+    EXPECT_EQ(simulator.getCpu()->getRegister(1), 0x200u);
+    EXPECT_EQ(simulator.getCpu()->getFPRegister(3), 0x1122334455667788ULL);
+    EXPECT_EQ(simulator.getCpu()->getCSR(0x001), 0x5u);
+    EXPECT_EQ(simulator.getCpu()->getEnabledExtensions(), snapshot.enabled_extensions);
+
+    simulator.step();
+    simulator.step();
+
+    EXPECT_EQ(simulator.getCpu()->getRegister(5), 57u);
+    EXPECT_EQ(simulator.getCpu()->getRegister(6), 60u);
+    EXPECT_EQ(simulator.getCpu()->getPC(), 0x108u);
+}
+
+TEST(SimulatorTest, LoadSnapshotRestoresGprDependenciesForOutOfOrderCpu) {
+    Simulator simulator(/*memorySize=*/4096, CpuType::OUT_OF_ORDER);
+    simulator.setMaxOutOfOrderCycles(1000);
+
+    SnapshotBundle snapshot;
+    std::vector<uint8_t> code_bytes;
+    appendWord(code_bytes, createITypeInstruction(3, 1, 0x0, 5, 0x13));
+    appendWord(code_bytes, createITypeInstruction(4, 1, 0x0, 6, 0x13));
+    appendWord(code_bytes, createECallInstruction());
+
+    MemorySegment code_segment;
+    code_segment.base = 0x100;
+    code_segment.bytes = code_bytes;
+
+    snapshot.pc = 0x100;
+    snapshot.integer_regs[1] = 39;
+    snapshot.integer_regs[10] = 0;
+    snapshot.integer_regs[17] = 93;
+    snapshot.memory_segments = {code_segment};
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/2);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
+    EXPECT_EQ(simulator.getCpu()->getRegister(6), 43u);
+}
 
 TEST(SimulatorTest, RunWithWarmupTriggersCallbackOnceAndKeepsSteadyStateWindow) {
     Simulator simulator(/*memorySize=*/4096, CpuType::OUT_OF_ORDER);
@@ -89,6 +175,69 @@ TEST(SimulatorTest, RunWithWarmupTriggersCallbackOnceAndKeepsSteadyStateWindow) 
         << "post-warmup instructions 应只统计 reset 之后的窗口";
     EXPECT_EQ(simulator.getCpu()->getRegister(1), 128u)
         << "warmup 统计重置不应影响架构执行结果";
+}
+
+TEST(SimulatorTest, RunInstructionWindowReturnsProgramExitWhenMeasureEndsEarly) {
+    Simulator simulator(/*memorySize=*/4096, CpuType::IN_ORDER);
+
+    ASSERT_TRUE(simulator.loadProgramFromBytes(makeExitProgram(/*addi_count=*/2), /*startAddr=*/0));
+    simulator.getCpu()->setRegister(17, 93);
+    simulator.getCpu()->setRegister(10, 0);
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/1, /*measure_instructions=*/5);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.warmup_completed);
+    EXPECT_FALSE(result.measure_completed);
+    EXPECT_EQ(result.failure_reason, CheckpointFailureReason::PROGRAM_EXIT);
+    EXPECT_EQ(result.warmup_instructions_completed, 1u);
+    EXPECT_LT(result.measure_instructions_completed, 5u);
+    EXPECT_EQ(result.stop_pc, 8u);
+}
+
+TEST(SimulatorTest, RunInstructionWindowClassifiesOutOfOrderIllegalInstruction) {
+    Simulator simulator(/*memorySize=*/4096, CpuType::OUT_OF_ORDER);
+    simulator.setMaxOutOfOrderCycles(1000);
+
+    std::vector<uint8_t> program;
+    appendWord(program, 0xffffffffU);
+    ASSERT_TRUE(simulator.loadProgramFromBytes(program, /*startAddr=*/0));
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/1);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.failure_reason, CheckpointFailureReason::ILLEGAL_INSTRUCTION);
+}
+
+TEST(SimulatorTest, CpuInterfaceExposesNextStepRetireLimitHooks) {
+    Simulator simulator(/*memorySize=*/4096, CpuType::IN_ORDER);
+    simulator.getCpu()->setNextStepRetireLimit(1);
+    simulator.getCpu()->clearNextStepRetireLimit();
+    SUCCEED();
+}
+
+TEST(SimulatorTest, RunInstructionWindowWarmupBoundaryIsPreciselySplitInOooMode) {
+    Simulator simulator(/*memorySize=*/4096, CpuType::OUT_OF_ORDER);
+    simulator.setMaxOutOfOrderCycles(1000);
+
+    ASSERT_TRUE(simulator.loadProgramFromBytes(makeWarmupProgram(), /*startAddr=*/0));
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/41, /*measure_instructions=*/87);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_TRUE(result.warmup_completed);
+    EXPECT_TRUE(result.measure_completed);
+    EXPECT_EQ(result.warmup_instructions_completed, 41u);
+    EXPECT_EQ(result.measure_instructions_completed, 87u);
+    EXPECT_EQ(result.total_instructions, 128u);
+    EXPECT_EQ(simulator.getCpu()->getRegister(1), 128u);
+    EXPECT_EQ(result.failure_reason, CheckpointFailureReason::NONE);
+    EXPECT_EQ(statValue(simulator.getCpu()->getStats(), "instructions"), 87u)
+        << "measure 统计应只覆盖 reset 之后的窗口";
+    EXPECT_GT(statValue(simulator.getCpu()->getStats(), "cycles"), 0u);
 }
 
 TEST(SimulatorTest, ElfAutoSizingUsesLargerDefaultStackReserveForBaremetalWorkloads) {

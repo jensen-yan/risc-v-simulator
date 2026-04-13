@@ -99,6 +99,12 @@ public:
     // 流水线可视化
     void setPipelineTracer(PipelineTracer* tracer) override { cpu_state_.pipeline_tracer = tracer; }
 
+    void setCommitWidthOverride(size_t width) { cpu_state_.commit_width_override = width; }
+    void clearCommitWidthOverride() { cpu_state_.commit_width_override = 0; }
+    size_t getCommitWidthOverride() const { return cpu_state_.commit_width_override; }
+    std::string getLastHaltMessage() const override { return cpu_state_.last_halt_message; }
+    uint64_t getLastHaltPC() const override { return cpu_state_.last_halt_pc; }
+
     // DiffTest控制接口
     void setDiffTest(class DiffTest* difftest) override;  // 由Simulator设置DiffTest引用
     void enableDiffTest(bool enable);

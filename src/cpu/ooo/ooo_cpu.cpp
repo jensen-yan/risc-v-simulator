@@ -73,6 +73,9 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.store_profiles.clear();
     state.load_addr_unknown_predictor.clear();
     state.blocked_addr_unknown_pairs.clear();
+    state.commit_width_override = 0;
+    state.last_halt_pc = 0;
+    state.last_halt_message.clear();
 
     state.arch_registers.fill(0);
     state.arch_fp_registers.fill(0);
@@ -279,6 +282,9 @@ void OutOfOrderCPU::setRegister(RegNum reg, uint64_t value) {
     // x0寄存器始终为0
     if (reg != 0) {
         cpu_state_.arch_registers[reg] = value;
+        if (cpu_state_.register_rename) {
+            cpu_state_.register_rename->update_architecture_register(reg, value);
+        }
     }
 }
 
@@ -335,6 +341,8 @@ void OutOfOrderCPU::setCSR(uint32_t addr, uint64_t value) {
 
 void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint64_t pc) {
     LOGE(SYSTEM, "exception: %s, pc=0x%" PRIx64, exception_msg.c_str(), pc);
+    cpu_state_.last_halt_pc = pc;
+    cpu_state_.last_halt_message = exception_msg;
     flush_pipeline();
     cpu_state_.halted = true;
 }

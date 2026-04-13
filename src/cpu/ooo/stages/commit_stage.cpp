@@ -5,6 +5,8 @@
 #include "core/instruction_executor.h"
 #include "common/debug_types.h"
 
+#include <algorithm>
+
 namespace riscv {
 
 namespace {
@@ -73,7 +75,12 @@ CommitStage::CommitStage() {
 }
 
 void CommitStage::execute(CPUState& state) {
-    state.perf_counters.increment(PerfCounterId::COMMIT_SLOTS, OOOPipelineConfig::COMMIT_WIDTH);
+    const size_t effective_commit_width =
+        (state.commit_width_override == 0)
+            ? OOOPipelineConfig::COMMIT_WIDTH
+            : std::min(OOOPipelineConfig::COMMIT_WIDTH, state.commit_width_override);
+
+    state.perf_counters.increment(PerfCounterId::COMMIT_SLOTS, effective_commit_width);
 
     // 添加ROB状态调试信息
     size_t free_entries = state.reorder_buffer->get_free_entry_count();
@@ -125,7 +132,7 @@ void CommitStage::execute(CPUState& state) {
     // 尝试提交指令
     size_t committed_this_cycle = 0;
     while (state.reorder_buffer->can_commit() &&
-           committed_this_cycle < OOOPipelineConfig::COMMIT_WIDTH) {
+           committed_this_cycle < effective_commit_width) {
         auto commit_result = state.reorder_buffer->commit_instruction();
         if (!commit_result.success) {
             LOGW(COMMIT, "commit failed: %s", commit_result.error_message.c_str());
@@ -764,6 +771,8 @@ void CommitStage::enter_machine_trap(CPUState& state,
 void CommitStage::handle_exception(CPUState& state, const std::string& exception_msg, uint64_t pc) {
     LOGE(COMMIT, "exception: %s, pc=0x%" PRIx64, exception_msg.c_str(), pc);
     // 异常处理会导致流水线刷新，这需要在主控制器中处理
+    state.last_halt_pc = pc;
+    state.last_halt_message = exception_msg;
     state.halted = true;
 }
 

@@ -80,6 +80,14 @@ public:
         (void)path;
         return false;
     }
+
+    // 单步退休上限控制（默认 no-op，供窗口执行精确切边界使用）
+    virtual void setNextStepRetireLimit(size_t limit) { (void)limit; }
+    virtual void clearNextStepRetireLimit() {}
+
+    // 最近一次 halt 的附加信息（默认空实现）。
+    virtual std::string getLastHaltMessage() const { return {}; }
+    virtual uint64_t getLastHaltPC() const { return 0; }
 };
 
 /**

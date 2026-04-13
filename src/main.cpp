@@ -1,4 +1,5 @@
 #include "system/simulator.h"
+#include "system/checkpoint_runner.h"
 #include "system/elf_loader.h"
 #include "common/debug_types.h"
 #include "cpu/ooo/ooo_cpu.h"
@@ -93,6 +94,13 @@ void printUsage(const char* programName) {
     std::cout << "  --pipeline-view=FILE         Generate HTML pipeline visualization\n";
     std::cout << "  --pipeline-cycles=START-END  Limit pipeline view to cycle range\n";
     std::cout << "  --pipeline-max=N             Max instructions in pipeline view (default: 2000)\n";
+    std::cout << "  --checkpoint=FILE            Run a checkpoint slice instead of an ELF/binary\n";
+    std::cout << "  --checkpoint-recipe=FILE     Checkpoint recipe spec path\n";
+    std::cout << "  --checkpoint-importer=NAME   Checkpoint importer executable or name\n";
+    std::cout << "  --checkpoint-restorer=FILE   Checkpoint restorer executable path\n";
+    std::cout << "  --checkpoint-output-dir=DIR  Directory for checkpoint artifacts\n";
+    std::cout << "  --warmup-instructions=N      Warmup instruction count for checkpoint mode\n";
+    std::cout << "  --measure-instructions=N     Measure instruction count for checkpoint mode\n";
     std::cout << "  +signature=FILE              Spike-compatible signature file option\n";
     std::cout << "  +signature-granularity=N     Spike-compatible granularity option\n";
     std::cout << "\n";
@@ -168,6 +176,13 @@ int main(int argc, char* argv[]) {
     uint64_t pipelineStartCycle = 0;
     uint64_t pipelineEndCycle = UINT64_MAX;
     size_t pipelineMaxInstructions = 2000;
+    std::string checkpointPath;
+    std::string checkpointRecipePath;
+    std::string checkpointImporterName;
+    std::string checkpointRestorerPath;
+    std::string checkpointOutputDir;
+    uint64_t warmupInstructions = 5'000'000;
+    uint64_t measureInstructions = 5'000'000;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -265,14 +280,30 @@ int main(int argc, char* argv[]) {
             }
         } else if (arg.find("--pipeline-max=") == 0) {
             pipelineMaxInstructions = std::stoull(arg.substr(15));
+        } else if (arg.find("--checkpoint=") == 0) {
+            checkpointPath = arg.substr(13);
+        } else if (arg.find("--checkpoint-recipe=") == 0) {
+            checkpointRecipePath = arg.substr(20);
+        } else if (arg.find("--checkpoint-importer=") == 0) {
+            checkpointImporterName = arg.substr(22);
+        } else if (arg.find("--checkpoint-restorer=") == 0) {
+            checkpointRestorerPath = arg.substr(22);
+        } else if (arg.find("--checkpoint-output-dir=") == 0) {
+            checkpointOutputDir = arg.substr(24);
+        } else if (arg.find("--warmup-instructions=") == 0) {
+            warmupInstructions = std::stoull(arg.substr(22), nullptr, 0);
+        } else if (arg.find("--measure-instructions=") == 0) {
+            measureInstructions = std::stoull(arg.substr(23), nullptr, 0);
         } else if (filename.empty()) {
             filename = arg;
         }
     }
     
     try {
+        const bool checkpointMode = !checkpointPath.empty();
+
         // 未显式指定 -m 时，若加载 ELF 则根据段地址自动决定内存大小
-        if (!memorySizeSpecified && !filename.empty()) {
+        if (!checkpointMode && !memorySizeSpecified && !filename.empty()) {
             const bool willLoadElf = forceElf || filename.find(".elf") != std::string::npos;
             if (willLoadElf) {
                 memorySize = ElfLoader::getRequiredMemorySize(filename, memorySize);
@@ -345,6 +376,38 @@ int main(int argc, char* argv[]) {
         // 显示CPU类型
         std::cout << "CPU type: " << (cpuType == CpuType::OUT_OF_ORDER ? "out-of-order" : "in-order") << "\n";
         std::cout << "Memory size: " << memorySize << " bytes\n\n";
+
+        if (checkpointMode) {
+            if (checkpointOutputDir.empty()) {
+                std::cerr << "Error: --checkpoint-output-dir is required in checkpoint mode\n";
+                return 1;
+            }
+
+            CheckpointRunConfig runConfig;
+            runConfig.checkpoint_path = checkpointPath;
+            runConfig.recipe_path = checkpointRecipePath;
+            runConfig.importer_name = checkpointImporterName;
+            runConfig.restorer_path = checkpointRestorerPath;
+            runConfig.output_dir = checkpointOutputDir;
+            runConfig.warmup_instructions = warmupInstructions;
+            runConfig.measure_instructions = measureInstructions;
+
+            std::cout << "Running checkpoint: " << checkpointPath << "\n";
+            CheckpointRunner runner(cpuType, memorySize);
+            runner.setMaxInOrderInstructions(maxInOrderInstructions);
+            runner.setMaxOutOfOrderCycles(maxOutOfOrderCycles);
+
+            const CheckpointRunResult result = runner.run(runConfig);
+            std::cout << "Checkpoint status: " << result.status << "\n";
+            std::cout << "Workload: " << result.workload_name
+                      << ", slice: " << result.slice_id
+                      << ", instructions: " << result.instructions_measure
+                      << ", cycles: " << result.cycles_measure << "\n";
+            if (!result.message.empty()) {
+                std::cout << "Message: " << result.message << "\n";
+            }
+            return result.success ? 0 : 1;
+        }
         
         if (!filename.empty()) {
             std::cout << "Loading program: " << filename << "\n";

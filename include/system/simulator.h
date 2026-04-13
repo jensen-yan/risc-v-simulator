@@ -2,11 +2,13 @@
 
 #include "common/cpu_interface.h"
 #include "core/memory.h"
+#include "system/checkpoint_types.h"
 #include "system/elf_loader.h"
 #include "system/pipeline_tracer.h"
+
 #include <functional>
-#include <string>
 #include <memory>
+#include <string>
 
 // 前向声明
 namespace riscv {
@@ -14,6 +16,20 @@ namespace riscv {
 }
 
 namespace riscv {
+
+struct InstructionWindowResult {
+    bool success = false;
+    bool warmup_completed = false;
+    bool measure_completed = false;
+    CheckpointFailureReason failure_reason = CheckpointFailureReason::NONE;
+    std::string message;
+    uint64_t stop_pc = 0;
+    uint64_t total_instructions = 0;
+    uint64_t total_cycles = 0;
+    uint64_t measure_cycles = 0;
+    uint64_t warmup_instructions_completed = 0;
+    uint64_t measure_instructions_completed = 0;
+};
 
 /**
  * RISC-V 模拟器主类
@@ -33,6 +49,7 @@ public:
     bool loadProgramFromBytes(const std::vector<uint8_t>& program, Address startAddr = 0);
     bool loadRiscvProgram(const std::string& filename, Address loadAddr = 0x1000);
     bool loadElfProgram(const std::string& filename);
+    bool loadSnapshot(const SnapshotBundle& snapshot);
     void setHostCommAddresses(Address tohostAddr, Address fromhostAddr);
     void setEnabledExtensions(uint32_t extensions);
     
@@ -40,6 +57,8 @@ public:
     void step();                    // 单步执行
     void run();                     // 运行到结束
     bool runWithWarmup(uint64_t warmupCycles, const std::function<void()>& onWarmup);
+    InstructionWindowResult runInstructionWindow(uint64_t warmup_instructions,
+                                                 uint64_t measure_instructions);
     void reset();                   // 重置模拟器
     
     // 状态查询

@@ -266,7 +266,7 @@ TEST(CheckpointImporterTest, BuiltinZstdImporterParsesDefaultGcptLayout) {
     const SnapshotBundle snapshot = importer->importCheckpoint(config);
 
     ASSERT_EQ(snapshot.memory_segments.size(), 1u);
-    EXPECT_EQ(snapshot.memory_segments[0].base, 0x0ULL);
+    EXPECT_EQ(snapshot.memory_segments[0].base, 0x80000000ULL);
     EXPECT_TRUE(snapshot.memory_segments[0].isFileBacked());
     EXPECT_EQ(snapshot.memory_segments[0].size, image.size());
     EXPECT_TRUE(std::filesystem::exists(snapshot.memory_segments[0].file_path));

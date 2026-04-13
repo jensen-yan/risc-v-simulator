@@ -29,7 +29,7 @@ struct BuiltinImageInfo {
 };
 
 constexpr const char* kBuiltinZstdImporterName = "builtin-zstd";
-constexpr Address kDefaultGcptGuestBase = 0x0ULL;
+constexpr Address kDefaultGcptGuestBase = 0x80000000ULL;
 constexpr uint64_t kGcptMagicNumber = 0xBEEFULL;
 constexpr uint32_t kMstatusCsrAddress = 0x300U;
 

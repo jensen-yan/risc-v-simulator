@@ -255,4 +255,29 @@ TEST(CheckpointRunnerTest, HighGuestAddressSnapshotUsesGuestBaseMappedMemory) {
     EXPECT_TRUE(std::filesystem::exists(temp_dir / "output" / "completed"));
 }
 
+TEST(CheckpointRunnerTest, ZeroInOrderInstructionLimitDoesNotClipWindow) {
+    auto temp_dir = resetTempDir("checkpoint_runner_zero_limit");
+
+    std::vector<uint8_t> program;
+    for (int i = 0; i < 12; ++i) {
+        appendWord(program, createITypeInstruction(1, 1, 0x0, 1, 0x13));
+    }
+    appendWord(program, createECallInstruction());
+
+    CheckpointRunner runner(
+        CpuType::IN_ORDER,
+        /*memory_size=*/4096,
+        [&](const std::string&) {
+            return std::make_unique<StaticSnapshotImporter>(
+                makeSnapshot(std::move(program), "zero_limit", "12"));
+        });
+    runner.setMaxInOrderInstructions(0);
+
+    const CheckpointRunResult result = runner.run(makeRunConfig(temp_dir / "output", 5, 5));
+
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(result.instructions_measure, 5u);
+    EXPECT_TRUE(std::filesystem::exists(temp_dir / "output" / "completed"));
+}
+
 } // namespace riscv

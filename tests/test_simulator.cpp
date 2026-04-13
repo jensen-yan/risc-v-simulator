@@ -274,6 +274,30 @@ TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesInstructionFetch) {
     EXPECT_EQ(simulator.getCpu()->getPC(), 0x1004u);
 }
 
+TEST(SimulatorTest, LoadSnapshotWithSv39HighVirtualPcDoesNotAutoHaltInOrderCpu) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::IN_ORDER, /*memoryBaseAddress=*/0);
+
+    constexpr uint64_t kHighVirtualPc = 0xffffffff80100000ULL;
+
+    SnapshotBundle snapshot;
+    snapshot.pc = kHighVirtualPc;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+    snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(segment.bytes, /*virtualAddress=*/kHighVirtualPc, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    writeWord(segment.bytes, /*address=*/0x4000, createITypeInstruction(42, 0, 0x0, 5, 0x13));
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    EXPECT_NO_THROW(simulator.step());
+    EXPECT_FALSE(simulator.getCpu()->isHalted());
+    EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
+    EXPECT_EQ(simulator.getCpu()->getPC(), kHighVirtualPc + 4);
+}
+
 TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderLoadStore) {
     Simulator simulator(/*memorySize=*/0x20000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
     simulator.setMaxOutOfOrderCycles(200);

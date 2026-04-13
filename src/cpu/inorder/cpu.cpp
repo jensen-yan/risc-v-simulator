@@ -165,11 +165,6 @@ void CPU::step() {
                       static_cast<int>(decoded.imm));
         }
         
-        // 简单的停机条件：PC超出内存范围
-        if (pc_ >= memory_->getSize()) {
-            halted_ = true;
-        }
-        
     } catch (const TranslationException& e) {
         const uint64_t trap_vector = getCSR(csr::kMtvec) & ~0x3ULL;
         if (trap_vector == 0) {

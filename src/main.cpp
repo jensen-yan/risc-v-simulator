@@ -150,6 +150,7 @@ int main(int argc, char* argv[]) {
     size_t memorySize = Memory::DEFAULT_SIZE;
     bool memorySizeSpecified = false;
     uint64_t maxInOrderInstructions = 5000000;
+    bool maxInOrderInstructionsSpecified = false;
     uint64_t maxOutOfOrderCycles = 50000;
     CpuType cpuType = CpuType::OUT_OF_ORDER;  // 默认使用乱序执行CPU
     
@@ -205,6 +206,7 @@ int main(int argc, char* argv[]) {
             memorySizeSpecified = true;
         } else if (arg.find("--max-instructions=") == 0) {
             maxInOrderInstructions = std::stoull(arg.substr(19), nullptr, 0);
+            maxInOrderInstructionsSpecified = true;
         } else if (arg.find("--max-ooo-cycles=") == 0) {
             maxOutOfOrderCycles = std::stoull(arg.substr(17), nullptr, 0);
         } else if (arg.find("--debug-flags=") == 0) {
@@ -394,7 +396,11 @@ int main(int argc, char* argv[]) {
 
             std::cout << "Running checkpoint: " << checkpointPath << "\n";
             CheckpointRunner runner(cpuType, memorySize);
-            runner.setMaxInOrderInstructions(maxInOrderInstructions);
+            if (cpuType != CpuType::IN_ORDER || maxInOrderInstructionsSpecified) {
+                runner.setMaxInOrderInstructions(maxInOrderInstructions);
+            } else {
+                runner.setMaxInOrderInstructions(0);
+            }
             runner.setMaxOutOfOrderCycles(maxOutOfOrderCycles);
 
             const CheckpointRunResult result = runner.run(runConfig);

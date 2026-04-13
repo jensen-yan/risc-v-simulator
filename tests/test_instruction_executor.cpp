@@ -352,6 +352,30 @@ TEST_F(InstructionExecutorTest, Register32BitOperations) {
     const auto sllw_expected =
         static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(0x80000001u) << 4)));
     EXPECT_EQ(sllw_result, sllw_expected) << "SLLW应该进行32位左移并符号扩展";
+
+    // ADD.UW / SH1ADD.UW / SH2ADD.UW / SH3ADD.UW (Zba)
+    auto add_uw_inst = createDecodedInst(Opcode::OP_32, Funct3::ADD_SUB, static_cast<Funct7>(0x04), 1, 2, 3);
+    uint64_t add_uw_result =
+        InstructionExecutor::executeRegisterOperation32(add_uw_inst, 0xFFFFFFFF80000000ULL, 0x1234ULL);
+    EXPECT_EQ(add_uw_result, 0x80001234ULL) << "ADD.UW 应对 rs1 的低32位做零扩展后再加 rs2";
+
+    auto sh1add_uw_inst =
+        createDecodedInst(Opcode::OP_32, static_cast<Funct3>(0x2), static_cast<Funct7>(0x10), 1, 2, 3);
+    uint64_t sh1add_uw_result =
+        InstructionExecutor::executeRegisterOperation32(sh1add_uw_inst, 0xFFFFFFFF80000001ULL, 7ULL);
+    EXPECT_EQ(sh1add_uw_result, 0x100000009ULL) << "SH1ADD.UW 应执行 (zext.w(rs1) << 1) + rs2";
+
+    auto sh2add_uw_inst =
+        createDecodedInst(Opcode::OP_32, Funct3::XOR, static_cast<Funct7>(0x10), 1, 2, 3);
+    uint64_t sh2add_uw_result =
+        InstructionExecutor::executeRegisterOperation32(sh2add_uw_inst, 0xFFFFFFFF80000001ULL, 7ULL);
+    EXPECT_EQ(sh2add_uw_result, 0x20000000BULL) << "SH2ADD.UW 应执行 (zext.w(rs1) << 2) + rs2";
+
+    auto sh3add_uw_inst =
+        createDecodedInst(Opcode::OP_32, Funct3::OR, static_cast<Funct7>(0x10), 1, 2, 3);
+    uint64_t sh3add_uw_result =
+        InstructionExecutor::executeRegisterOperation32(sh3add_uw_inst, 0xFFFFFFFF80000001ULL, 7ULL);
+    EXPECT_EQ(sh3add_uw_result, 0x40000000FULL) << "SH3ADD.UW 应执行 (zext.w(rs1) << 3) + rs2";
 }
 
 // ========== M扩展指令测试 ==========

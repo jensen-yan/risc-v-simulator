@@ -505,6 +505,9 @@ uint64_t InstructionExecutor::executeRegisterOperation32(const DecodedInstructio
     
     switch (inst.funct3) {
         case Funct3::ADD_SUB:
+            if (inst.funct7 == static_cast<Funct7>(0x04)) {  // ADD.UW
+                return static_cast<uint64_t>(static_cast<uint32_t>(rs1_val)) + rs2_val;
+            }
             if (inst.funct7 == Funct7::SUB_SRA) {  // SUBW
                 result = rs1_32 - rs2_32;
             } else {  // ADDW
@@ -523,6 +526,24 @@ uint64_t InstructionExecutor::executeRegisterOperation32(const DecodedInstructio
                 result = static_cast<int32_t>(static_cast<uint32_t>(rs1_32) >> (rs2_32 & 0x1F));
             }
             break;
+
+        case Funct3::SLT:
+            if (inst.funct7 == static_cast<Funct7>(0x10)) {  // SH1ADD.UW
+                return (static_cast<uint64_t>(static_cast<uint32_t>(rs1_val)) << 1) + rs2_val;
+            }
+            throw IllegalInstructionException("未知的32位寄存器指令功能码");
+
+        case Funct3::XOR:
+            if (inst.funct7 == static_cast<Funct7>(0x10)) {  // SH2ADD.UW
+                return (static_cast<uint64_t>(static_cast<uint32_t>(rs1_val)) << 2) + rs2_val;
+            }
+            throw IllegalInstructionException("未知的32位寄存器指令功能码");
+
+        case Funct3::OR:
+            if (inst.funct7 == static_cast<Funct7>(0x10)) {  // SH3ADD.UW
+                return (static_cast<uint64_t>(static_cast<uint32_t>(rs1_val)) << 3) + rs2_val;
+            }
+            throw IllegalInstructionException("未知的32位寄存器指令功能码");
             
         default:
             throw IllegalInstructionException("未知的32位寄存器指令功能码");

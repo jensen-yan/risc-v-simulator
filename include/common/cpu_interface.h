@@ -48,6 +48,9 @@ public:
     // 程序计数器
     virtual uint64_t getPC() const = 0;
     virtual void setPC(uint64_t pc) = 0;
+
+    virtual void setPrivilegeMode(PrivilegeMode mode) { (void)mode; }
+    virtual PrivilegeMode getPrivilegeMode() const { return PrivilegeMode::MACHINE; }
     
     // 状态查询
     virtual bool isHalted() const = 0;

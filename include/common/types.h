@@ -22,6 +22,12 @@ using RegNum = uint8_t;
 // 内存地址类型
 using Address = uint64_t;
 
+enum class PrivilegeMode : uint8_t {
+    USER = 0,
+    SUPERVISOR = 1,
+    MACHINE = 3,
+};
+
 // 寄存器值类型
 using RegValue = uint64_t;
 

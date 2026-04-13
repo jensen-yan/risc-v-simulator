@@ -10,6 +10,8 @@
 namespace riscv {
 
 class SyscallHandler;
+class AddressTranslation;
+class PrivilegeState;
 
 /**
  * RISC-V CPU 核心类
@@ -108,12 +110,20 @@ private:
     bool isExtensionEnabled(Extension extension) const;
     bool isInstructionAddressMisaligned(uint64_t addr) const;
     void raiseInstructionAddressMisaligned(uint64_t target_addr);
+    Instruction fetchInstruction(Address virtual_pc) const;
+    Address translateInstructionAddress(Address virtual_addr, size_t size) const;
+    Address translateLoadAddress(Address virtual_addr, size_t size) const;
+    Address translateStoreAddress(Address virtual_addr, size_t size) const;
+    void syncPrivilegeStateFromCsrs();
     
     // 辅助方法
     void incrementPC() { 
         pc_ += last_instruction_compressed_ ? 2 : 4; 
     }
     int32_t signExtend(uint32_t value, int bits) const;
+
+    std::unique_ptr<PrivilegeState> privilege_state_;
+    std::unique_ptr<AddressTranslation> address_translation_;
 }; 
 
 } // namespace riscv

@@ -12,6 +12,8 @@
 #include "cpu/ooo/dynamic_inst.h"
 #include "cpu/ooo/branch_predictor.h"
 #include "cpu/ooo/cache/blocking_cache.h"
+#include "system/address_translation.h"
+#include "system/privilege_state.h"
 #include "system/syscall_handler.h"
 #include "system/pipeline_tracer.h"
 #include "common/cpu_interface.h"
@@ -242,6 +244,8 @@ struct CPUState {
     // 核心组件（共享引用）
     std::shared_ptr<Memory> memory;
     Decoder decoder;
+    std::unique_ptr<PrivilegeState> privilege_state;
+    std::unique_ptr<AddressTranslation> address_translation;
     std::unique_ptr<SyscallHandler> syscall_handler;
     
     // CPU接口引用，用于Stage中调用CPU方法

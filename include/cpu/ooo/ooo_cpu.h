@@ -149,6 +149,7 @@ private:
     // 内存访问辅助方法
     uint64_t loadFromMemory(Address addr, Funct3 funct3);
     void storeToMemory(Address addr, uint64_t value, Funct3 funct3);
+    void syncPrivilegeStateFromCsrs();
     
     // 立即数符号扩展
     int32_t signExtend(uint32_t value, int bits) const;

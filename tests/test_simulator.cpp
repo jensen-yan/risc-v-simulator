@@ -12,12 +12,32 @@ namespace riscv {
 
 namespace {
 
+constexpr uint64_t kSv39Mode = 8ULL;
+constexpr Address kRootPageTable = 0x1000;
+constexpr Address kLevel1PageTable = 0x2000;
+constexpr Address kLevel0PageTable = 0x3000;
+constexpr uint64_t kPteV = 1ULL << 0;
+constexpr uint64_t kPteR = 1ULL << 1;
+constexpr uint64_t kPteW = 1ULL << 2;
+constexpr uint64_t kPteX = 1ULL << 3;
+constexpr uint64_t kPteA = 1ULL << 6;
+constexpr uint64_t kPteD = 1ULL << 7;
+
 uint32_t createITypeInstruction(int16_t imm, uint8_t rs1, uint8_t funct3, uint8_t rd, uint8_t opcode) {
     return (static_cast<uint32_t>(static_cast<uint16_t>(imm)) << 20) |
            (static_cast<uint32_t>(rs1) << 15) |
            (static_cast<uint32_t>(funct3) << 12) |
            (static_cast<uint32_t>(rd) << 7) |
            opcode;
+}
+
+uint32_t createSTypeInstruction(int16_t imm, uint8_t rs2, uint8_t rs1, uint8_t funct3, uint8_t opcode) {
+    const uint32_t imm12 = static_cast<uint16_t>(imm) & 0x0FFFu;
+    const uint32_t imm_low = imm12 & 0x1Fu;
+    const uint32_t imm_high = (imm12 >> 5) & 0x7Fu;
+    return (imm_high << 25) | (static_cast<uint32_t>(rs2) << 20) |
+           (static_cast<uint32_t>(rs1) << 15) | (static_cast<uint32_t>(funct3) << 12) |
+           (imm_low << 7) | opcode;
 }
 
 uint32_t createECallInstruction() {
@@ -28,11 +48,54 @@ uint32_t createLoadInstruction(int16_t imm, uint8_t rs1, uint8_t funct3, uint8_t
     return createITypeInstruction(imm, rs1, funct3, rd, 0x03);
 }
 
+uint32_t createStoreInstruction(int16_t imm, uint8_t rs2, uint8_t rs1, uint8_t funct3) {
+    return createSTypeInstruction(imm, rs2, rs1, funct3, 0x23);
+}
+
 void appendWord(std::vector<uint8_t>& program, uint32_t instruction) {
     program.push_back(static_cast<uint8_t>(instruction & 0xFFU));
     program.push_back(static_cast<uint8_t>((instruction >> 8) & 0xFFU));
     program.push_back(static_cast<uint8_t>((instruction >> 16) & 0xFFU));
     program.push_back(static_cast<uint8_t>((instruction >> 24) & 0xFFU));
+}
+
+uint64_t makePte(Address target, uint64_t flags) {
+    return ((target >> 12) << 10) | flags;
+}
+
+void writeWord(std::vector<uint8_t>& image, Address address, uint32_t value) {
+    ASSERT_LE(address + 4, image.size());
+    image[static_cast<size_t>(address)] = static_cast<uint8_t>(value & 0xFFU);
+    image[static_cast<size_t>(address + 1)] = static_cast<uint8_t>((value >> 8) & 0xFFU);
+    image[static_cast<size_t>(address + 2)] = static_cast<uint8_t>((value >> 16) & 0xFFU);
+    image[static_cast<size_t>(address + 3)] = static_cast<uint8_t>((value >> 24) & 0xFFU);
+}
+
+void writeDoubleWord(std::vector<uint8_t>& image, Address address, uint64_t value) {
+    ASSERT_LE(address + 8, image.size());
+    for (size_t i = 0; i < 8; ++i) {
+        image[static_cast<size_t>(address + i)] = static_cast<uint8_t>((value >> (i * 8)) & 0xFFU);
+    }
+}
+
+void installSv39Mapping4K(std::vector<uint8_t>& image,
+                          Address virtualAddress,
+                          Address physicalAddress,
+                          uint64_t leafFlags) {
+    const uint64_t vpn2 = (virtualAddress >> 30) & 0x1FF;
+    const uint64_t vpn1 = (virtualAddress >> 21) & 0x1FF;
+    const uint64_t vpn0 = (virtualAddress >> 12) & 0x1FF;
+
+    writeDoubleWord(image, kRootPageTable + vpn2 * 8, makePte(kLevel1PageTable, kPteV));
+    writeDoubleWord(image, kLevel1PageTable + vpn1 * 8, makePte(kLevel0PageTable, kPteV));
+    writeDoubleWord(image, kLevel0PageTable + vpn0 * 8, makePte(physicalAddress, leafFlags));
+}
+
+MemorySegment makeSv39SnapshotMemoryImage() {
+    MemorySegment segment;
+    segment.base = 0;
+    segment.bytes.resize(0x10000, 0);
+    return segment;
 }
 
 uint64_t statValue(const ICpuInterface::StatsList& stats, const std::string& name) {
@@ -170,6 +233,59 @@ TEST(SimulatorTest, LoadSnapshotSupportsFileBackedMemorySegments) {
     simulator.step();
 
     EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
+}
+
+TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesInstructionFetch) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::IN_ORDER, /*memoryBaseAddress=*/0);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x1000;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+    snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(segment.bytes, /*virtualAddress=*/0x1000, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    writeWord(segment.bytes, /*address=*/0x4000, createITypeInstruction(42, 0, 0x0, 5, 0x13));
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    EXPECT_NO_THROW(simulator.step());
+    EXPECT_EQ(simulator.getCpu()->getRegister(5), 42u);
+    EXPECT_EQ(simulator.getCpu()->getPC(), 0x1004u);
+}
+
+TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderLoadStore) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
+    simulator.setMaxOutOfOrderCycles(200);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x1000;
+    snapshot.integer_regs[1] = 0x2000;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+    snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(segment.bytes, /*virtualAddress=*/0x1000, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/0x2000, /*physicalAddress=*/0x5000, kPteV | kPteR | kPteW);
+    writeWord(segment.bytes, /*address=*/0x4000, createLoadInstruction(0, 1, 0x3, 6));
+    writeWord(segment.bytes, /*address=*/0x4004, createStoreInstruction(8, 6, 1, 0x3));
+    writeWord(segment.bytes, /*address=*/0x4008, createLoadInstruction(8, 1, 0x3, 8));
+    writeWord(segment.bytes, /*address=*/0x400C, createITypeInstruction(1, 6, 0x0, 7, 0x13));
+    writeWord(segment.bytes, /*address=*/0x4010, createECallInstruction());
+    writeDoubleWord(segment.bytes, /*address=*/0x5000, 0x1122334455667788ULL);
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/4);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(simulator.getCpu()->getRegister(6), 0x1122334455667788ULL);
+    EXPECT_EQ(simulator.getCpu()->getRegister(8), 0x1122334455667788ULL);
+    EXPECT_EQ(simulator.getCpu()->getRegister(7), 0x1122334455667789ULL);
 }
 
 TEST(SimulatorTest, RunWithWarmupTriggersCallbackOnceAndKeepsSteadyStateWindow) {

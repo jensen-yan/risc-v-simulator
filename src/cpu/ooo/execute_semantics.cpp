@@ -9,6 +9,31 @@ namespace riscv {
 
 namespace {
 
+[[noreturn]] void throwTranslationFault(const char* access_type,
+                                       Address virtual_address,
+                                       size_t size,
+                                       const TranslationResult& result) {
+    throw MemoryException(std::string(access_type) + " translation failed for va=0x" +
+                          std::to_string(virtual_address) + " size=" + std::to_string(size) +
+                          ": " + result.message);
+}
+
+Address translateLoadAddress(const CPUState& state, Address virtual_address, size_t size) {
+    const auto result = state.address_translation->translateLoadAddress(virtual_address, size);
+    if (!result.success) {
+        throwTranslationFault("load", virtual_address, size, result);
+    }
+    return result.physical_address;
+}
+
+Address translateStoreAddress(const CPUState& state, Address virtual_address, size_t size) {
+    const auto result = state.address_translation->translateStoreAddress(virtual_address, size);
+    if (!result.success) {
+        throwTranslationFault("store", virtual_address, size, result);
+    }
+    return result.physical_address;
+}
+
 uint64_t readAtomicMemoryValue(std::shared_ptr<Memory> memory, uint64_t addr, Funct3 width) {
     switch (width) {
         case Funct3::LW:
@@ -34,9 +59,10 @@ bool isInstructionAddressMisaligned(const CPUState& state, uint64_t addr) {
 
 void executeAtomicOperation(ExecutionUnit& unit, const DynamicInstPtr& instruction, CPUState& state) {
     const auto& inst = instruction->get_decoded_info();
-    const uint64_t addr = instruction->get_src1_value();
-    const uint64_t memory_value = readAtomicMemoryValue(state.memory, addr, inst.funct3);
-    const bool reservation_hit = state.reservation_valid && (state.reservation_addr == addr);
+    const uint64_t virtual_addr = instruction->get_src1_value();
+    const uint64_t physical_addr = translateLoadAddress(state, virtual_addr, inst.memory_access_size);
+    const uint64_t memory_value = readAtomicMemoryValue(state.memory, physical_addr, inst.funct3);
+    const bool reservation_hit = state.reservation_valid && (state.reservation_addr == virtual_addr);
 
     const auto amo_result = InstructionExecutor::executeAtomicOperation(
         inst, memory_value, instruction->get_src2_value(), reservation_hit);
@@ -44,7 +70,7 @@ void executeAtomicOperation(ExecutionUnit& unit, const DynamicInstPtr& instructi
     // LR/SC 的成败判定依赖当前reservation状态，需在执行阶段即时更新。
     if (amo_result.acquire_reservation) {
         state.reservation_valid = true;
-        state.reservation_addr = addr;
+        state.reservation_addr = virtual_addr;
     }
     if (amo_result.release_reservation) {
         state.reservation_valid = false;
@@ -54,12 +80,16 @@ void executeAtomicOperation(ExecutionUnit& unit, const DynamicInstPtr& instructi
     atomic_info.acquire_reservation = amo_result.acquire_reservation;
     atomic_info.release_reservation = amo_result.release_reservation;
     atomic_info.do_store = amo_result.do_store;
-    atomic_info.address = addr;
+    atomic_info.address = virtual_addr;
     atomic_info.store_value = amo_result.store_value;
     atomic_info.width = inst.funct3;
 
     if (amo_result.do_store) {
-        state.store_buffer->add_store(instruction, addr, amo_result.store_value, inst.memory_access_size);
+        state.store_buffer->add_store(
+            instruction,
+            translateStoreAddress(state, virtual_addr, inst.memory_access_size),
+            amo_result.store_value,
+            inst.memory_access_size);
         state.perf_counters.increment(PerfCounterId::STORES_TO_BUFFER);
     }
     instruction->set_atomic_execute_info(atomic_info);
@@ -151,18 +181,22 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                     unit.result = InstructionExecutor::executeImmediateOperation32(inst, instruction->get_src1_value());
                 } else if (inst.opcode == Opcode::LOAD || inst.opcode == Opcode::LOAD_FP) {
                     // 加载指令 - 使用预解析的静态信息
-                    uint64_t addr = instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+                    const uint64_t virtual_addr =
+                        instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+                    const uint64_t physical_addr =
+                        translateLoadAddress(state, virtual_addr, inst.memory_access_size);
 
                     // 异常已在解码时检测，这里直接使用预解析的信息
-                    unit.load_address = addr;
+                    unit.load_address = physical_addr;
                     unit.load_size = inst.memory_access_size;
                     auto& memory_info = instruction->get_memory_info();
                     memory_info.is_memory_op = true;
                     memory_info.is_load = true;
-                    memory_info.memory_address = addr;
+                    memory_info.memory_address = physical_addr;
                     memory_info.memory_size = inst.memory_access_size;
                     memory_info.address_ready = true;
-                    LOGT(EXECUTE, "start LOAD: addr=0x%" PRIx64 ", size=%d", addr, inst.memory_access_size);
+                    LOGT(EXECUTE, "start LOAD: va=0x%" PRIx64 " pa=0x%" PRIx64 ", size=%d",
+                         virtual_addr, physical_addr, inst.memory_access_size);
 
                 } else if (inst.opcode == Opcode::JALR) {
                     // JALR 指令 - I-type 跳转指令
@@ -269,26 +303,32 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
             case InstructionType::S_TYPE:
                 // 存储指令 - 使用预解析的静态信息
                 {
-                    uint64_t addr = instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+                    const uint64_t virtual_addr =
+                        instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+                    const uint64_t physical_addr =
+                        translateStoreAddress(state, virtual_addr, inst.memory_access_size);
                     const uint64_t store_value = instruction->get_src2_value();
 
                     auto& memory_info = instruction->get_memory_info();
                     memory_info.is_memory_op = true;
                     memory_info.is_store = true;
-                    memory_info.memory_address = addr;
+                    memory_info.memory_address = physical_addr;
                     memory_info.memory_value = store_value;
                     memory_info.memory_size = inst.memory_access_size;
                     memory_info.address_ready = true;
 
-                    unit.load_address = addr;
+                    unit.load_address = physical_addr;
                     unit.load_size = inst.memory_access_size;
 
                     // 异常已在解码时检测，这里直接使用预解析的信息
-                    LOGT(EXECUTE, "execute STORE: addr=0x%" PRIx64 " value=0x%" PRIx64 " size=%d",
-                         addr, store_value, inst.memory_access_size);
+                    LOGT(EXECUTE,
+                         "execute STORE: va=0x%" PRIx64 " pa=0x%" PRIx64
+                         " value=0x%" PRIx64 " size=%d",
+                         virtual_addr, physical_addr, store_value, inst.memory_access_size);
 
                     // 仅记录待提交Store，真正写内存在commit阶段进行。
-                    state.store_buffer->add_store(instruction, addr, store_value, inst.memory_access_size);
+                    state.store_buffer->add_store(
+                        instruction, physical_addr, store_value, inst.memory_access_size);
                     state.perf_counters.increment(PerfCounterId::STORES_TO_BUFFER);
                 }
                 break;

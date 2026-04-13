@@ -6,6 +6,38 @@
 
 namespace riscv {
 
+namespace {
+
+[[noreturn]] void throwTranslationFault(Address virtual_address,
+                                       size_t size,
+                                       const TranslationResult& result) {
+    throw MemoryException("instruction fetch translation failed for va=0x" +
+                          std::to_string(virtual_address) + " size=" + std::to_string(size) +
+                          ": " + result.message);
+}
+
+Address translateInstructionAddress(const CPUState& state, Address virtual_address, size_t size) {
+    const auto result = state.address_translation->translateInstructionAddress(virtual_address, size);
+    if (!result.success) {
+        throwTranslationFault(virtual_address, size, result);
+    }
+    return result.physical_address;
+}
+
+Instruction fetchTranslatedInstruction(const CPUState& state, Address virtual_pc) {
+    const Address first_half_pa = translateInstructionAddress(state, virtual_pc, /*size=*/2);
+    const uint16_t first_half = state.memory->readHalfWord(first_half_pa);
+    if ((first_half & 0x03U) != 0x03U) {
+        return static_cast<Instruction>(first_half);
+    }
+
+    const Address second_half_pa = translateInstructionAddress(state, virtual_pc + 2, /*size=*/2);
+    const uint16_t second_half = state.memory->readHalfWord(second_half_pa);
+    return static_cast<Instruction>(first_half) | (static_cast<Instruction>(second_half) << 16);
+}
+
+} // namespace
+
 FetchStage::FetchStage() {
     // 构造函数：初始化取指阶段
 }
@@ -57,7 +89,9 @@ void FetchStage::execute(CPUState& state) {
                     LOGT(FETCH, "reuse resolved icache miss request, pc=0x%" PRIx64, fetch_pc);
                 } else if (state.l1i_cache) {
                     Instruction fetched_inst = 0;
-                    const auto cache_result = state.l1i_cache->fetchInstruction(state.memory, fetch_pc, fetched_inst);
+                    const Address physical_fetch_pc = translateInstructionAddress(state, fetch_pc, /*size=*/2);
+                    const auto cache_result =
+                        state.l1i_cache->fetchInstruction(state.memory, physical_fetch_pc, fetched_inst);
                     if (cache_result.blocked) {
                         state.perf_counters.increment(PerfCounterId::CACHE_L1I_STALL_CYCLES);
                         state.pc = next_fetch_pc;
@@ -82,7 +116,7 @@ void FetchStage::execute(CPUState& state) {
                     raw_inst = fetched_inst;
                     state.icache.reset();
                 } else {
-                    raw_inst = state.memory->fetchInstruction(fetch_pc);
+                    raw_inst = fetchTranslatedInstruction(state, fetch_pc);
                 }
 
                 if (raw_inst == 0) {

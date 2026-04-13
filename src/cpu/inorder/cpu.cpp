@@ -2,12 +2,39 @@
 #include "common/debug_types.h"
 #include "core/csr_utils.h"
 #include "core/instruction_executor.h"
+#include "system/address_translation.h"
+#include "system/privilege_state.h"
 #include "system/syscall_handler.h"
-#include <iostream>
-#include <iomanip>
+
 #include <cinttypes>
+#include <iomanip>
+#include <iostream>
 
 namespace riscv {
+
+namespace {
+
+constexpr uint32_t kSatpCsrAddress = 0x180;
+constexpr uint32_t kMstatusCsrAddress = 0x300;
+
+PrivilegeMode inferPrivilegeMode(uint64_t satp, uint64_t mstatus) {
+    (void)mstatus;
+    if (satp == 0) {
+        return PrivilegeMode::MACHINE;
+    }
+    return PrivilegeMode::SUPERVISOR;
+}
+
+[[noreturn]] void throwTranslationFault(const char* access_type,
+                                       Address virtual_address,
+                                       size_t size,
+                                       const TranslationResult& result) {
+    throw MemoryException(std::string(access_type) + " translation failed for va=0x" +
+                          std::to_string(virtual_address) + " size=" + std::to_string(size) +
+                          ": " + result.message);
+}
+
+} // namespace
 
 CPU::CPU(std::shared_ptr<Memory> memory) 
     : memory_(memory), pc_(0), halted_(false), instruction_count_(0), 
@@ -23,6 +50,9 @@ CPU::CPU(std::shared_ptr<Memory> memory)
     
     // 初始化系统调用处理器
     syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
+    privilege_state_ = std::make_unique<PrivilegeState>();
+    address_translation_ = std::make_unique<AddressTranslation>(memory_, privilege_state_.get());
+    syncPrivilegeStateFromCsrs();
 }
 
 CPU::~CPU() = default;
@@ -35,7 +65,7 @@ void CPU::step() {
     try {
         // 1. 取指令
         const uint64_t pc_before = pc_;
-        Instruction inst = memory_->fetchInstruction(pc_);
+        Instruction inst = fetchInstruction(pc_);
         
         // 如果指令为0，可能表明程序结束或到达无效内存区域
         if (inst == 0) {
@@ -156,6 +186,7 @@ void CPU::reset() {
     instruction_count_ = 0;
     reservation_valid_ = false;
     reservation_addr_ = 0;
+    syncPrivilegeStateFromCsrs();
 }
 
 uint64_t CPU::getRegister(RegNum reg) const {
@@ -227,6 +258,9 @@ void CPU::setCSR(uint32_t addr, uint64_t value) {
         throw SimulatorException("无效的CSR地址: " + std::to_string(addr));
     }
     csr::write(csr_registers_, addr, value);
+    if (addr == kSatpCsrAddress || addr == kMstatusCsrAddress) {
+        syncPrivilegeStateFromCsrs();
+    }
 }
 
 void CPU::dumpRegisters() const {
@@ -263,8 +297,10 @@ void CPU::executeImmediateOperations32(const DecodedInstruction& inst) {
 }
 
 void CPU::executeLoadOperations(const DecodedInstruction& inst) {
-    uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
-    uint64_t value = InstructionExecutor::loadFromMemory(memory_, addr, inst.funct3);
+    const uint64_t virtual_addr =
+        getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+    const uint64_t physical_addr = translateLoadAddress(virtual_addr, inst.memory_access_size);
+    uint64_t value = InstructionExecutor::loadFromMemory(memory_, physical_addr, inst.funct3);
     setRegister(inst.rd, value);
 }
 
@@ -332,8 +368,10 @@ void CPU::executeIType(const DecodedInstruction& inst) {
             incrementPC();
             break;
         case Opcode::LOAD_FP: {
-            uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
-            uint64_t value = InstructionExecutor::loadFPFromMemory(memory_, addr, inst.funct3);
+            const uint64_t virtual_addr =
+                getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+            const uint64_t physical_addr = translateLoadAddress(virtual_addr, inst.memory_access_size);
+            uint64_t value = InstructionExecutor::loadFPFromMemory(memory_, physical_addr, inst.funct3);
             setFPRegister(inst.rd, value);
             incrementPC();
             break;
@@ -352,15 +390,19 @@ void CPU::executeIType(const DecodedInstruction& inst) {
 
 void CPU::executeSType(const DecodedInstruction& inst) {
     if (inst.opcode == Opcode::STORE) {
-        uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+        const uint64_t virtual_addr =
+            getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+        const uint64_t physical_addr = translateStoreAddress(virtual_addr, inst.memory_access_size);
         uint64_t value = getRegister(inst.rs2);
-        InstructionExecutor::storeToMemory(memory_, addr, value, inst.funct3);
+        InstructionExecutor::storeToMemory(memory_, physical_addr, value, inst.funct3);
         reservation_valid_ = false;
         incrementPC();
     } else if (inst.opcode == Opcode::STORE_FP) {
-        uint64_t addr = getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+        const uint64_t virtual_addr =
+            getRegister(inst.rs1) + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+        const uint64_t physical_addr = translateStoreAddress(virtual_addr, inst.memory_access_size);
         uint64_t value = getFPRegister(inst.rs2);
-        InstructionExecutor::storeFPToMemory(memory_, addr, value, inst.funct3);
+        InstructionExecutor::storeFPToMemory(memory_, physical_addr, value, inst.funct3);
         reservation_valid_ = false;
         incrementPC();
     } else {
@@ -500,6 +542,53 @@ int32_t CPU::signExtend(uint32_t value, int bits) const {
     return (value & mask) | (((value & signBit) != 0) ? ~mask : 0);
 }
 
+Instruction CPU::fetchInstruction(Address virtual_pc) const {
+    const Address first_half_pa = translateInstructionAddress(virtual_pc, /*size=*/2);
+    const uint16_t first_half = memory_->readHalfWord(first_half_pa);
+    if ((first_half & 0x03U) != 0x03U) {
+        return static_cast<Instruction>(first_half);
+    }
+
+    const Address second_half_pa = translateInstructionAddress(virtual_pc + 2, /*size=*/2);
+    const uint16_t second_half = memory_->readHalfWord(second_half_pa);
+    return static_cast<Instruction>(first_half) | (static_cast<Instruction>(second_half) << 16);
+}
+
+Address CPU::translateInstructionAddress(Address virtual_addr, size_t size) const {
+    const auto result = address_translation_->translateInstructionAddress(virtual_addr, size);
+    if (!result.success) {
+        throwTranslationFault("instruction fetch", virtual_addr, size, result);
+    }
+    return result.physical_address;
+}
+
+Address CPU::translateLoadAddress(Address virtual_addr, size_t size) const {
+    const auto result = address_translation_->translateLoadAddress(virtual_addr, size);
+    if (!result.success) {
+        throwTranslationFault("load", virtual_addr, size, result);
+    }
+    return result.physical_address;
+}
+
+Address CPU::translateStoreAddress(Address virtual_addr, size_t size) const {
+    const auto result = address_translation_->translateStoreAddress(virtual_addr, size);
+    if (!result.success) {
+        throwTranslationFault("store", virtual_addr, size, result);
+    }
+    return result.physical_address;
+}
+
+void CPU::syncPrivilegeStateFromCsrs() {
+    if (!privilege_state_) {
+        return;
+    }
+
+    const uint64_t satp = csr::read(csr_registers_, kSatpCsrAddress);
+    const uint64_t mstatus = csr::read(csr_registers_, kMstatusCsrAddress);
+    privilege_state_->setSatp(satp);
+    privilege_state_->setMode(inferPrivilegeMode(satp, mstatus));
+}
+
 void CPU::executeMExtension(const DecodedInstruction& inst) {
     uint64_t rs1_val = getRegister(inst.rs1);
     uint64_t rs2_val = getRegister(inst.rs2);
@@ -551,36 +640,39 @@ void CPU::executeFPExtension(const DecodedInstruction& inst) {
 }
 
 void CPU::executeAtomicExtension(const DecodedInstruction& inst) {
-    const uint64_t addr = getRegister(inst.rs1);
+    const uint64_t virtual_addr = getRegister(inst.rs1);
+    const uint64_t access_size = (inst.funct3 == Funct3::LW) ? 4ULL : 8ULL;
+    const uint64_t load_addr = translateLoadAddress(virtual_addr, access_size);
     uint64_t memory_value = 0;
     switch (inst.funct3) {
         case Funct3::LW:
-            memory_value = memory_->readWord(addr);
+            memory_value = memory_->readWord(load_addr);
             break;
         case Funct3::LD:
-            memory_value = memory_->read64(addr);
+            memory_value = memory_->read64(load_addr);
             break;
         default:
             throw IllegalInstructionException("A扩展仅支持W/D宽度");
     }
 
-    const bool reservation_hit = reservation_valid_ && (reservation_addr_ == addr);
+    const bool reservation_hit = reservation_valid_ && (reservation_addr_ == virtual_addr);
     const auto amo_result = InstructionExecutor::executeAtomicOperation(
         inst, memory_value, getRegister(inst.rs2), reservation_hit);
 
     if (amo_result.acquire_reservation) {
         reservation_valid_ = true;
-        reservation_addr_ = addr;
+        reservation_addr_ = virtual_addr;
     }
     if (amo_result.release_reservation) {
         reservation_valid_ = false;
     }
 
     if (amo_result.do_store) {
+        const uint64_t store_addr = translateStoreAddress(virtual_addr, access_size);
         if (inst.funct3 == Funct3::LW) {
-            memory_->writeWord(addr, static_cast<uint32_t>(amo_result.store_value));
+            memory_->writeWord(store_addr, static_cast<uint32_t>(amo_result.store_value));
         } else {
-            memory_->write64(addr, amo_result.store_value);
+            memory_->write64(store_addr, amo_result.store_value);
         }
     }
 

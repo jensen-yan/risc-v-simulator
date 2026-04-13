@@ -343,10 +343,7 @@ void DynamicInst::refresh_memory_info_if_operands_ready() {
     }
 
     auto& memory_info = *memory_info_;
-    memory_info.memory_address =
-        src1_value_ + static_cast<uint64_t>(static_cast<int64_t>(decoded_info_.imm));
     memory_info.memory_size = decoded_info_.memory_access_size;
-    memory_info.address_ready = true;
 
     if (memory_info.is_store && src2_ready_) {
         memory_info.memory_value = src2_value_;

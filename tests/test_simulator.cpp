@@ -419,6 +419,44 @@ TEST(SimulatorTest, LoadSnapshotWithSv39TranslatesOutOfOrderLoadStore) {
     EXPECT_EQ(simulator.getCpu()->getRegister(7), 0x1122334455667789ULL);
 }
 
+TEST(SimulatorTest, LoadSnapshotWithSv39BlocksYoungerLoadUntilOlderTranslatedStoreValueIsReady) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
+    simulator.setMaxOutOfOrderCycles(400);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x1000;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
+    snapshot.integer_regs[1] = 0x2000;
+    snapshot.integer_regs[17] = 93;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+    snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(segment.bytes, /*virtualAddress=*/0x1000, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/0x2000, /*physicalAddress=*/0x5000, kPteV | kPteR | kPteW);
+    writeWord(segment.bytes, /*address=*/0x4000, createLoadInstruction(0, 1, 0x3, 6));
+    writeWord(segment.bytes, /*address=*/0x4004, createITypeInstruction(1, 6, 0x0, 7, 0x13));
+    writeWord(segment.bytes, /*address=*/0x4008, createStoreInstruction(8, 7, 1, 0x3));
+    writeWord(segment.bytes, /*address=*/0x400C, createLoadInstruction(8, 1, 0x3, 8));
+    writeWord(segment.bytes, /*address=*/0x4010, createECallInstruction());
+    writeDoubleWord(segment.bytes, /*address=*/0x5000, 0x10ULL);
+    writeDoubleWord(segment.bytes, /*address=*/0x5008, 0x99ULL);
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/4);
+
+    ASSERT_TRUE(result.success) << result.message;
+    EXPECT_EQ(simulator.getCpu()->getRegister(6), 0x10u);
+    EXPECT_EQ(simulator.getCpu()->getRegister(7), 0x11u);
+    EXPECT_EQ(simulator.getCpu()->getRegister(8), 0x11u)
+        << "更老 store 的地址在 Sv39 下必须按物理地址参与 hazard 检查，"
+           " younger load 不能因为 VA/PA 混用读到旧值";
+}
+
 TEST(SimulatorTest, LoadSnapshotWithSv39SynchronizesOutOfOrderTranslationAfterSatpCsrWrite) {
     Simulator simulator(/*memorySize=*/0x20000, CpuType::OUT_OF_ORDER, /*memoryBaseAddress=*/0);
     simulator.setMaxOutOfOrderCycles(200);

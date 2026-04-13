@@ -2,6 +2,7 @@
 
 #include "system/checkpoint_importer.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -314,7 +315,7 @@ TEST(CheckpointImporterTest, BuiltinZstdImporterCanAutoDiscoverRecipePath) {
     EXPECT_EQ(snapshot.recipe.point_id, "99");
 }
 
-TEST(CheckpointImporterTest, BuiltinZstdImporterRejectsVirtualMemoryCheckpoint) {
+TEST(CheckpointImporterTest, BuiltinZstdImporterAcceptsVirtualMemoryCheckpointAndPreservesSatp) {
     if (!hasZstdBinary()) {
         GTEST_SKIP() << "缺少 zstd 命令";
     }
@@ -342,7 +343,14 @@ TEST(CheckpointImporterTest, BuiltinZstdImporterRejectsVirtualMemoryCheckpoint) 
     config.output_dir = (temp_dir / "output").string();
 
     auto importer = createCheckpointImporter(config.importer_name);
-    EXPECT_THROW(importer->importCheckpoint(config), SimulatorException);
+    const SnapshotBundle snapshot = importer->importCheckpoint(config);
+
+    EXPECT_EQ(snapshot.pc, 0x1000ULL);
+    auto satp_it = std::find_if(snapshot.csr_values.begin(),
+                                snapshot.csr_values.end(),
+                                [](const auto& csr_entry) { return csr_entry.first == 0x180U; });
+    ASSERT_NE(satp_it, snapshot.csr_values.end());
+    EXPECT_EQ(satp_it->second, 0x8000000000001001ULL);
 }
 
 } // namespace riscv

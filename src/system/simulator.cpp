@@ -18,6 +18,10 @@ namespace riscv {
 
 namespace {
 
+constexpr uint32_t kSstatusCsrAddress = 0x100;
+constexpr uint32_t kSatpCsrAddress = 0x180;
+constexpr uint32_t kMstatusCsrAddress = 0x300;
+
 std::string toLowerCopy(const std::string& value) {
     std::string lowered = value;
     std::transform(lowered.begin(), lowered.end(), lowered.begin(),
@@ -29,10 +33,20 @@ bool containsIgnoreCase(const std::string& haystack, const std::string& needle) 
     return toLowerCopy(haystack).find(toLowerCopy(needle)) != std::string::npos;
 }
 
+bool isTranslationTrapMessage(const std::string& message) {
+    return containsIgnoreCase(message, "translation failed") ||
+           containsIgnoreCase(message, "page fault") ||
+           containsIgnoreCase(message, "access fault") ||
+           containsIgnoreCase(message, "unsupported satp mode");
+}
+
 CheckpointFailureReason classifyExceptionMessage(const std::string& message) {
     if (containsIgnoreCase(message, "不支持的系统指令") ||
         containsIgnoreCase(message, "unsupported system instruction")) {
         return CheckpointFailureReason::UNIMPLEMENTED_SYSTEM_INSTRUCTION;
+    }
+    if (isTranslationTrapMessage(message)) {
+        return CheckpointFailureReason::TRAP;
     }
     if (containsIgnoreCase(message, "非法指令") ||
         containsIgnoreCase(message, "illegal") ||
@@ -600,6 +614,50 @@ std::vector<uint8_t> Simulator::loadBinaryFile(const std::string& filename) {
     return program;
 }
 
+void Simulator::restoreSnapshotMemory(const SnapshotBundle& snapshot,
+                                      const std::shared_ptr<Memory>& memory) const {
+    for (const auto& segment : snapshot.memory_segments) {
+        if (segment.isFileBacked()) {
+            memory->loadProgramFromFile(segment.file_path, segment.base, segment.size);
+        } else if (!segment.bytes.empty()) {
+            memory->loadProgram(segment.bytes, segment.base);
+        }
+    }
+}
+
+void Simulator::synchronizeSharedTranslationState(ICpuInterface* cpu) const {
+    if (cpu == nullptr) {
+        return;
+    }
+
+    const uint64_t mstatus = cpu->getCSR(kMstatusCsrAddress);
+    cpu->setCSR(kMstatusCsrAddress, mstatus);
+
+    const uint64_t sstatus = cpu->getCSR(kSstatusCsrAddress);
+    cpu->setCSR(kSstatusCsrAddress, sstatus);
+
+    const uint64_t satp = cpu->getCSR(kSatpCsrAddress);
+    cpu->setCSR(kSatpCsrAddress, satp);
+}
+
+void Simulator::restoreSnapshotCpuState(ICpuInterface* cpu, const SnapshotBundle& snapshot) const {
+    cpu->setEnabledExtensions(snapshot.enabled_extensions);
+
+    for (size_t i = 0; i < snapshot.integer_regs.size(); ++i) {
+        cpu->setRegister(static_cast<RegNum>(i), snapshot.integer_regs[i]);
+    }
+    for (size_t i = 0; i < snapshot.fp_regs.size(); ++i) {
+        cpu->setFPRegister(static_cast<RegNum>(i), snapshot.fp_regs[i]);
+    }
+    for (const auto& [csr_addr, csr_value] : snapshot.csr_values) {
+        cpu->setCSR(csr_addr, csr_value);
+    }
+    cpu->setPC(snapshot.pc);
+
+    // 以最终 CSR 状态做一次显式收口，保证恢复后的第一条指令就看到正确翻译上下文。
+    synchronizeSharedTranslationState(cpu);
+}
+
 bool Simulator::loadElfProgram(const std::string& filename) {
     try {
         memory_->resetExitStatus();
@@ -672,50 +730,15 @@ bool Simulator::loadSnapshot(const SnapshotBundle& snapshot) {
     try {
         reset();
         memory_->resetExitStatus();
-        cpu_->setEnabledExtensions(snapshot.enabled_extensions);
-
-        for (const auto& segment : snapshot.memory_segments) {
-            if (segment.isFileBacked()) {
-                memory_->loadProgramFromFile(segment.file_path, segment.base, segment.size);
-            } else if (!segment.bytes.empty()) {
-                memory_->loadProgram(segment.bytes, segment.base);
-            }
-        }
-
-        for (size_t i = 0; i < snapshot.integer_regs.size(); ++i) {
-            cpu_->setRegister(static_cast<RegNum>(i), snapshot.integer_regs[i]);
-        }
-        for (size_t i = 0; i < snapshot.fp_regs.size(); ++i) {
-            cpu_->setFPRegister(static_cast<RegNum>(i), snapshot.fp_regs[i]);
-        }
-        for (const auto& [csr_addr, csr_value] : snapshot.csr_values) {
-            cpu_->setCSR(csr_addr, csr_value);
-        }
-        cpu_->setPC(snapshot.pc);
+        restoreSnapshotMemory(snapshot, memory_);
+        restoreSnapshotCpuState(cpu_.get(), snapshot);
 
         if (reference_memory_ && reference_cpu_) {
             reference_memory_->clear();
             reference_memory_->resetExitStatus();
             reference_cpu_->reset();
-            reference_cpu_->setEnabledExtensions(snapshot.enabled_extensions);
-
-            for (const auto& segment : snapshot.memory_segments) {
-                if (segment.isFileBacked()) {
-                    reference_memory_->loadProgramFromFile(segment.file_path, segment.base, segment.size);
-                } else if (!segment.bytes.empty()) {
-                    reference_memory_->loadProgram(segment.bytes, segment.base);
-                }
-            }
-            for (size_t i = 0; i < snapshot.integer_regs.size(); ++i) {
-                reference_cpu_->setRegister(static_cast<RegNum>(i), snapshot.integer_regs[i]);
-            }
-            for (size_t i = 0; i < snapshot.fp_regs.size(); ++i) {
-                reference_cpu_->setFPRegister(static_cast<RegNum>(i), snapshot.fp_regs[i]);
-            }
-            for (const auto& [csr_addr, csr_value] : snapshot.csr_values) {
-                reference_cpu_->setCSR(csr_addr, csr_value);
-            }
-            reference_cpu_->setPC(snapshot.pc);
+            restoreSnapshotMemory(snapshot, reference_memory_);
+            restoreSnapshotCpuState(reference_cpu_.get(), snapshot);
         }
 
         if (difftest_) {

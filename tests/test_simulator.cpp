@@ -464,6 +464,30 @@ TEST(SimulatorTest, RunInstructionWindowClassifiesOutOfOrderIllegalInstruction) 
     EXPECT_EQ(result.failure_reason, CheckpointFailureReason::ILLEGAL_INSTRUCTION);
 }
 
+TEST(SimulatorTest, RunInstructionWindowClassifiesSv39TranslationFailureAsTrap) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::IN_ORDER, /*memoryBaseAddress=*/0);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x1000;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+    snapshot.csr_values.push_back({0x300, 0x0000000A00000000ULL});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(segment.bytes, /*virtualAddress=*/0x1000, /*physicalAddress=*/0x4000, kPteV | kPteR);
+    writeWord(segment.bytes, /*address=*/0x4000, createITypeInstruction(42, 0, 0x0, 5, 0x13));
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/1);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.failure_reason, CheckpointFailureReason::TRAP);
+    EXPECT_NE(result.message.find("instruction fetch translation failed"), std::string::npos);
+    EXPECT_NE(result.message.find("execute permission"), std::string::npos);
+}
+
 TEST(SimulatorTest, CpuInterfaceExposesNextStepRetireLimitHooks) {
     Simulator simulator(/*memorySize=*/4096, CpuType::IN_ORDER);
     simulator.getCpu()->setNextStepRetireLimit(1);

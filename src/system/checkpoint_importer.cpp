@@ -388,16 +388,6 @@ SnapshotBundle parseBuiltinZstdSnapshot(const CheckpointRecipeSpec& recipe,
         }
     }
 
-    const uint64_t satp =
-        readLittleEndian64FromFile(
-            image.path, image.size, layout.csr_reg_cpt_addr + 0x180ULL * sizeof(uint64_t), "satp");
-    if (satp != 0) {
-        std::ostringstream oss;
-        oss << "checkpoint 依赖虚拟内存地址翻译(satp=0x" << std::hex << satp
-            << ")，当前模拟器尚未支持 MMU/Sv39 checkpoint restore";
-        throw SimulatorException(oss.str());
-    }
-
     const uint64_t misa =
         readLittleEndian64FromFile(
             image.path, image.size, layout.csr_reg_cpt_addr + 0x301ULL * sizeof(uint64_t), "misa");

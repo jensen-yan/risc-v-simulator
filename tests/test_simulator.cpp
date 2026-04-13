@@ -218,6 +218,93 @@ TEST(SimulatorTest, LoadSnapshotRestoresGprDependenciesForOutOfOrderCpu) {
     EXPECT_EQ(simulator.getCpu()->getRegister(6), 43u);
 }
 
+TEST(SimulatorTest, OutOfOrderSnapshotDoesNotCreateDiffTestByDefault) {
+    Simulator simulator(/*memorySize=*/4096, CpuType::OUT_OF_ORDER);
+    simulator.setMaxOutOfOrderCycles(1000);
+
+    SnapshotBundle snapshot;
+    std::vector<uint8_t> code_bytes;
+    appendWord(code_bytes, createITypeInstruction(3, 1, 0x0, 5, 0x13));
+    appendWord(code_bytes, createITypeInstruction(4, 1, 0x0, 6, 0x13));
+    appendWord(code_bytes, createECallInstruction());
+
+    MemorySegment code_segment;
+    code_segment.base = 0x100;
+    code_segment.bytes = code_bytes;
+
+    snapshot.pc = 0x100;
+    snapshot.integer_regs[1] = 39;
+    snapshot.integer_regs[10] = 0;
+    snapshot.integer_regs[17] = 93;
+    snapshot.memory_segments = {code_segment};
+
+    ASSERT_FALSE(simulator.hasReferenceExecutionContext());
+    ASSERT_FALSE(simulator.hasDiffTestInstance());
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+    EXPECT_FALSE(simulator.hasReferenceExecutionContext());
+    EXPECT_FALSE(simulator.hasDiffTestInstance());
+    EXPECT_FALSE(simulator.getCpu()->isDiffTestEnabled());
+}
+
+TEST(SimulatorTest, OutOfOrderSnapshotCanEnableDiffTestOnDemand) {
+    Simulator simulator(/*memorySize=*/4096, CpuType::OUT_OF_ORDER);
+    simulator.setCheckpointDiffTestEnabled(true);
+    simulator.setMaxOutOfOrderCycles(1000);
+
+    SnapshotBundle snapshot;
+    std::vector<uint8_t> code_bytes;
+    appendWord(code_bytes, createITypeInstruction(3, 1, 0x0, 5, 0x13));
+    appendWord(code_bytes, createITypeInstruction(4, 1, 0x0, 6, 0x13));
+    appendWord(code_bytes, createECallInstruction());
+
+    MemorySegment code_segment;
+    code_segment.base = 0x100;
+    code_segment.bytes = code_bytes;
+
+    snapshot.pc = 0x100;
+    snapshot.integer_regs[1] = 39;
+    snapshot.integer_regs[10] = 0;
+    snapshot.integer_regs[17] = 93;
+    snapshot.memory_segments = {code_segment};
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+    EXPECT_TRUE(simulator.hasReferenceExecutionContext());
+    EXPECT_TRUE(simulator.hasDiffTestInstance());
+    EXPECT_TRUE(simulator.getCpu()->isDiffTestEnabled());
+}
+
+TEST(SimulatorTest, OutOfOrderSnapshotDiffTestSupportsSv39CheckpointState) {
+    Simulator simulator(/*memorySize=*/0x20000, CpuType::OUT_OF_ORDER);
+    simulator.setCheckpointDiffTestEnabled(true);
+    simulator.setMaxOutOfOrderCycles(1000);
+
+    SnapshotBundle snapshot;
+    snapshot.pc = 0x1000;
+    snapshot.privilege_mode = PrivilegeMode::SUPERVISOR;
+    snapshot.integer_regs[1] = 0x2000;
+    snapshot.csr_values.push_back({0x180, (kSv39Mode << 60) | (kRootPageTable >> 12)});
+
+    auto segment = makeSv39SnapshotMemoryImage();
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/0x1000, /*physicalAddress=*/0x4000, kPteV | kPteX);
+    installSv39Mapping4K(
+        segment.bytes, /*virtualAddress=*/0x2000, /*physicalAddress=*/0x5000, kPteV | kPteR);
+    writeWord(segment.bytes, /*address=*/0x4000, createLoadInstruction(0, 1, 0x3, 6));
+    writeWord(segment.bytes, /*address=*/0x4004, createECallInstruction());
+    writeDoubleWord(segment.bytes, /*address=*/0x5000, 0x1122334455667788ULL);
+    snapshot.memory_segments.push_back(std::move(segment));
+
+    ASSERT_TRUE(simulator.loadSnapshot(snapshot));
+    ASSERT_TRUE(simulator.getCpu()->isDiffTestEnabled());
+
+    const InstructionWindowResult result =
+        simulator.runInstructionWindow(/*warmup_instructions=*/0, /*measure_instructions=*/1);
+
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(simulator.getCpu()->getRegister(6), 0x1122334455667788ULL);
+}
+
 TEST(SimulatorTest, LoadSnapshotSupportsFileBackedMemorySegments) {
     const auto temp_dir = std::filesystem::temp_directory_path() / "simulator_file_backed_snapshot";
     std::filesystem::remove_all(temp_dir);

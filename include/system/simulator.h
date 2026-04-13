@@ -54,6 +54,7 @@ public:
     bool loadSnapshot(const SnapshotBundle& snapshot);
     void setHostCommAddresses(Address tohostAddr, Address fromhostAddr);
     void setEnabledExtensions(uint32_t extensions);
+    void setCheckpointDiffTestEnabled(bool enabled);
     
     // 执行控制
     void step();                    // 单步执行
@@ -83,6 +84,10 @@ public:
     bool writePipelineView() const;
     uint64_t getMaxInOrderInstructions() const { return max_in_order_instructions_; }
     uint64_t getMaxOutOfOrderCycles() const { return max_out_of_order_cycles_; }
+    bool hasReferenceExecutionContext() const {
+        return reference_memory_ != nullptr && reference_cpu_ != nullptr;
+    }
+    bool hasDiffTestInstance() const { return difftest_ != nullptr; }
     
     // 调试功能
     void dumpRegisters() const;
@@ -111,6 +116,9 @@ private:
     std::unique_ptr<ICpuInterface> cpu_;
     CpuType cpuType_;
     uint64_t cycle_count_ = 0;
+    size_t memory_size_ = 0;
+    Address memory_base_address_ = 0;
+    bool checkpoint_difftest_enabled_ = false;
     
     // 参考CPU内存和CPU（仅乱序CPU模式下使用）
     std::shared_ptr<Memory> reference_memory_;
@@ -130,6 +138,9 @@ private:
     
     // 辅助方法
     std::vector<uint8_t> loadBinaryFile(const std::string& filename);
+    void ensureReferenceExecutionContext();
+    void releaseReferenceExecutionContext();
+    void ensureDiffTestInitialized();
     void restoreSnapshotMemory(const SnapshotBundle& snapshot, const std::shared_ptr<Memory>& memory) const;
     void restoreSnapshotCpuState(ICpuInterface* cpu, const SnapshotBundle& snapshot) const;
     void synchronizeSharedTranslationState(ICpuInterface* cpu, const SnapshotBundle& snapshot) const;

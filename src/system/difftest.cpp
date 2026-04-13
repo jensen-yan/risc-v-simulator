@@ -8,6 +8,7 @@ namespace riscv {
 
 namespace {
 constexpr std::array<uint32_t, 8> kKeyCsrAddrs = {
+    0x180,  // satp
     0x300,  // mstatus
     0x305,  // mtvec
     0x341,  // mepc
@@ -15,7 +16,6 @@ constexpr std::array<uint32_t, 8> kKeyCsrAddrs = {
     0x343,  // mtval
     0x344,  // mip
     0x340,  // mscratch
-    0xF14,  // mhartid
 };
 }  // namespace
 
@@ -64,6 +64,8 @@ void DiffTest::syncReferenceState(ICpuInterface* ooo_cpu) {
     for (uint32_t csr_addr : kKeyCsrAddrs) {
         reference_cpu_->setCSR(csr_addr, ooo_cpu->getCSR(csr_addr));
     }
+
+    reference_cpu_->setPrivilegeMode(ooo_cpu->getPrivilegeMode());
 }
 
 bool DiffTest::stepAndCompareWithCommittedPC(ICpuInterface* ooo_cpu, uint64_t committed_pc) {
@@ -142,6 +144,9 @@ bool DiffTest::compareFPRegisters(ICpuInterface* ooo_cpu) {
 }
 
 bool DiffTest::compareCSRRegisters(ICpuInterface* ooo_cpu) {
+    if (reference_cpu_->getPrivilegeMode() != ooo_cpu->getPrivilegeMode()) {
+        return false;
+    }
     for (uint32_t csr_addr : kKeyCsrAddrs) {
         const uint64_t ref_value = reference_cpu_->getCSR(csr_addr);
         const uint64_t ooo_value = ooo_cpu->getCSR(csr_addr);
@@ -179,6 +184,12 @@ void DiffTest::dumpState(ICpuInterface* ref_cpu, ICpuInterface* ooo_cpu) {
             LOGE(DIFFTEST, "csr mismatch [0x%03x]: ref=0x%" PRIx64 ", ooo=0x%" PRIx64,
                  csr_addr, ref_value, ooo_value);
         }
+    }
+
+    if (ref_cpu->getPrivilegeMode() != ooo_cpu->getPrivilegeMode()) {
+        LOGE(DIFFTEST, "privilege mode mismatch: ref=%d, ooo=%d",
+             static_cast<int>(ref_cpu->getPrivilegeMode()),
+             static_cast<int>(ooo_cpu->getPrivilegeMode()));
     }
 }
 

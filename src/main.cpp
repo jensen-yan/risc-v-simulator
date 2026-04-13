@@ -99,6 +99,7 @@ void printUsage(const char* programName) {
     std::cout << "  --checkpoint-importer=NAME   Checkpoint importer executable or name\n";
     std::cout << "  --checkpoint-restorer=FILE   Checkpoint restorer executable path\n";
     std::cout << "  --checkpoint-output-dir=DIR  Directory for checkpoint artifacts\n";
+    std::cout << "  --checkpoint-difftest=on|off Enable per-commit difftest for checkpoint OOO runs (default: off)\n";
     std::cout << "  --warmup-instructions=N      Warmup instruction count for checkpoint mode\n";
     std::cout << "  --measure-instructions=N     Measure instruction count for checkpoint mode\n";
     std::cout << "  +signature=FILE              Spike-compatible signature file option\n";
@@ -182,6 +183,7 @@ int main(int argc, char* argv[]) {
     std::string checkpointImporterName;
     std::string checkpointRestorerPath;
     std::string checkpointOutputDir;
+    bool checkpointDiffTestEnabled = false;
     uint64_t warmupInstructions = 5'000'000;
     uint64_t measureInstructions = 5'000'000;
     
@@ -292,6 +294,18 @@ int main(int argc, char* argv[]) {
             checkpointRestorerPath = arg.substr(22);
         } else if (arg.find("--checkpoint-output-dir=") == 0) {
             checkpointOutputDir = arg.substr(24);
+        } else if (arg.find("--checkpoint-difftest=") == 0) {
+            static const std::string kCheckpointDiffTestPrefix = "--checkpoint-difftest=";
+            const std::string value = arg.substr(kCheckpointDiffTestPrefix.size());
+            if (value == "on") {
+                checkpointDiffTestEnabled = true;
+            } else if (value == "off") {
+                checkpointDiffTestEnabled = false;
+            } else {
+                std::cerr << "Error: invalid --checkpoint-difftest value '" << value
+                          << "', expected on|off\n";
+                return 1;
+            }
         } else if (arg.find("--warmup-instructions=") == 0) {
             warmupInstructions = std::stoull(arg.substr(22), nullptr, 0);
         } else if (arg.find("--measure-instructions=") == 0) {
@@ -393,6 +407,7 @@ int main(int argc, char* argv[]) {
             runConfig.output_dir = checkpointOutputDir;
             runConfig.warmup_instructions = warmupInstructions;
             runConfig.measure_instructions = measureInstructions;
+            runConfig.enable_difftest = checkpointDiffTestEnabled;
 
             std::cout << "Running checkpoint: " << checkpointPath << "\n";
             CheckpointRunner runner(cpuType, memorySize);

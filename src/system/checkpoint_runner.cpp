@@ -377,6 +377,7 @@ CheckpointRunResult CheckpointRunner::run(const CheckpointRunConfig& config) con
             computeRequiredMemorySize(snapshot, memory_size_, memory_base_address),
             cpu_type_,
             memory_base_address);
+        simulator->setCheckpointDiffTestEnabled(config.enable_difftest);
         simulator->setMaxInOrderInstructions(max_in_order_instructions_);
         simulator->setMaxOutOfOrderCycles(max_out_of_order_cycles_);
     } catch (const std::exception& e) {

@@ -15,6 +15,7 @@ struct CheckpointRunConfig {
     std::string output_dir;
     uint64_t warmup_instructions = 5'000'000;
     uint64_t measure_instructions = 5'000'000;
+    bool enable_difftest = false;
 };
 
 class ICheckpointImporter {

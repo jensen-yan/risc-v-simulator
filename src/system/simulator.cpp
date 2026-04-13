@@ -136,20 +136,57 @@ Simulator::Simulator(size_t memorySize, CpuType cpuType, Address memoryBaseAddre
     : memory_(std::make_shared<Memory>(memorySize, memoryBaseAddress)),
       cpu_(CpuFactory::createCpu(cpuType, memory_)),
       cpuType_(cpuType),
-      cycle_count_(0) {
-    
-    // 如果是乱序CPU，创建独立的参考内存和参考CPU用于DiffTest
-    if (cpuType == CpuType::OUT_OF_ORDER) {
-        reference_memory_ = std::make_shared<Memory>(memorySize, memoryBaseAddress);
-        reference_cpu_ = CpuFactory::createCpu(CpuType::IN_ORDER, reference_memory_);
-        
-        // DiffTest将在loadElfProgram中创建，因为需要两个CPU都加载相同的程序
-    }
+      cycle_count_(0),
+      memory_size_(memorySize),
+      memory_base_address_(memoryBaseAddress) {
 
     DebugManager::getInstance().setGlobalContext(cycle_count_, cpu_->getPC());
 }
 
 Simulator::~Simulator() = default;
+
+void Simulator::ensureReferenceExecutionContext() {
+    if (cpuType_ != CpuType::OUT_OF_ORDER) {
+        return;
+    }
+    if (reference_memory_ && reference_cpu_) {
+        return;
+    }
+
+    reference_memory_ = std::make_shared<Memory>(memory_size_, memory_base_address_);
+    reference_memory_->setHostCommAddresses(memory_->getTohostAddr(), memory_->getFromhostAddr());
+    reference_cpu_ = CpuFactory::createCpu(CpuType::IN_ORDER, reference_memory_);
+    reference_cpu_->setEnabledExtensions(cpu_->getEnabledExtensions());
+}
+
+void Simulator::releaseReferenceExecutionContext() {
+    if (cpu_) {
+        cpu_->setDiffTest(nullptr);
+    }
+    difftest_.reset();
+    reference_cpu_.reset();
+    reference_memory_.reset();
+}
+
+void Simulator::ensureDiffTestInitialized() {
+    if (cpuType_ != CpuType::OUT_OF_ORDER) {
+        return;
+    }
+    ensureReferenceExecutionContext();
+    if (!reference_cpu_) {
+        return;
+    }
+    if (!difftest_) {
+        difftest_ = std::make_unique<DiffTest>(cpu_.get(), reference_cpu_.get());
+    }
+}
+
+void Simulator::setCheckpointDiffTestEnabled(bool enabled) {
+    checkpoint_difftest_enabled_ = enabled;
+    if (!enabled) {
+        releaseReferenceExecutionContext();
+    }
+}
 
 bool Simulator::loadProgram(const std::string& filename) {
     try {
@@ -687,7 +724,10 @@ bool Simulator::loadElfProgram(const std::string& filename) {
         cpu_->setRegister(8, memory_->getSize() - 4); // s0/fp
         
         // 如果是乱序CPU模式，同时加载ELF到参考CPU
-        if (cpuType_ == CpuType::OUT_OF_ORDER && reference_memory_ && reference_cpu_) {
+        if (cpuType_ == CpuType::OUT_OF_ORDER) {
+            ensureReferenceExecutionContext();
+            ensureDiffTestInitialized();
+
             // 加载相同的ELF文件到参考CPU内存
             ElfLoader::ElfInfo refElfInfo = ElfLoader::loadElfFile(filename, reference_memory_);
             
@@ -704,10 +744,6 @@ bool Simulator::loadElfProgram(const std::string& filename) {
             reference_cpu_->setRegister(2, reference_memory_->getSize() - 4); // sp
             reference_cpu_->setRegister(8, reference_memory_->getSize() - 4); // s0/fp
             
-            // 创建DiffTest组件，传入两个独立的CPU
-            difftest_ = std::make_unique<DiffTest>(cpu_.get(), reference_cpu_.get());
-            
-            // 将DiffTest设置到乱序CPU中
             cpu_->setDiffTest(difftest_.get());
 
             LOGI(DIFFTEST, "difftest initialized for ooo mode");
@@ -729,17 +765,22 @@ bool Simulator::loadSnapshot(const SnapshotBundle& snapshot) {
         restoreSnapshotMemory(snapshot, memory_);
         restoreSnapshotCpuState(cpu_.get(), snapshot);
 
-        if (reference_memory_ && reference_cpu_) {
+        if (cpuType_ == CpuType::OUT_OF_ORDER && checkpoint_difftest_enabled_) {
+            ensureReferenceExecutionContext();
             reference_memory_->clear();
             reference_memory_->resetExitStatus();
             reference_cpu_->reset();
             restoreSnapshotMemory(snapshot, reference_memory_);
             restoreSnapshotCpuState(reference_cpu_.get(), snapshot);
+            difftest_ = std::make_unique<DiffTest>(cpu_.get(), reference_cpu_.get());
+        } else {
+            releaseReferenceExecutionContext();
         }
 
         if (difftest_) {
-            difftest_->reset();
             cpu_->setDiffTest(difftest_.get());
+        } else if (cpu_) {
+            cpu_->setDiffTest(nullptr);
         }
 
         halted_by_instruction_limit_ = false;

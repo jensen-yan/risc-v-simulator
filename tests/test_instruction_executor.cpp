@@ -371,6 +371,12 @@ TEST_F(InstructionExecutorTest, Register32BitOperations) {
         InstructionExecutor::executeRegisterOperation32(sh2add_uw_inst, 0xFFFFFFFF80000001ULL, 7ULL);
     EXPECT_EQ(sh2add_uw_result, 0x20000000BULL) << "SH2ADD.UW 应执行 (zext.w(rs1) << 2) + rs2";
 
+    auto zext_h_inst =
+        createDecodedInst(Opcode::OP_32, Funct3::XOR, static_cast<Funct7>(0x04), 17, 15, 0);
+    uint64_t zext_h_result =
+        InstructionExecutor::executeRegisterOperation32(zext_h_inst, 0xFFFFFFFFFFFF1005ULL, 0ULL);
+    EXPECT_EQ(zext_h_result, 0x1005ULL) << "ZEXT.H 应对 rs1 的低16位做零扩展";
+
     auto sh3add_uw_inst =
         createDecodedInst(Opcode::OP_32, Funct3::OR, static_cast<Funct7>(0x10), 1, 2, 3);
     uint64_t sh3add_uw_result =

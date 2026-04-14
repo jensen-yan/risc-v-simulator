@@ -548,6 +548,9 @@ uint64_t InstructionExecutor::executeRegisterOperation32(const DecodedInstructio
             throw IllegalInstructionException("未知的32位寄存器指令功能码");
 
         case Funct3::XOR:
+            if (inst.funct7 == static_cast<Funct7>(0x04) && inst.rs2 == 0) {  // ZEXT.H
+                return rs1_val & 0xFFFFULL;
+            }
             if (inst.funct7 == static_cast<Funct7>(0x10)) {  // SH2ADD.UW
                 return (static_cast<uint64_t>(static_cast<uint32_t>(rs1_val)) << 2) + rs2_val;
             }

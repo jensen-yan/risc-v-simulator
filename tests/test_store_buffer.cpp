@@ -275,6 +275,30 @@ TEST_F(StoreBufferTest, OverlapNoForwarding) {
               StoreBuffer::LoadForwardingKind::BlockedByOverlap);
 } 
 
+TEST_F(StoreBufferTest, YoungerPartialStoreMergesIntoOlderFullWidthStoreForwarding) {
+    const uint64_t base_address = 0x1000;
+    const uint32_t pc = 0x80000000;
+
+    auto older_full_store = createTestDynamicInst(1, pc);
+    auto younger_byte_store = createTestDynamicInst(2, pc + 4);
+
+    store_buffer->add_store(older_full_store, base_address, 0xFFFF100000001005ULL, 8);
+    store_buffer->add_store(younger_byte_store, base_address + 4, 0x30, 1);
+
+    uint64_t load_result = 0;
+    bool blocked = false;
+    const bool forwarded = store_buffer->forward_load(
+        base_address, 8, load_result, /*current_instruction_id=*/3, blocked);
+
+    EXPECT_TRUE(forwarded);
+    EXPECT_FALSE(blocked);
+    EXPECT_EQ(load_result, 0xFFFF103000001005ULL);
+    EXPECT_EQ(
+        store_buffer->classify_load_forwarding(
+            base_address, 8, load_result, /*current_instruction_id=*/3),
+        StoreBuffer::LoadForwardingKind::PartialMatch);
+}
+
 TEST_F(StoreBufferTest, OccupiedEntryCountTracksValidStores) {
     const uint32_t pc = 0x80000000;
     auto older = createTestDynamicInst(1, pc);

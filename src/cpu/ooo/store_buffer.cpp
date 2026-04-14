@@ -101,7 +101,12 @@ StoreBuffer::LoadForwardingInfo StoreBuffer::analyze_load_forwarding(uint64_t ad
     }
 
     const uint8_t full_mask = static_cast<uint8_t>(size == 8 ? 0xFFu : ((1u << size) - 1u));
-    bool saw_overlap = false;
+    bool saw_exact_match_store = false;
+    struct OlderStoreCandidate {
+        const StoreBufferEntry* entry = nullptr;
+    };
+    std::vector<OlderStoreCandidate> candidates;
+    candidates.reserve(MAX_ENTRIES);
 
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         int index = (next_allocate_index - 1 - i + MAX_ENTRIES) % MAX_ENTRIES;
@@ -117,7 +122,22 @@ StoreBuffer::LoadForwardingInfo StoreBuffer::analyze_load_forwarding(uint64_t ad
             continue;
         }
 
-        saw_overlap = true;
+        candidates.push_back({&entry});
+    }
+
+    if (candidates.empty()) {
+        return info;
+    }
+
+    std::sort(candidates.begin(),
+              candidates.end(),
+              [](const OlderStoreCandidate& lhs, const OlderStoreCandidate& rhs) {
+                  return lhs.entry->instruction->get_instruction_id() >
+                         rhs.entry->instruction->get_instruction_id();
+              });
+
+    for (const auto& candidate : candidates) {
+        const StoreBufferEntry& entry = *candidate.entry;
         if (!info.primary_store) {
             info.primary_store = entry.instruction;
         }
@@ -147,23 +167,17 @@ StoreBuffer::LoadForwardingInfo StoreBuffer::analyze_load_forwarding(uint64_t ad
         }
 
         if (entry.address == address && entry.size == size) {
-            info.kind = LoadForwardingKind::FullMatch;
-            info.value = entry.value;
-            info.byte_mask = full_mask;
-            info.contributing_stores.fill(nullptr);
-            info.contributing_stores[0] = entry.instruction;
-            info.contributing_count = 1;
-            info.primary_store = entry.instruction;
-            return info;
+            saw_exact_match_store = true;
         }
-    }
-
-    if (!saw_overlap) {
-        return info;
     }
 
     if (info.byte_mask == 0) {
         info.kind = LoadForwardingKind::BlockedByOverlap;
+        return info;
+    }
+
+    if (info.byte_mask == full_mask && saw_exact_match_store && info.contributing_count == 1) {
+        info.kind = LoadForwardingKind::FullMatch;
         return info;
     }
 

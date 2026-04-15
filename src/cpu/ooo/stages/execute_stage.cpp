@@ -579,18 +579,26 @@ bool ExecuteStage::try_recover_control_mispredict_early(ExecutionUnit& unit,
         flush_younger_execution_units(state, instruction_id, current_unit_type, current_unit_index);
 
     std::vector<PhysRegNum> surviving_live_regs;
+    std::vector<PhysRegNum> surviving_live_fp_regs;
     surviving_live_regs.reserve(ReorderBuffer::MAX_ROB_ENTRIES);
+    surviving_live_fp_regs.reserve(ReorderBuffer::MAX_ROB_ENTRIES);
     for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
         if (!state.reorder_buffer->is_entry_valid(static_cast<ROBEntry>(i))) {
             continue;
         }
         const auto live_entry = state.reorder_buffer->get_entry(static_cast<ROBEntry>(i));
-        if (live_entry && live_entry->get_physical_dest() != 0) {
-            surviving_live_regs.push_back(live_entry->get_physical_dest());
+        if (live_entry && live_entry->get_physical_dest_kind() != RegisterFileKind::None) {
+            if (live_entry->get_physical_dest_kind() == RegisterFileKind::FloatingPoint) {
+                surviving_live_fp_regs.push_back(live_entry->get_physical_dest());
+            } else if (live_entry->get_physical_dest() != 0) {
+                surviving_live_regs.push_back(live_entry->get_physical_dest());
+            }
         }
     }
 
-    state.register_rename->restore_checkpoint(checkpoint_it->second, surviving_live_regs);
+    state.register_rename->restore_checkpoint(checkpoint_it->second,
+                                              surviving_live_regs,
+                                              surviving_live_fp_regs);
     erase_younger_rename_checkpoints(state, instruction_id);
     state.rename_checkpoints.erase(instruction_id);
     if (state.branch_predictor && instruction->has_ras_checkpoint()) {

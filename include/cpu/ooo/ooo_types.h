@@ -11,6 +11,12 @@ namespace riscv {
 // 物理寄存器编号类型
 using PhysRegNum = uint8_t;
 
+enum class RegisterFileKind : uint8_t {
+    None = 0,
+    Integer,
+    FloatingPoint,
+};
+
 // 重排序缓冲表项编号
 using ROBEntry = uint16_t;
 

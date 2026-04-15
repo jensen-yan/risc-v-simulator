@@ -8,6 +8,7 @@ namespace riscv {
 namespace {
 
 constexpr uint8_t kFenceIFunct3 = 0b001;
+constexpr uint8_t kFpFunct5Shift = 2;
 
 bool isSerializingControlInstruction(const DecodedInstruction& decoded_info) {
     return (decoded_info.opcode == Opcode::SYSTEM &&
@@ -33,6 +34,100 @@ bool hasOlderInflightSerializingInstruction(const CPUState& state, uint64_t inst
         }
     }
     return false;
+}
+
+uint8_t fpFunct5(const DecodedInstruction& decoded_info) {
+    return static_cast<uint8_t>(static_cast<uint8_t>(decoded_info.funct7) >> kFpFunct5Shift);
+}
+
+RegisterFileKind fpSource1Kind(const DecodedInstruction& decoded_info) {
+    if (decoded_info.opcode == Opcode::LOAD_FP || decoded_info.opcode == Opcode::STORE_FP) {
+        return RegisterFileKind::Integer;
+    }
+    if (decoded_info.opcode == Opcode::FMADD || decoded_info.opcode == Opcode::FMSUB ||
+        decoded_info.opcode == Opcode::FNMSUB || decoded_info.opcode == Opcode::FNMADD) {
+        return RegisterFileKind::FloatingPoint;
+    }
+    if (decoded_info.opcode != Opcode::OP_FP) {
+        return RegisterFileKind::None;
+    }
+    switch (fpFunct5(decoded_info)) {
+        case 0x1A:
+        case 0x1E:
+            return RegisterFileKind::Integer;
+        default:
+            return RegisterFileKind::FloatingPoint;
+    }
+}
+
+RegisterFileKind fpSource2Kind(const DecodedInstruction& decoded_info) {
+    if (decoded_info.opcode == Opcode::STORE_FP) {
+        return RegisterFileKind::FloatingPoint;
+    }
+    if (decoded_info.opcode == Opcode::FMADD || decoded_info.opcode == Opcode::FMSUB ||
+        decoded_info.opcode == Opcode::FNMSUB || decoded_info.opcode == Opcode::FNMADD) {
+        return RegisterFileKind::FloatingPoint;
+    }
+    if (decoded_info.opcode != Opcode::OP_FP) {
+        return RegisterFileKind::None;
+    }
+    switch (fpFunct5(decoded_info)) {
+        case 0x00:
+        case 0x01:
+        case 0x02:
+        case 0x03:
+        case 0x04:
+        case 0x05:
+        case 0x14:
+            return RegisterFileKind::FloatingPoint;
+        default:
+            return RegisterFileKind::None;
+    }
+}
+
+RegisterFileKind fpSource3Kind(const DecodedInstruction& decoded_info) {
+    switch (decoded_info.opcode) {
+        case Opcode::FMADD:
+        case Opcode::FMSUB:
+        case Opcode::FNMSUB:
+        case Opcode::FNMADD:
+            return RegisterFileKind::FloatingPoint;
+        default:
+            return RegisterFileKind::None;
+    }
+}
+
+RegisterFileKind fpDestinationKind(const DecodedInstruction& decoded_info) {
+    if (decoded_info.opcode == Opcode::STORE_FP) {
+        return RegisterFileKind::None;
+    }
+    return InstructionExecutor::isFPIntegerDestination(decoded_info)
+               ? RegisterFileKind::Integer
+               : RegisterFileKind::FloatingPoint;
+}
+
+void applyLookupToSrc1(const RegisterRenameUnit::SourceLookupResult& lookup,
+                       const DynamicInstPtr& inst,
+                       RegisterFileKind kind) {
+    inst->set_physical_src1_kind(kind);
+    inst->set_physical_src1(lookup.reg);
+    inst->set_src1_ready(lookup.ready, lookup.value);
+}
+
+void applyLookupToSrc2(const RegisterRenameUnit::SourceLookupResult& lookup,
+                       const DynamicInstPtr& inst,
+                       RegisterFileKind kind) {
+    inst->set_physical_src2_kind(kind);
+    inst->set_physical_src2(lookup.reg);
+    inst->set_src2_ready(lookup.ready, lookup.value);
+}
+
+void applyLookupToSrc3(const RegisterRenameUnit::SourceLookupResult& lookup,
+                       const DynamicInstPtr& inst,
+                       RegisterFileKind kind) {
+    inst->set_physical_src3_kind(kind);
+    inst->set_physical_src3(lookup.reg);
+    inst->set_src3_ready(lookup.ready, lookup.value);
 }
 
 }  // namespace
@@ -69,21 +164,8 @@ void IssueStage::execute(CPUState& state) {
         LOGT(ISSUE, "try issue slot=%zu inst=%" PRId64 " (rob[%d])",
              slot, dispatchable_entry->get_instruction_id(), dispatchable_entry->get_rob_entry());
 
-        const auto head_entry = state.reorder_buffer->get_head_entry();
-        if (head_entry != ReorderBuffer::MAX_ROB_ENTRIES) {
-            auto head_inst = state.reorder_buffer->get_entry(head_entry);
-            if (head_inst &&
-                InstructionExecutor::isFloatingPointInstruction(head_inst->get_decoded_info()) &&
-                head_entry != dispatchable_entry->get_rob_entry()) {
-                if (issued_this_cycle == 0) {
-                    LOGT(ISSUE, "fp instruction at ROB head, block younger issue");
-                    state.recordPipelineStall(PerfCounterId::STALL_ISSUE_FP_HEAD_BLOCKED);
-                }
-                break;
-            }
-        }
-
         const auto& decoded_info = dispatchable_entry->get_decoded_info();
+        const auto head_entry = state.reorder_buffer->get_head_entry();
         const bool is_serializing_control = isSerializingControlInstruction(decoded_info);
 
         if (hasOlderInflightSerializingInstruction(state, dispatchable_entry->get_instruction_id())) {
@@ -123,71 +205,43 @@ void IssueStage::execute(CPUState& state) {
         bool issued = false;
 
         if (InstructionExecutor::isFloatingPointInstruction(decoded_info)) {
-            if (head_entry != dispatchable_entry->get_rob_entry()) {
+            const auto src1_kind = fpSource1Kind(decoded_info);
+            const auto src2_kind = fpSource2Kind(decoded_info);
+            const auto src3_kind = fpSource3Kind(decoded_info);
+            const auto dst_kind = fpDestinationKind(decoded_info);
+
+            const auto src1 = state.register_rename->lookup_source(src1_kind, decoded_info.rs1);
+            const auto src2 = state.register_rename->lookup_source(src2_kind, decoded_info.rs2);
+            const auto src3 = state.register_rename->lookup_source(src3_kind, decoded_info.rs3);
+            const auto dest = state.register_rename->allocate_destination(dst_kind, decoded_info.rd);
+            if (!dest.success) {
                 if (issued_this_cycle == 0) {
-                    LOGT(ISSUE, "fp instruction waits for ROB head commit");
-                    state.recordPipelineStall(PerfCounterId::STALL_ISSUE_FP_HEAD_BLOCKED);
+                    LOGT(ISSUE, "rename failed for fp instruction");
+                    state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RENAME_FAIL);
                 }
                 break;
             }
 
-            const bool fp_write_int = InstructionExecutor::isFPIntegerDestination(decoded_info);
-            if (fp_write_int) {
-                auto rename_result = state.register_rename->rename_instruction(dispatchable_entry->get_decoded_info());
-                if (!rename_result.success) {
-                    if (issued_this_cycle == 0) {
-                        LOGT(ISSUE, "rename failed for fp-int instruction");
-                        state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RENAME_FAIL);
-                    }
-                    break;
+            applyLookupToSrc1(src1, dispatchable_entry, src1_kind);
+            applyLookupToSrc2(src2, dispatchable_entry, src2_kind);
+            applyLookupToSrc3(src3, dispatchable_entry, src3_kind);
+            dispatchable_entry->set_physical_dest_kind(dst_kind);
+            dispatchable_entry->set_physical_dest(dest.dest_reg);
+
+            auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
+            if (!issue_result.success) {
+                state.register_rename->release_physical_register(dst_kind, dest.dest_reg);
+                if (issued_this_cycle == 0) {
+                    LOGT(ISSUE, "rs issue failed for fp instruction");
+                    state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
                 }
-
-                dispatchable_entry->set_physical_src1(0);
-                dispatchable_entry->set_physical_src2(0);
-                dispatchable_entry->set_physical_dest(rename_result.dest_reg);
-                dispatchable_entry->set_src1_ready(true, state.arch_registers[decoded_info.rs1]);
-                dispatchable_entry->set_src2_ready(true, state.arch_registers[decoded_info.rs2]);
-
-                auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
-                if (!issue_result.success) {
-                    state.register_rename->release_physical_register(rename_result.dest_reg);
-                    if (issued_this_cycle == 0) {
-                        LOGT(ISSUE, "rs issue failed for fp-int instruction");
-                        state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
-                    }
-                    break;
-                }
-
-                LOGT(ISSUE, "issued slot=%zu fp-int inst=%" PRId64 " to rs[%d]",
-                     slot, dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
-                issued = true;
-            } else {
-                dispatchable_entry->set_physical_src1(0);
-                dispatchable_entry->set_physical_src2(0);
-                dispatchable_entry->set_physical_dest(0);
-
-                uint64_t src1_value = state.arch_registers[decoded_info.rs1];
-                uint64_t src2_value = state.arch_registers[decoded_info.rs2];
-                if (decoded_info.opcode == Opcode::STORE_FP) {
-                    src2_value = state.arch_fp_registers[decoded_info.rs2];
-                }
-                dispatchable_entry->set_src1_ready(true, src1_value);
-                dispatchable_entry->set_src2_ready(true, src2_value);
-
-                auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
-                if (!issue_result.success) {
-                    if (issued_this_cycle == 0) {
-                        LOGT(ISSUE, "rs issue failed for fp instruction");
-                        state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
-                    }
-                    break;
-                }
-
-                LOGT(ISSUE, "issued slot=%zu fp inst=%" PRId64 " to rs[%d]",
-                     slot, dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
-                state.store_buffer->publish_ready_store(dispatchable_entry);
-                issued = true;
+                break;
             }
+
+            LOGT(ISSUE, "issued slot=%zu fp inst=%" PRId64 " to rs[%d]",
+                 slot, dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
+            state.store_buffer->publish_ready_store(dispatchable_entry);
+            issued = true;
         } else {
             auto rename_result = state.register_rename->rename_instruction(dispatchable_entry->get_decoded_info());
             if (!rename_result.success) {
@@ -200,13 +254,21 @@ void IssueStage::execute(CPUState& state) {
 
             dispatchable_entry->set_physical_src1(rename_result.src1_reg);
             dispatchable_entry->set_physical_src2(rename_result.src2_reg);
+            dispatchable_entry->set_physical_src1_kind(RegisterFileKind::Integer);
+            dispatchable_entry->set_physical_src2_kind(RegisterFileKind::Integer);
             dispatchable_entry->set_physical_dest(rename_result.dest_reg);
+            dispatchable_entry->set_physical_dest_kind(
+                rename_result.dest_reg != 0 ? RegisterFileKind::Integer : RegisterFileKind::None);
+            dispatchable_entry->set_physical_src3(0);
+            dispatchable_entry->set_physical_src3_kind(RegisterFileKind::None);
+            dispatchable_entry->set_src3_ready(true, 0);
             dispatchable_entry->set_src1_ready(rename_result.src1_ready, rename_result.src1_value);
             dispatchable_entry->set_src2_ready(rename_result.src2_ready, rename_result.src2_value);
 
             auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
             if (!issue_result.success) {
-                state.register_rename->release_physical_register(rename_result.dest_reg);
+                state.register_rename->release_physical_register(RegisterFileKind::Integer,
+                                                                 rename_result.dest_reg);
                 if (issued_this_cycle == 0) {
                     LOGT(ISSUE, "rs issue failed, rollback rename");
                     state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);

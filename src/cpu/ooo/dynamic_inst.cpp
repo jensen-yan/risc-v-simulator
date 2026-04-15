@@ -8,9 +8,13 @@ namespace riscv {
 // ========== 构造函数实现 ==========
 DynamicInst::DynamicInst() 
     : instruction_id_(0), pc_(0), status_(Status::ALLOCATED),
-      logical_dest_(0), physical_dest_(0), logical_src1_(0), logical_src2_(0),
-      physical_src1_(0), physical_src2_(0),
-      src1_ready_(false), src2_ready_(false), src1_value_(0), src2_value_(0),
+      logical_dest_(0), physical_dest_(0), physical_dest_kind_(RegisterFileKind::None),
+      logical_src1_(0), logical_src2_(0), logical_src3_(0),
+      physical_src1_(0), physical_src2_(0), physical_src3_(0),
+      physical_src1_kind_(RegisterFileKind::None), physical_src2_kind_(RegisterFileKind::None),
+      physical_src3_kind_(RegisterFileKind::None),
+      src1_ready_(false), src2_ready_(false), src3_ready_(true),
+      src1_value_(0), src2_value_(0), src3_value_(0),
       result_(0), result_ready_(false), has_exception_(false), has_trap_(false),
       trap_cause_(0), trap_tval_(0),
       has_fp_execute_info_(false), fp_execute_info_{},
@@ -27,9 +31,13 @@ DynamicInst::DynamicInst()
 DynamicInst::DynamicInst(const DecodedInstruction& decoded_info, uint64_t pc, uint64_t instruction_id)
     : decoded_info_(decoded_info), instruction_id_(instruction_id), pc_(pc), 
       status_(Status::ALLOCATED),
-      logical_dest_(0), physical_dest_(0), logical_src1_(0), logical_src2_(0),
-      physical_src1_(0), physical_src2_(0),
-      src1_ready_(false), src2_ready_(false), src1_value_(0), src2_value_(0),
+      logical_dest_(0), physical_dest_(0), physical_dest_kind_(RegisterFileKind::None),
+      logical_src1_(0), logical_src2_(0), logical_src3_(0),
+      physical_src1_(0), physical_src2_(0), physical_src3_(0),
+      physical_src1_kind_(RegisterFileKind::None), physical_src2_kind_(RegisterFileKind::None),
+      physical_src3_kind_(RegisterFileKind::None),
+      src1_ready_(false), src2_ready_(false), src3_ready_(true),
+      src1_value_(0), src2_value_(0), src3_value_(0),
       result_(0), result_ready_(false), has_exception_(false), has_trap_(false),
       trap_cause_(0), trap_tval_(0),
       has_fp_execute_info_(false), fp_execute_info_{},
@@ -120,16 +128,25 @@ std::string DynamicInst::to_string() const {
     
     if (logical_dest_ != 0) {
         ss << ", Dest=x" << std::dec << static_cast<int>(logical_dest_)
-           << "->p" << static_cast<int>(physical_dest_);
+           << "->" << (physical_dest_kind_ == RegisterFileKind::FloatingPoint ? "fp" : "p")
+           << static_cast<int>(physical_dest_);
     }
     
-    if (logical_src1_ != 0 || logical_src2_ != 0) {
+    if (logical_src1_ != 0 || logical_src2_ != 0 || logical_src3_ != 0) {
         ss << ", Src1=x" << std::dec << static_cast<int>(logical_src1_)
-           << "(p" << static_cast<int>(physical_src1_) 
+           << "(" << (physical_src1_kind_ == RegisterFileKind::FloatingPoint ? "fp" : "p")
+           << static_cast<int>(physical_src1_) 
            << "," << (src1_ready_ ? "R" : "W") << ")";
         ss << ", Src2=x" << static_cast<int>(logical_src2_)
-           << "(p" << static_cast<int>(physical_src2_) 
+           << "(" << (physical_src2_kind_ == RegisterFileKind::FloatingPoint ? "fp" : "p")
+           << static_cast<int>(physical_src2_) 
            << "," << (src2_ready_ ? "R" : "W") << ")";
+        if (logical_src3_ != 0 || !src3_ready_) {
+            ss << ", Src3=x" << static_cast<int>(logical_src3_)
+               << "(" << (physical_src3_kind_ == RegisterFileKind::FloatingPoint ? "fp" : "p")
+               << static_cast<int>(physical_src3_)
+               << "," << (src3_ready_ ? "R" : "W") << ")";
+        }
     }
     
     if (result_ready_) {
@@ -167,19 +184,29 @@ void DynamicInst::dump_state() const {
     
     std::cout << "Register Info:" << std::endl;
     std::cout << "  Dest: x" << static_cast<int>(logical_dest_) 
-              << " -> p" << static_cast<int>(physical_dest_) << std::endl;
+              << " -> " << (physical_dest_kind_ == RegisterFileKind::FloatingPoint ? "fp" : "p")
+              << static_cast<int>(physical_dest_) << std::endl;
     std::cout << "  Src1: x" << static_cast<int>(logical_src1_) 
-              << " -> p" << static_cast<int>(physical_src1_) 
+              << " -> " << (physical_src1_kind_ == RegisterFileKind::FloatingPoint ? "fp" : "p")
+              << static_cast<int>(physical_src1_) 
               << " (" << (src1_ready_ ? "Ready" : "Waiting") << ")" << std::endl;
     std::cout << "  Src2: x" << static_cast<int>(logical_src2_) 
-              << " -> p" << static_cast<int>(physical_src2_) 
+              << " -> " << (physical_src2_kind_ == RegisterFileKind::FloatingPoint ? "fp" : "p")
+              << static_cast<int>(physical_src2_) 
               << " (" << (src2_ready_ ? "Ready" : "Waiting") << ")" << std::endl;
+    std::cout << "  Src3: x" << static_cast<int>(logical_src3_)
+              << " -> " << (physical_src3_kind_ == RegisterFileKind::FloatingPoint ? "fp" : "p")
+              << static_cast<int>(physical_src3_)
+              << " (" << (src3_ready_ ? "Ready" : "Waiting") << ")" << std::endl;
     
     if (src1_ready_) {
         std::cout << "  Src1 Value: 0x" << std::hex << src1_value_ << std::dec << std::endl;
     }
     if (src2_ready_) {
         std::cout << "  Src2 Value: 0x" << std::hex << src2_value_ << std::dec << std::endl;
+    }
+    if (src3_ready_) {
+        std::cout << "  Src3 Value: 0x" << std::hex << src3_value_ << std::dec << std::endl;
     }
     
     std::cout << "Execution Info:" << std::endl;
@@ -259,6 +286,7 @@ void DynamicInst::extract_register_info() {
     logical_dest_ = decoded_info_.rd;
     logical_src1_ = decoded_info_.rs1;
     logical_src2_ = decoded_info_.rs2;
+    logical_src3_ = decoded_info_.rs3;
     
     // x0 寄存器总是准备好且值为0
     if (logical_src1_ == 0) {
@@ -276,6 +304,18 @@ void DynamicInst::extract_register_info() {
         decoded_info_.type == InstructionType::J_TYPE) {
         src2_ready_ = true;
         src2_value_ = static_cast<uint64_t>(decoded_info_.imm);
+    }
+
+    if (decoded_info_.opcode != Opcode::FMADD &&
+        decoded_info_.opcode != Opcode::FMSUB &&
+        decoded_info_.opcode != Opcode::FNMSUB &&
+        decoded_info_.opcode != Opcode::FNMADD) {
+        src3_ready_ = true;
+        src3_value_ = 0;
+        logical_src3_ = 0;
+    } else {
+        src3_ready_ = false;
+        src3_value_ = 0;
     }
 }
 

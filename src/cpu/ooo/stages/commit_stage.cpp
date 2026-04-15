@@ -317,16 +317,28 @@ void CommitStage::execute(CPUState& state) {
             if (fp_info.write_int_reg && decoded_info.rd != 0) {
                 const uint64_t int_result = fp_info.value;
                 state.arch_registers[decoded_info.rd] = int_result;
-                if (committed_inst->get_physical_dest() != 0) {
-                    state.register_rename->commit_instruction(committed_inst->get_logical_dest(),
+                if (committed_inst->get_physical_dest_kind() == RegisterFileKind::Integer &&
+                    committed_inst->get_physical_dest() != 0) {
+                    state.register_rename->commit_instruction(RegisterFileKind::Integer,
+                                                             committed_inst->get_logical_dest(),
                                                              committed_inst->get_physical_dest());
                 }
-                state.register_rename->update_architecture_register(decoded_info.rd, int_result);
+                state.register_rename->update_architecture_register(RegisterFileKind::Integer,
+                                                                    decoded_info.rd,
+                                                                    int_result);
                 wrote_integer_reg = true;
                 LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
                     committed_inst->get_instruction_id(), decoded_info.rd, int_result);
             } else if (fp_info.write_fp_reg) {
                 state.arch_fp_registers[decoded_info.rd] = fp_info.value;
+                if (committed_inst->get_physical_dest_kind() == RegisterFileKind::FloatingPoint) {
+                    state.register_rename->commit_instruction(RegisterFileKind::FloatingPoint,
+                                                             committed_inst->get_logical_dest(),
+                                                             committed_inst->get_physical_dest());
+                    state.register_rename->update_architecture_register(RegisterFileKind::FloatingPoint,
+                                                                        decoded_info.rd,
+                                                                        fp_info.value);
+                }
                 LOGT(COMMIT, "inst=%" PRId64 " f%d = 0x%016" PRIx64,
                     committed_inst->get_instruction_id(), decoded_info.rd, fp_info.value);
             } else {
@@ -348,14 +360,16 @@ void CommitStage::execute(CPUState& state) {
             }
 
             // 释放物理寄存器
-            state.register_rename->commit_instruction(committed_inst->get_logical_dest(),
+            state.register_rename->commit_instruction(RegisterFileKind::Integer,
+                                                     committed_inst->get_logical_dest(),
                                                      committed_inst->get_physical_dest());
 
             // 确保架构寄存器状态与寄存器重命名模块同步
             // 这是为了确保DiffTest比较时状态一致
             if (wrote_integer_reg) {
-                state.register_rename->update_architecture_register(decoded_info.rd,
-                                                                  committed_inst->get_result());
+                state.register_rename->update_architecture_register(RegisterFileKind::Integer,
+                                                                    decoded_info.rd,
+                                                                    committed_inst->get_result());
             }
         }
         

@@ -308,6 +308,11 @@ void OutOfOrderCPU::setFPRegister(RegNum reg, uint64_t value) {
         throw SimulatorException("无效的浮点寄存器编号: " + std::to_string(reg));
     }
     cpu_state_.arch_fp_registers[reg] = value;
+    if (cpu_state_.register_rename) {
+        cpu_state_.register_rename->update_architecture_register(RegisterFileKind::FloatingPoint,
+                                                                 reg,
+                                                                 value);
+    }
 }
 
 float OutOfOrderCPU::getFPRegisterFloat(RegNum reg) const {
@@ -331,6 +336,11 @@ void OutOfOrderCPU::setFPRegisterFloat(RegNum reg, float value) {
     } conv{};
     conv.f = value;
     cpu_state_.arch_fp_registers[reg] = 0xFFFFFFFF00000000ULL | static_cast<uint64_t>(conv.u);
+    if (cpu_state_.register_rename) {
+        cpu_state_.register_rename->update_architecture_register(RegisterFileKind::FloatingPoint,
+                                                                 reg,
+                                                                 cpu_state_.arch_fp_registers[reg]);
+    }
 }
 
 uint64_t OutOfOrderCPU::getCSR(uint32_t addr) const {

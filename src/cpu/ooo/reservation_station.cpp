@@ -189,7 +189,11 @@ void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry, St
     if (!cdb_entry.valid || !cdb_entry.instruction) return;
     
     auto phys_dest = cdb_entry.instruction->get_physical_dest();
+    auto dest_kind = cdb_entry.instruction->get_physical_dest_kind();
     auto result = cdb_entry.instruction->get_result();
+    if (dest_kind == RegisterFileKind::None) {
+        return;
+    }
     
     // 遍历所有保留站表项，更新等待该物理寄存器的操作数
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
@@ -197,15 +201,26 @@ void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry, St
             DynamicInstPtr inst = rs_entries[i];
             
             // 检查源操作数1
-            if (!inst->is_src1_ready() && inst->get_physical_src1() == phys_dest) {
+            if (!inst->is_src1_ready() &&
+                inst->get_physical_src1_kind() == dest_kind &&
+                inst->get_physical_src1() == phys_dest) {
                 inst->set_src1_ready(true, result);
                 LOGT(RS, "rs[%d] src1 ready: p%d = 0x%" PRIx64, i, phys_dest, result);
             }
             
             // 检查源操作数2
-            if (!inst->is_src2_ready() && inst->get_physical_src2() == phys_dest) {
+            if (!inst->is_src2_ready() &&
+                inst->get_physical_src2_kind() == dest_kind &&
+                inst->get_physical_src2() == phys_dest) {
                 inst->set_src2_ready(true, result);
                 LOGT(RS, "rs[%d] src2 ready: p%d = 0x%" PRIx64, i, phys_dest, result);
+            }
+
+            if (!inst->is_src3_ready() &&
+                inst->get_physical_src3_kind() == dest_kind &&
+                inst->get_physical_src3() == phys_dest) {
+                inst->set_src3_ready(true, result);
+                LOGT(RS, "rs[%d] src3 ready: p%d = 0x%" PRIx64, i, phys_dest, result);
             }
 
             if (store_buffer) {

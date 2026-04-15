@@ -23,6 +23,7 @@ void WritebackStage::execute(CPUState& state) {
         auto instruction = cdb_entry.instruction;
         auto rob_entry = instruction->get_rob_entry();
         auto phys_dest = instruction->get_physical_dest();
+        auto dest_kind = instruction->get_physical_dest_kind();
         auto result = instruction->get_result();
         
         LOGT(WRITEBACK, "cdb writeback: rob[%d] p%d = 0x%" PRIx64,
@@ -34,7 +35,7 @@ void WritebackStage::execute(CPUState& state) {
         state.reservation_station->update_operands(cdb_entry, state.store_buffer.get());
         
         // 更新寄存器重命名映射
-        state.register_rename->update_physical_register(phys_dest, result, rob_entry);
+        state.register_rename->update_physical_register(dest_kind, phys_dest, result, rob_entry);
         
         // 更新ROB表项（使用DynamicInst指针直接验证）
         auto rob_instruction = state.reorder_buffer->get_entry(rob_entry);

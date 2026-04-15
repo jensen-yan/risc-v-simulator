@@ -135,9 +135,9 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                         inst.opcode == Opcode::FNMADD) {
                         const auto fp_result = InstructionExecutor::executeFusedFPOperation(
                             inst,
-                            state.arch_fp_registers[inst.rs1],
-                            state.arch_fp_registers[inst.rs2],
-                            state.arch_fp_registers[inst.rs3],
+                            instruction->get_src1_value(),
+                            instruction->get_src2_value(),
+                            instruction->get_src3_value(),
                             current_frm);
                         fp_info.value = fp_result.value;
                         fp_info.write_int_reg = fp_result.write_int_reg;
@@ -146,9 +146,9 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                     } else {
                         const auto fp_result = InstructionExecutor::executeFPOperation(
                             inst,
-                            state.arch_fp_registers[inst.rs1],
-                            state.arch_fp_registers[inst.rs2],
-                            state.arch_registers[inst.rs1],
+                            instruction->get_src1_value(),
+                            instruction->get_src2_value(),
+                            instruction->get_src1_value(),
                             current_frm);
                         fp_info.value = fp_result.value;
                         fp_info.write_int_reg = fp_result.write_int_reg;

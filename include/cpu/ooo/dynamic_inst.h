@@ -141,16 +141,24 @@ private:
     // ========== 寄存器重命名信息 ==========
     RegNum logical_dest_;                     // 逻辑目标寄存器
     PhysRegNum physical_dest_;                // 物理目标寄存器
+    RegisterFileKind physical_dest_kind_;     // 目标寄存器所属寄存器文件
     RegNum logical_src1_;                     // 逻辑源寄存器1
     RegNum logical_src2_;                     // 逻辑源寄存器2
+    RegNum logical_src3_;                     // 逻辑源寄存器3（FMA类）
     PhysRegNum physical_src1_;                // 物理源寄存器1
     PhysRegNum physical_src2_;                // 物理源寄存器2
+    PhysRegNum physical_src3_;                // 物理源寄存器3
+    RegisterFileKind physical_src1_kind_;     // 源寄存器1所属寄存器文件
+    RegisterFileKind physical_src2_kind_;     // 源寄存器2所属寄存器文件
+    RegisterFileKind physical_src3_kind_;     // 源寄存器3所属寄存器文件
 
     // ========== 操作数状态 ==========
     bool src1_ready_;                         // 源操作数1是否准备好
     bool src2_ready_;                         // 源操作数2是否准备好  
+    bool src3_ready_;                         // 源操作数3是否准备好
     uint64_t src1_value_;                     // 源操作数1的值
     uint64_t src2_value_;                     // 源操作数2的值
+    uint64_t src3_value_;                     // 源操作数3的值
 
     // ========== 执行结果 ==========
     uint64_t result_;                         // 执行结果
@@ -220,21 +228,34 @@ public:
     RegNum get_logical_dest() const { return logical_dest_; }
     PhysRegNum get_physical_dest() const { return physical_dest_; }
     void set_physical_dest(PhysRegNum reg) { physical_dest_ = reg; }
+    RegisterFileKind get_physical_dest_kind() const { return physical_dest_kind_; }
+    void set_physical_dest_kind(RegisterFileKind kind) { physical_dest_kind_ = kind; }
     
     RegNum get_logical_src1() const { return logical_src1_; }
     RegNum get_logical_src2() const { return logical_src2_; }
+    RegNum get_logical_src3() const { return logical_src3_; }
     PhysRegNum get_physical_src1() const { return physical_src1_; }
     PhysRegNum get_physical_src2() const { return physical_src2_; }
+    PhysRegNum get_physical_src3() const { return physical_src3_; }
     void set_physical_src1(PhysRegNum reg) { physical_src1_ = reg; }
     void set_physical_src2(PhysRegNum reg) { physical_src2_ = reg; }
+    void set_physical_src3(PhysRegNum reg) { physical_src3_ = reg; }
+    RegisterFileKind get_physical_src1_kind() const { return physical_src1_kind_; }
+    RegisterFileKind get_physical_src2_kind() const { return physical_src2_kind_; }
+    RegisterFileKind get_physical_src3_kind() const { return physical_src3_kind_; }
+    void set_physical_src1_kind(RegisterFileKind kind) { physical_src1_kind_ = kind; }
+    void set_physical_src2_kind(RegisterFileKind kind) { physical_src2_kind_ = kind; }
+    void set_physical_src3_kind(RegisterFileKind kind) { physical_src3_kind_ = kind; }
 
     // ========== 操作数状态接口 ==========
     bool is_src1_ready() const { return src1_ready_; }
     bool is_src2_ready() const { return src2_ready_; }
-    bool is_ready_to_execute() const { return src1_ready_ && src2_ready_; }
+    bool is_src3_ready() const { return src3_ready_; }
+    bool is_ready_to_execute() const { return src1_ready_ && src2_ready_ && src3_ready_; }
     
     uint64_t get_src1_value() const { return src1_value_; }
     uint64_t get_src2_value() const { return src2_value_; }
+    uint64_t get_src3_value() const { return src3_value_; }
     
     void set_src1_ready(bool ready, uint64_t value = 0) { 
         src1_ready_ = ready; 
@@ -248,6 +269,12 @@ public:
         if (ready) {
             src2_value_ = value;
             refresh_memory_info_if_operands_ready();
+        }
+    }
+    void set_src3_ready(bool ready, uint64_t value = 0) {
+        src3_ready_ = ready;
+        if (ready) {
+            src3_value_ = value;
         }
     }
 

@@ -370,6 +370,77 @@ TEST_F(OutOfOrderCPUTest, SameCycleIssueRenameTracksYoungerRawDependency) {
         << "older 指令尚未执行完成时，younger RAW 源操作数应保持未就绪";
 }
 
+TEST_F(OutOfOrderCPUTest, FloatingPointHeadDoesNotBlockYoungerIntegerIssue) {
+    cpu->setFPRegister(1, 0xFFFFFFFF3FC00000ULL); // 1.5f
+    cpu->setFPRegister(2, 0xFFFFFFFF40000000ULL); // 2.0f
+
+    // fadd.s f3, f1, f2
+    writeInstruction(0x0, createRTypeInstruction(0x00, 2, 1, 0x0, 3, 0x53));
+    // addi x5, x0, 7
+    writeInstruction(0x4, createITypeInstruction(7, 0, 0x0, 5, 0x13));
+    writeInstruction(0x8, createECallInstruction());
+
+    auto& state = const_cast<CPUState&>(cpu->getCPUState());
+    state.l1i_cache.reset();
+    state.l1d_cache.reset();
+
+    cpu->setPC(0x0);
+    cpu->step();
+    cpu->step();
+    cpu->step();
+
+    auto first = state.reorder_buffer->get_entry(0);
+    auto second = state.reorder_buffer->get_entry(1);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(first->get_status(), DynamicInst::Status::ISSUED);
+    EXPECT_EQ(second->get_status(), DynamicInst::Status::ISSUED)
+        << "更老 FP 指令不应再阻塞年轻整数指令进入保留站";
+    EXPECT_EQ(first->get_physical_dest_kind(), RegisterFileKind::FloatingPoint);
+    EXPECT_EQ(second->get_physical_dest_kind(), RegisterFileKind::Integer);
+}
+
+TEST_F(OutOfOrderCPUTest, FloatingPointRenameTracksYoungerDependency) {
+    cpu->setFPRegister(1, 0xFFFFFFFF3FC00000ULL); // 1.5f
+    cpu->setFPRegister(2, 0xFFFFFFFF40000000ULL); // 2.0f
+
+    // fadd.s f3, f1, f2
+    writeInstruction(0x0, createRTypeInstruction(0x00, 2, 1, 0x0, 3, 0x53));
+    // fadd.s f4, f3, f2
+    writeInstruction(0x4, createRTypeInstruction(0x00, 2, 3, 0x0, 4, 0x53));
+    writeInstruction(0x8, createECallInstruction());
+
+    auto& state = const_cast<CPUState&>(cpu->getCPUState());
+    state.l1i_cache.reset();
+    state.l1d_cache.reset();
+
+    cpu->setPC(0x0);
+    cpu->step();
+    cpu->step();
+    cpu->step();
+
+    auto first = state.reorder_buffer->get_entry(0);
+    auto second = state.reorder_buffer->get_entry(1);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_EQ(first->get_status(), DynamicInst::Status::ISSUED);
+    ASSERT_EQ(second->get_status(), DynamicInst::Status::ISSUED);
+    EXPECT_EQ(first->get_physical_dest_kind(), RegisterFileKind::FloatingPoint);
+    EXPECT_EQ(second->get_physical_src1_kind(), RegisterFileKind::FloatingPoint);
+    EXPECT_EQ(second->get_physical_src1(), first->get_physical_dest())
+        << "年轻 FP 指令应跟踪更老 FP 结果的物理寄存器";
+    EXPECT_FALSE(second->is_src1_ready())
+        << "更老 FP 指令尚未写回前，年轻 FP 依赖源应保持未就绪";
+
+    for (int i = 0; i < 120 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    ASSERT_TRUE(cpu->isHalted());
+    EXPECT_EQ(cpu->getFPRegister(3), 0xFFFFFFFF40600000ULL); // 3.5f
+    EXPECT_EQ(cpu->getFPRegister(4), 0xFFFFFFFF40B00000ULL); // 5.5f
+}
+
 TEST_F(OutOfOrderCPUTest, SerializingSystemInstructionBlocksYoungerIssue) {
     // ADDI  x1, x0, 6
     // ADDI  x2, x0, 7

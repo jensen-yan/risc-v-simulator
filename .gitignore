@@ -51,6 +51,7 @@ test_results/
 benchmarks/external/
 benchmarks/build/
 benchmarks/results/
+docs/exec-plans/
 
 .cache/
 .humanize/

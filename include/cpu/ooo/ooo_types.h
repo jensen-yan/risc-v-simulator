@@ -28,6 +28,7 @@ using RSEntry = uint8_t;
 // 执行单元类型
 enum class ExecutionUnitType {
     ALU,        // 算术逻辑单元
+    FP,         // 浮点算术单元
     BRANCH,     // 分支单元
     LOAD,       // 加载单元
     STORE       // 存储单元

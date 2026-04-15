@@ -91,6 +91,19 @@ bool DynamicInst::is_alu_instruction() const {
            decoded_info_.opcode == Opcode::AUIPC;
 }
 
+bool is_fp_arithmetic_opcode(Opcode opcode) {
+    switch (opcode) {
+        case Opcode::OP_FP:
+        case Opcode::FMADD:
+        case Opcode::FMSUB:
+        case Opcode::FNMSUB:
+        case Opcode::FNMADD:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // ========== 执行单元类型获取 ==========
 ExecutionUnitType DynamicInst::get_required_execution_unit() const {
     if (is_load_instruction()) {
@@ -99,6 +112,8 @@ ExecutionUnitType DynamicInst::get_required_execution_unit() const {
         return ExecutionUnitType::STORE;
     } else if (is_branch_instruction() || is_jump_instruction()) {
         return ExecutionUnitType::BRANCH;
+    } else if (is_fp_arithmetic_opcode(decoded_info_.opcode)) {
+        return ExecutionUnitType::FP;
     } else {
         return ExecutionUnitType::ALU;
     }
@@ -350,6 +365,9 @@ void DynamicInst::setup_execution_requirements() {
                         break;
                 }
             }
+            break;
+        case ExecutionUnitType::FP:
+            exec_info_->execution_cycles = 1;
             break;
         case ExecutionUnitType::LOAD:
             exec_info_->execution_cycles = 2;  // 加载指令需要2个周期

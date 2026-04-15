@@ -181,6 +181,9 @@ void ExecuteStage::execute(CPUState& state) {
             case ExecutionUnitType::ALU:
                 unit = &state.alu_units[dispatch_result.unit_id];
                 break;
+            case ExecutionUnitType::FP:
+                unit = &state.fp_units[dispatch_result.unit_id];
+                break;
             case ExecutionUnitType::BRANCH:
                 unit = &state.branch_units[dispatch_result.unit_id];
                 break;
@@ -239,6 +242,9 @@ void ExecuteStage::execute(CPUState& state) {
             case ExecutionUnitType::ALU:
                 unit_type_str = "ALU";
                 break;
+            case ExecutionUnitType::FP:
+                unit_type_str = "FP";
+                break;
             case ExecutionUnitType::BRANCH:
                 unit_type_str = "BRANCH";
                 break;
@@ -289,6 +295,21 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     unit.instruction->get_instruction_id(), i, unit.result);
                 
                 complete_execution_unit(unit, ExecutionUnitType::ALU, i, state);
+            }
+        }
+    }
+
+    for (size_t i = 0; i < state.fp_units.size(); ++i) {
+        auto& unit = state.fp_units[i];
+        if (unit.busy) {
+            unit.remaining_cycles--;
+            LOGT(EXECUTE, "inst=%" PRId64 " FP%zu running, remaining=%d",
+                unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
+
+            if (unit.remaining_cycles <= 0) {
+                LOGT(EXECUTE, "inst=%" PRId64 " FP%zu done, result=0x%" PRIx64 " -> CDB",
+                    unit.instruction->get_instruction_id(), i, unit.result);
+                complete_execution_unit(unit, ExecutionUnitType::FP, i, state);
             }
         }
     }
@@ -480,6 +501,11 @@ ExecutionUnit* ExecuteStage::get_available_unit(ExecutionUnitType type, CPUState
     switch (type) {
         case ExecutionUnitType::ALU:
             for (auto& unit : state.alu_units) {
+                if (!unit.busy) return &unit;
+            }
+            break;
+        case ExecutionUnitType::FP:
+            for (auto& unit : state.fp_units) {
                 if (!unit.busy) return &unit;
             }
             break;
@@ -695,6 +721,7 @@ bool ExecuteStage::flush_younger_execution_units(CPUState& state,
     };
 
     flush_container(state.alu_units, ExecutionUnitType::ALU);
+    flush_container(state.fp_units, ExecutionUnitType::FP);
     flush_container(state.branch_units, ExecutionUnitType::BRANCH);
     flush_container(state.load_units, ExecutionUnitType::LOAD);
     flush_container(state.store_units, ExecutionUnitType::STORE);

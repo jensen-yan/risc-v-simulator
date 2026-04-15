@@ -268,6 +268,7 @@ struct CPUState {
     
     // 执行单元
     std::array<ExecutionUnit, 2> alu_units;      // 2个ALU单元
+    std::array<ExecutionUnit, 2> fp_units;       // 2个浮点算术单元
     std::array<ExecutionUnit, 1> branch_units;   // 1个分支单元
     std::array<ExecutionUnit, 1> load_units;     // 1个加载单元
     std::array<ExecutionUnit, 1> store_units;    // 1个存储单元
@@ -373,6 +374,7 @@ struct CPUState {
 
     void resetExecutionUnits() {
         resetExecutionUnitContainer(alu_units);
+        resetExecutionUnitContainer(fp_units);
         resetExecutionUnitContainer(branch_units);
         resetExecutionUnitContainer(load_units);
         resetExecutionUnitContainer(store_units);

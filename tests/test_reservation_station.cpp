@@ -56,6 +56,9 @@ protected:
         dynamic_inst->set_physical_dest(dest_reg);
         dynamic_inst->set_physical_src1(src1_reg);
         dynamic_inst->set_physical_src2(src2_reg);
+        dynamic_inst->set_physical_dest_kind(RegisterFileKind::Integer);
+        dynamic_inst->set_physical_src1_kind(RegisterFileKind::Integer);
+        dynamic_inst->set_physical_src2_kind(RegisterFileKind::Integer);
         dynamic_inst->set_rob_entry(rob_entry);
         // 设置操作数状态
         if (src1_ready) {
@@ -151,6 +154,7 @@ TEST_F(ReservationStationTest, OperandDependency) {
     
     auto mock_inst = std::make_shared<DynamicInst>(test_decoded, 0x1000, 999);
     mock_inst->set_physical_dest(PhysRegNum(32));  // 对应src1_reg
+    mock_inst->set_physical_dest_kind(RegisterFileKind::Integer);
     mock_inst->set_result(0xAABBCCDD);
     
     CommonDataBusEntry cdb_entry(mock_inst);
@@ -174,6 +178,7 @@ TEST_F(ReservationStationTest, ExecutionUnitAllocation) {
     std::vector<TestCase> test_cases = {
         {InstructionType::R_TYPE, Opcode::OP, ExecutionUnitType::ALU, "R型指令->ALU"},
         {InstructionType::I_TYPE, Opcode::OP_IMM, ExecutionUnitType::ALU, "I型算术指令->ALU"},
+        {InstructionType::R_TYPE, Opcode::OP_FP, ExecutionUnitType::FP, "浮点算术指令->FP"},
         {InstructionType::I_TYPE, Opcode::LOAD, ExecutionUnitType::LOAD, "加载指令->LOAD单元"},
         {InstructionType::S_TYPE, Opcode::STORE, ExecutionUnitType::STORE, "存储指令->STORE单元"},
         {InstructionType::B_TYPE, Opcode::BRANCH, ExecutionUnitType::BRANCH, "分支指令->BRANCH单元"},
@@ -362,6 +367,28 @@ TEST_F(ReservationStationTest, BatchDispatchUsesTwoAvailableAluSlots) {
     EXPECT_EQ(results[0].instruction->get_instruction_id(), dyn1->get_instruction_id());
     EXPECT_EQ(results[1].instruction->get_instruction_id(), dyn2->get_instruction_id());
     EXPECT_NE(results[0].unit_id, results[1].unit_id) << "两条 ALU 指令应占用不同 ALU 单元";
+}
+
+TEST_F(ReservationStationTest, BatchDispatchUsesIndependentAluAndFpSlots) {
+    auto alu_inst = createInstruction(InstructionType::R_TYPE, Opcode::OP, 1, 2, 3);
+    auto alu_dyn = createDynamicInst(alu_inst, 32, 33, 34, true, true, 0x1000, 1);
+
+    auto fp_inst = createInstruction(InstructionType::R_TYPE, Opcode::OP_FP, 4, 5, 6);
+    fp_inst.funct7 = Funct7::FADD_S;
+    auto fp_dyn = createDynamicInst(fp_inst, 35, 36, 37, true, true, 0x1004, 2);
+    fp_dyn->set_physical_dest_kind(RegisterFileKind::FloatingPoint);
+    fp_dyn->set_physical_src1_kind(RegisterFileKind::FloatingPoint);
+    fp_dyn->set_physical_src2_kind(RegisterFileKind::FloatingPoint);
+
+    EXPECT_TRUE(rs.issue_instruction(alu_dyn).success);
+    EXPECT_TRUE(rs.issue_instruction(fp_dyn).success);
+
+    const auto results = rs.dispatch_instructions(2);
+    ASSERT_EQ(results.size(), 2u) << "同拍应能同时派发一条整数 ALU 和一条 FP 算术指令";
+    EXPECT_EQ(results[0].instruction->get_instruction_id(), alu_dyn->get_instruction_id());
+    EXPECT_EQ(results[0].unit_type, ExecutionUnitType::ALU);
+    EXPECT_EQ(results[1].instruction->get_instruction_id(), fp_dyn->get_instruction_id());
+    EXPECT_EQ(results[1].unit_type, ExecutionUnitType::FP);
 }
 
 TEST_F(ReservationStationTest, BatchDispatchSkipsBlockedOlderCandidateForSecondSlot) {

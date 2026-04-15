@@ -9,6 +9,7 @@ namespace riscv {
 ReservationStation::ReservationStation() 
     : rs_entries(MAX_RS_ENTRIES),
       alu_units_busy(MAX_ALU_UNITS, false),
+      fp_units_busy(MAX_FP_UNITS, false),
       branch_units_busy(MAX_BRANCH_UNITS, false),
       load_units_busy(MAX_LOAD_UNITS, false),
       store_units_busy(MAX_STORE_UNITS, false),
@@ -28,6 +29,7 @@ void ReservationStation::initialize_free_list() {
 
 void ReservationStation::initialize_execution_units() {
     std::fill(alu_units_busy.begin(), alu_units_busy.end(), false);
+    std::fill(fp_units_busy.begin(), fp_units_busy.end(), false);
     std::fill(branch_units_busy.begin(), branch_units_busy.end(), false);
     std::fill(load_units_busy.begin(), load_units_busy.end(), false);
     std::fill(store_units_busy.begin(), store_units_busy.end(), false);
@@ -86,6 +88,7 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
     }
 
     auto alu_available = std::vector<bool>(MAX_ALU_UNITS, false);
+    auto fp_available = std::vector<bool>(MAX_FP_UNITS, false);
     auto branch_available = std::vector<bool>(MAX_BRANCH_UNITS, false);
     auto load_available = std::vector<bool>(MAX_LOAD_UNITS, false);
     auto store_available = std::vector<bool>(MAX_STORE_UNITS, false);
@@ -93,6 +96,9 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
 
     for (int i = 0; i < MAX_ALU_UNITS; ++i) {
         alu_available[i] = !alu_units_busy[i];
+    }
+    for (int i = 0; i < MAX_FP_UNITS; ++i) {
+        fp_available[i] = !fp_units_busy[i];
     }
     for (int i = 0; i < MAX_BRANCH_UNITS; ++i) {
         branch_available[i] = !branch_units_busy[i];
@@ -106,7 +112,7 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
 
     while (results.size() < limit) {
         const RSEntry ready_rs = select_ready_instruction_with_availability(
-            alu_available, branch_available, load_available, store_available, selected_entries);
+            alu_available, fp_available, branch_available, load_available, store_available, selected_entries);
         if (ready_rs >= MAX_RS_ENTRIES) {
             break;
         }
@@ -126,6 +132,9 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
         switch (unit_type) {
             case ExecutionUnitType::ALU:
                 unit_available = &alu_available;
+                break;
+            case ExecutionUnitType::FP:
+                unit_available = &fp_available;
                 break;
             case ExecutionUnitType::BRANCH:
                 unit_available = &branch_available;
@@ -177,6 +186,7 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
 
         LOGT(RS, "dispatch to %s%d, pc=0x%" PRIx64 ", inst=%" PRId64,
              (unit_type == ExecutionUnitType::ALU ? "ALU" :
+              unit_type == ExecutionUnitType::FP ? "FP" :
               unit_type == ExecutionUnitType::BRANCH ? "BRANCH" :
               unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE"),
              allocated_unit_id, instruction->get_pc(), instruction->get_instruction_id());
@@ -285,6 +295,8 @@ bool ReservationStation::is_execution_unit_available(ExecutionUnitType unit_type
     switch (unit_type) {
         case ExecutionUnitType::ALU:
             return std::find(alu_units_busy.begin(), alu_units_busy.end(), false) != alu_units_busy.end();
+        case ExecutionUnitType::FP:
+            return std::find(fp_units_busy.begin(), fp_units_busy.end(), false) != fp_units_busy.end();
         case ExecutionUnitType::BRANCH:
             return std::find(branch_units_busy.begin(), branch_units_busy.end(), false) != branch_units_busy.end();
         case ExecutionUnitType::LOAD:
@@ -302,6 +314,14 @@ int ReservationStation::allocate_execution_unit(ExecutionUnitType unit_type) {
             for (int i = 0; i < MAX_ALU_UNITS; ++i) {
                 if (!alu_units_busy[i]) {
                     alu_units_busy[i] = true;
+                    return i;
+                }
+            }
+            break;
+        case ExecutionUnitType::FP:
+            for (int i = 0; i < MAX_FP_UNITS; ++i) {
+                if (!fp_units_busy[i]) {
+                    fp_units_busy[i] = true;
                     return i;
                 }
             }
@@ -339,6 +359,11 @@ void ReservationStation::release_execution_unit(ExecutionUnitType unit_type, int
         case ExecutionUnitType::ALU:
             if (unit_id >= 0 && unit_id < MAX_ALU_UNITS) {
                 alu_units_busy[unit_id] = false;
+            }
+            break;
+        case ExecutionUnitType::FP:
+            if (unit_id >= 0 && unit_id < MAX_FP_UNITS) {
+                fp_units_busy[unit_id] = false;
             }
             break;
         case ExecutionUnitType::BRANCH:
@@ -384,6 +409,12 @@ void ReservationStation::dump_execution_units() const {
     std::cout << "ALU Units: ";
     for (int i = 0; i < MAX_ALU_UNITS; ++i) {
         std::cout << (alu_units_busy[i] ? "BUSY " : "FREE ");
+    }
+    std::cout << std::endl;
+
+    std::cout << "FP Units: ";
+    for (int i = 0; i < MAX_FP_UNITS; ++i) {
+        std::cout << (fp_units_busy[i] ? "BUSY " : "FREE ");
     }
     std::cout << std::endl;
     
@@ -461,16 +492,18 @@ bool ReservationStation::is_instruction_ready(DynamicInstPtr instruction) const 
 
 RSEntry ReservationStation::select_ready_instruction() const {
     const auto alu_available = std::vector<bool>(MAX_ALU_UNITS, true);
+    const auto fp_available = std::vector<bool>(MAX_FP_UNITS, true);
     const auto branch_available = std::vector<bool>(MAX_BRANCH_UNITS, true);
     const auto load_available = std::vector<bool>(MAX_LOAD_UNITS, true);
     const auto store_available = std::vector<bool>(MAX_STORE_UNITS, true);
     const auto selected_entries = std::vector<bool>(MAX_RS_ENTRIES, false);
     return select_ready_instruction_with_availability(
-        alu_available, branch_available, load_available, store_available, selected_entries);
+        alu_available, fp_available, branch_available, load_available, store_available, selected_entries);
 }
 
 RSEntry ReservationStation::select_ready_instruction_with_availability(
     const std::vector<bool>& alu_available,
+    const std::vector<bool>& fp_available,
     const std::vector<bool>& branch_available,
     const std::vector<bool>& load_available,
     const std::vector<bool>& store_available,
@@ -495,6 +528,10 @@ RSEntry ReservationStation::select_ready_instruction_with_availability(
                     case ExecutionUnitType::ALU:
                         unit_available =
                             std::find(alu_available.begin(), alu_available.end(), true) != alu_available.end();
+                        break;
+                    case ExecutionUnitType::FP:
+                        unit_available =
+                            std::find(fp_available.begin(), fp_available.end(), true) != fp_available.end();
                         break;
                     case ExecutionUnitType::BRANCH:
                         unit_available =

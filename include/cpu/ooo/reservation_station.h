@@ -28,6 +28,7 @@ private:
     // 配置参数
     static const int MAX_RS_ENTRIES = 48;        // 保留站最大容量
     static const int MAX_ALU_UNITS = 2;          // ALU执行单元数量
+    static const int MAX_FP_UNITS = 2;           // FP执行单元数量
     static const int MAX_BRANCH_UNITS = 1;       // 分支执行单元数量
     static const int MAX_LOAD_UNITS = 1;         // 加载执行单元数量
     static const int MAX_STORE_UNITS = 1;        // 存储执行单元数量
@@ -38,6 +39,7 @@ private:
     
     // 执行单元忙碌状态
     std::vector<bool> alu_units_busy;
+    std::vector<bool> fp_units_busy;
     std::vector<bool> branch_units_busy;
     std::vector<bool> load_units_busy;
     std::vector<bool> store_units_busy;
@@ -138,6 +140,7 @@ private:
 
     // 在给定可用执行单元快照下，选择一条准备好的指令
     RSEntry select_ready_instruction_with_availability(const std::vector<bool>& alu_available,
+                                                       const std::vector<bool>& fp_available,
                                                        const std::vector<bool>& branch_available,
                                                        const std::vector<bool>& load_available,
                                                        const std::vector<bool>& store_available,

@@ -264,6 +264,9 @@ void FetchStage::execute(CPUState& state) {
         for (const auto& unit : state.alu_units) {
             if (unit.busy) has_busy_units = true;
         }
+        for (const auto& unit : state.fp_units) {
+            if (unit.busy) has_busy_units = true;
+        }
         for (const auto& unit : state.branch_units) {
             if (unit.busy) has_busy_units = true;
         }

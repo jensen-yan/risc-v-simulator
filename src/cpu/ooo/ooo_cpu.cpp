@@ -53,6 +53,7 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     state.branch_predictor = std::make_unique<BranchPredictor>();
     auto icache_cfg = createDefaultL1CacheConfig();
     auto dcache_cfg = createDefaultL1CacheConfig();
+    dcache_cfg.max_outstanding_misses = 2;
     dcache_cfg.enable_next_line_prefetch = g_enable_l1d_next_line_prefetch;
     state.l1i_cache = std::make_unique<BlockingCache>(icache_cfg);
     state.l1d_cache = std::make_unique<BlockingCache>(dcache_cfg);

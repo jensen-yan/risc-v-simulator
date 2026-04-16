@@ -4,6 +4,7 @@
 #include "common/types.h"
 #include "core/instruction_executor.h"
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -133,6 +134,7 @@ ExecuteStage::ExecuteStage() {
 void ExecuteStage::execute(CPUState& state) {
     // 首先更新正在执行的指令的状态
     update_execution_units(state);
+    update_memory_access_inflight(state);
 
     state.perf_counters.increment(PerfCounterId::DISPATCH_SLOTS, OOOPipelineConfig::DISPATCH_WIDTH);
     const auto addr_unknown_store_snapshot = captureAddrUnknownStoreSnapshot(state);
@@ -145,6 +147,15 @@ void ExecuteStage::execute(CPUState& state) {
     if (dispatch_results.empty()) {
         LOGT(EXECUTE, "no ready instruction in reservation station");
         state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
+
+        const bool has_inflight_memory_wait = std::any_of(
+            state.memory_access_inflight.begin(),
+            state.memory_access_inflight.end(),
+            [](const MemoryAccessInFlight& entry) { return entry.valid; });
+        if (has_inflight_memory_wait) {
+            state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
+            return;
+        }
 
         const size_t rs_occupied = state.reservation_station->get_occupied_entry_count();
         if (rs_occupied == 0) {
@@ -430,6 +441,23 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     continue;
                 }
                 if (load_result == LoadExecutionResult::WaitingForCache) {
+                    if (unit.dcache.request_sent &&
+                        move_memory_access_to_inflight(unit, ExecutionUnitType::LOAD, i, state)) {
+                        continue;
+                    }
+
+                    if (!unit.dcache.request_sent) {
+                        auto blocked_inst = unit.instruction;
+                        blocked_inst->set_status(DynamicInst::Status::ISSUED);
+                        state.reservation_station->release_execution_unit(
+                            ExecutionUnitType::LOAD, static_cast<int>(i));
+                        resetExecutionUnitState(unit);
+                        LOGT(EXECUTE,
+                             "inst=%" PRId64 " LOAD%zu blocked by dcache outstanding limit, release and retry",
+                             blocked_inst->get_instruction_id(), i);
+                        continue;
+                    }
+
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waiting for dcache, remaining=%d",
                         unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
                     continue;
@@ -476,6 +504,23 @@ void ExecuteStage::update_execution_units(CPUState& state) {
 
                 if (!start_or_wait_dcache_access(
                         unit, state, CacheAccessType::Write, PerfCounterId::CACHE_L1D_STALL_CYCLES_STORE)) {
+                    if (unit.dcache.request_sent &&
+                        move_memory_access_to_inflight(unit, ExecutionUnitType::STORE, i, state)) {
+                        continue;
+                    }
+
+                    if (!unit.dcache.request_sent) {
+                        auto blocked_inst = unit.instruction;
+                        blocked_inst->set_status(DynamicInst::Status::ISSUED);
+                        state.reservation_station->release_execution_unit(
+                            ExecutionUnitType::STORE, static_cast<int>(i));
+                        resetExecutionUnitState(unit);
+                        LOGT(EXECUTE,
+                             "inst=%" PRId64 " STORE%zu blocked by dcache outstanding limit, release and retry",
+                             blocked_inst->get_instruction_id(), i);
+                        continue;
+                    }
+
                     LOGT(EXECUTE, "inst=%" PRId64 " STORE%zu waiting for dcache, remaining=%d",
                         unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
                     continue;
@@ -494,6 +539,49 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 complete_execution_unit(unit, ExecutionUnitType::STORE, i, state);
             }
         }
+    }
+}
+
+void ExecuteStage::update_memory_access_inflight(CPUState& state) {
+    for (auto& entry : state.memory_access_inflight) {
+        if (!entry.valid || !entry.state.instruction) {
+            continue;
+        }
+
+        auto& inflight = entry.state;
+        if (inflight.remaining_cycles > 0) {
+            --inflight.remaining_cycles;
+        }
+
+        if (inflight.remaining_cycles > 0) {
+            LOGT(EXECUTE,
+                 "inst=%" PRId64 " %s inflight waiting, remaining=%d",
+                 inflight.instruction->get_instruction_id(),
+                 entry.unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE",
+                 inflight.remaining_cycles);
+            continue;
+        }
+
+        if (entry.unit_type == ExecutionUnitType::LOAD) {
+            LOGT(EXECUTE,
+                 "inst=%" PRId64 " LOAD inflight done, result=0x%" PRIx64 " -> CDB",
+                 inflight.instruction->get_instruction_id(),
+                 inflight.result);
+            record_load_replay_bucket(inflight.instruction, state);
+            complete_execution_unit(inflight, ExecutionUnitType::LOAD, 0, state, /*release_dispatch_unit=*/false);
+        } else {
+            inflight.result = 0;
+            LOGT(EXECUTE,
+                 "inst=%" PRId64 " STORE inflight done, notify ROB",
+                 inflight.instruction->get_instruction_id());
+            if (try_recover_memory_order_violation(inflight.instruction, state)) {
+                resetMemoryAccessInFlightState(entry);
+                return;
+            }
+            complete_execution_unit(inflight, ExecutionUnitType::STORE, 0, state, /*release_dispatch_unit=*/false);
+        }
+
+        resetMemoryAccessInFlightState(entry);
     }
 }
 
@@ -528,7 +616,40 @@ ExecutionUnit* ExecuteStage::get_available_unit(ExecutionUnitType type, CPUState
     return nullptr;
 }
 
-void ExecuteStage::complete_execution_unit(ExecutionUnit& unit, ExecutionUnitType unit_type, size_t unit_index, CPUState& state) {
+bool ExecuteStage::move_memory_access_to_inflight(ExecutionUnit& unit,
+                                                  ExecutionUnitType unit_type,
+                                                  size_t unit_index,
+                                                  CPUState& state) {
+    for (auto& entry : state.memory_access_inflight) {
+        if (entry.valid) {
+            continue;
+        }
+
+        entry.valid = true;
+        entry.unit_type = unit_type;
+        entry.state = unit;
+        const RSEntry rs_entry = unit.instruction->get_rs_entry();
+        state.reservation_station->release_entry(rs_entry);
+        unit.instruction->set_rs_entry(std::numeric_limits<RSEntry>::max());
+        state.reservation_station->release_execution_unit(unit_type, static_cast<int>(unit_index));
+        LOGT(EXECUTE,
+             "inst=%" PRId64 " move %s%zu request to inflight queue, remaining=%d",
+             unit.instruction->get_instruction_id(),
+             unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE",
+             unit_index,
+             unit.remaining_cycles);
+        resetExecutionUnitState(unit);
+        return true;
+    }
+
+    return false;
+}
+
+void ExecuteStage::complete_execution_unit(ExecutionUnit& unit,
+                                           ExecutionUnitType unit_type,
+                                           size_t unit_index,
+                                           CPUState& state,
+                                           bool release_dispatch_unit) {
     unit.instruction->set_complete_cycle(state.cycle_count);
 
     if (unit.has_exception) {
@@ -550,12 +671,13 @@ void ExecuteStage::complete_execution_unit(ExecutionUnit& unit, ExecutionUnitTyp
     // 清空对应的保留站条目
     RSEntry rs_entry = unit.instruction->get_rs_entry();
     state.reservation_station->release_entry(rs_entry);
-    
+
+    if (release_dispatch_unit) {
+        state.reservation_station->release_execution_unit(unit_type, unit_index);
+    }
+
     // 释放执行单元
     resetExecutionUnitState(unit);
-    
-    // 释放保留站中的执行单元状态
-    state.reservation_station->release_execution_unit(unit_type, unit_index);
 }
 
 bool ExecuteStage::try_recover_control_mispredict_early(ExecutionUnit& unit,
@@ -725,6 +847,20 @@ bool ExecuteStage::flush_younger_execution_units(CPUState& state,
     flush_container(state.branch_units, ExecutionUnitType::BRANCH);
     flush_container(state.load_units, ExecutionUnitType::LOAD);
     flush_container(state.store_units, ExecutionUnitType::STORE);
+
+    for (auto& entry : state.memory_access_inflight) {
+        if (!entry.valid || !entry.state.instruction) {
+            continue;
+        }
+        if (entry.state.instruction->get_instruction_id() <= instruction_id) {
+            continue;
+        }
+
+        flushed_dcache_request = true;
+        LOGT(EXECUTE, "flush younger inflight memory access inst=%" PRId64,
+             entry.state.instruction->get_instruction_id());
+        resetMemoryAccessInFlightState(entry);
+    }
     return flushed_dcache_request;
 }
 

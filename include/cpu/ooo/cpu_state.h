@@ -76,6 +76,12 @@ struct ExecutionUnit {
     DCacheAccessState dcache;
 };
 
+struct MemoryAccessInFlight {
+    bool valid = false;
+    ExecutionUnitType unit_type = ExecutionUnitType::LOAD;
+    ExecutionUnit state;
+};
+
 struct ICacheFetchState {
     ICacheFetchState() : wait_cycles_(0), request_pending_(false), request_pc_(0), pending_instruction_valid_(false), pending_instruction_(0) {}
 
@@ -145,6 +151,12 @@ inline void resetExecutionUnitState(ExecutionUnit& unit) {
     unit.load_address = 0;
     unit.load_size = 0;
     unit.dcache.reset();
+}
+
+inline void resetMemoryAccessInFlightState(MemoryAccessInFlight& entry) {
+    entry.valid = false;
+    entry.unit_type = ExecutionUnitType::LOAD;
+    resetExecutionUnitState(entry.state);
 }
 
 template<typename UnitContainer>
@@ -272,7 +284,8 @@ struct CPUState {
     std::array<ExecutionUnit, 1> branch_units;   // 1个分支单元
     std::array<ExecutionUnit, 2> load_units;     // 2个加载单元
     std::array<ExecutionUnit, 2> store_units;    // 2个存储单元
-    
+    std::array<MemoryAccessInFlight, 8> memory_access_inflight; // 已发起的访存请求
+
     // 性能统计
     PerfCounterBank perf_counters; // 结构化性能计数器
     uint64_t branch_mispredicts;   // 条件分支预测错误次数（仅B-type）
@@ -378,6 +391,9 @@ struct CPUState {
         resetExecutionUnitContainer(branch_units);
         resetExecutionUnitContainer(load_units);
         resetExecutionUnitContainer(store_units);
+        for (auto& entry : memory_access_inflight) {
+            resetMemoryAccessInFlightState(entry);
+        }
     }
 };
 

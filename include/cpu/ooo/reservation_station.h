@@ -30,8 +30,8 @@ private:
     static const int MAX_ALU_UNITS = 2;          // ALU执行单元数量
     static const int MAX_FP_UNITS = 2;           // FP执行单元数量
     static const int MAX_BRANCH_UNITS = 1;       // 分支执行单元数量
-    static const int MAX_LOAD_UNITS = 1;         // 加载执行单元数量
-    static const int MAX_STORE_UNITS = 1;        // 存储执行单元数量
+    static const int MAX_LOAD_UNITS = 2;         // 加载执行单元数量
+    static const int MAX_STORE_UNITS = 2;        // 存储执行单元数量
     
     // 保留站表项
     std::vector<DynamicInstPtr> rs_entries;

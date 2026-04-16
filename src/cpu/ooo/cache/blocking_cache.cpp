@@ -29,7 +29,8 @@ BlockingCache::BlockingCache(const BlockingCacheConfig& config) : config_(config
     if ((config_.size_bytes % (config_.line_size_bytes * config_.associativity)) != 0) {
         throw std::invalid_argument("cache size must be divisible by line_size * associativity");
     }
-    if (config_.hit_latency <= 0 || config_.miss_penalty < 0) {
+    if (config_.hit_latency <= 0 || config_.miss_penalty < 0 ||
+        config_.max_outstanding_misses == 0) {
         throw std::invalid_argument("cache latency config is invalid");
     }
 
@@ -175,21 +176,22 @@ void BlockingCache::invalidateRange(uint64_t address, uint64_t size) {
 }
 
 void BlockingCache::tick() {
-    if (!miss_in_flight_) {
+    if (outstanding_miss_cycles_.empty()) {
         return;
     }
 
-    if (miss_service_remaining_cycles_ > 0) {
-        --miss_service_remaining_cycles_;
+    for (auto& remaining_cycles : outstanding_miss_cycles_) {
+        if (remaining_cycles > 0) {
+            --remaining_cycles;
+        }
     }
-    if (miss_service_remaining_cycles_ == 0) {
-        miss_in_flight_ = false;
-    }
+    outstanding_miss_cycles_.erase(
+        std::remove(outstanding_miss_cycles_.begin(), outstanding_miss_cycles_.end(), 0),
+        outstanding_miss_cycles_.end());
 }
 
 void BlockingCache::flushInFlight() {
-    miss_in_flight_ = false;
-    miss_service_remaining_cycles_ = 0;
+    outstanding_miss_cycles_.clear();
 }
 
 void BlockingCache::resetStats() {
@@ -246,7 +248,8 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
         return result;
     }
 
-    if (model_timing && miss_in_flight_) {
+    if (model_timing &&
+        outstanding_miss_cycles_.size() >= config_.max_outstanding_misses) {
         result.blocked = true;
         return result;
     }
@@ -277,10 +280,16 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
 
     if (model_timing && !overall_hit) {
         maybeIssueNextLinePrefetch(memory, line_addresses.back());
-        miss_in_flight_ = true;
-        miss_service_remaining_cycles_ = result.latency_cycles;
+        outstanding_miss_cycles_.push_back(result.latency_cycles);
     }
     return result;
+}
+
+int BlockingCache::missServiceRemainingCycles() const {
+    if (outstanding_miss_cycles_.empty()) {
+        return 0;
+    }
+    return *std::min_element(outstanding_miss_cycles_.begin(), outstanding_miss_cycles_.end());
 }
 
 std::vector<uint64_t> BlockingCache::enumerateLineAddresses(uint64_t address, uint8_t size) const {

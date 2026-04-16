@@ -54,7 +54,15 @@ CacheAccessResult fetchInstructionFromCache(const CPUState& state, Address virtu
     const Address second_half_pa = translateInstructionAddress(state, virtual_pc + 2, /*size=*/2);
     auto second_result = state.l1i_cache->load(state.memory, second_half_pa, /*size=*/2, second_half_raw);
     if (second_result.blocked) {
+        const uint64_t first_line = first_half_pa / state.l1i_cache->getConfig().line_size_bytes;
+        const uint64_t second_line = second_half_pa / state.l1i_cache->getConfig().line_size_bytes;
+        // 第一拍 miss 已把整条 cache line 装入 I$。如果第二个半字仍在同一条 line，
+        // 则无需把整次取指记成 blocked；直接功能性回读高 16 位即可保持 miss 记账正确。
+        if (!first_result.hit && first_line == second_line) {
+            second_half_raw = state.memory->readHalfWord(second_half_pa);
+        } else {
         return second_result;
+        }
     }
 
     const uint16_t second_half = static_cast<uint16_t>(second_half_raw & 0xFFFFU);

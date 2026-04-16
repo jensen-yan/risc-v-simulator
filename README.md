@@ -169,7 +169,7 @@ python3 ./tools/benchmarks/run_perf_suite.py \
 
 ## SPEC06 Checkpoint 批跑
 
-单切片 checkpoint 已支持 `5M warmup + 5M measure`。在此基础上，仓库提供了一个轻量批跑脚本，用于读取 GEM5 风格的 `checkpoint.lst / spec06_0.3c.lst` 并并行调度多个切片。
+单切片 checkpoint 默认使用 `20M warmup + 20M measure`。在此基础上，仓库提供了一个轻量批跑脚本，用于读取 GEM5 风格的 `checkpoint.lst / spec06_0.3c.lst` 并并行调度多个切片。
 
 ```bash
 python3 ./tools/benchmarks/run_checkpoint_batch.py \
@@ -178,8 +178,8 @@ python3 ./tools/benchmarks/run_checkpoint_batch.py \
   --checkpoint-root /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0 \
   --output-dir /tmp/spec06-gcc15-0.3c \
   --jobs 32 \
-  --warmup-instructions 5000000 \
-  --measure-instructions 5000000 \
+  --warmup-instructions 20000000 \
+  --measure-instructions 20000000 \
   --cpu-mode in-order \
   --cluster-config /nfs/home/share/gem5_ci/spec06_cpts/gcc15/gcc15-spec06-0.3.json
 ```

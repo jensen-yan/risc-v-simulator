@@ -21,6 +21,7 @@ struct BlockingCacheConfig {
     size_t associativity = 4;
     int hit_latency = 1;
     int miss_penalty = 20;
+    size_t max_outstanding_misses = 1;
     CacheWritePolicy write_policy = CacheWritePolicy::WriteBackWriteAllocate;
     bool enable_next_line_prefetch = false;
 };
@@ -74,8 +75,8 @@ public:
     void reset();
     void resetStats();
 
-    bool hasMissInFlight() const { return miss_in_flight_; }
-    int missServiceRemainingCycles() const { return miss_service_remaining_cycles_; }
+    bool hasMissInFlight() const { return !outstanding_miss_cycles_.empty(); }
+    int missServiceRemainingCycles() const;
     const BlockingCacheConfig& getConfig() const { return config_; }
     const BlockingCacheStats& getStats() const { return stats_; }
 
@@ -97,8 +98,7 @@ private:
     uint64_t lru_clock_ = 0;
     BlockingCacheStats stats_{};
 
-    bool miss_in_flight_ = false;
-    int miss_service_remaining_cycles_ = 0;
+    std::vector<int> outstanding_miss_cycles_;
 
     bool isBypassAccess(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size) const;
     CacheAccessResult ensureResident(std::shared_ptr<Memory> memory,

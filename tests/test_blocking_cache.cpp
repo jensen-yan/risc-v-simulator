@@ -92,6 +92,37 @@ TEST(BlockingCacheTest, AccessIsBlockedWhileMissInFlight) {
     EXPECT_FALSE(next.hit);
 }
 
+TEST(BlockingCacheTest, AccessAllowsMultipleOutstandingMissesUpToConfiguredLimit) {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 256;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 2;
+
+    auto memory = std::make_shared<Memory>(1024);
+    BlockingCache cache(cfg);
+
+    const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+
+    const auto second = cache.access(memory, 0x80, 4, CacheAccessType::Read);
+    EXPECT_FALSE(second.blocked);
+    EXPECT_FALSE(second.hit);
+
+    const auto third = cache.access(memory, 0x100, 4, CacheAccessType::Read);
+    EXPECT_TRUE(third.blocked);
+    EXPECT_EQ(third.latency_cycles, 0);
+
+    drainMiss(cache);
+
+    const auto retry = cache.access(memory, 0x100, 4, CacheAccessType::Read);
+    EXPECT_FALSE(retry.blocked);
+    EXPECT_FALSE(retry.hit);
+}
+
 TEST(BlockingCacheTest, CommitStoreUpdatesCachedDataForLaterLoad) {
     auto memory = std::make_shared<Memory>(4096);
     memory->writeWord(0x120, 0x11111111);

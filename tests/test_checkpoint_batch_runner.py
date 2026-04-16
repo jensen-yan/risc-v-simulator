@@ -191,6 +191,26 @@ class CheckpointBatchRunnerTest(unittest.TestCase):
         resolved = module.resolve_checkpoint_path(self.checkpoint_root, entries[0])
         self.assertEqual(resolved.name, "_555_0.026526_.zstd")
 
+    def test_parser_defaults_to_20m_warmup_and_20m_measure(self):
+        module = load_batch_runner_module()
+        parser = module.build_parser()
+
+        args = parser.parse_args(
+            [
+                "--simulator",
+                str(self.temp_dir / "fake_sim"),
+                "--checkpoint-list",
+                str(self.temp_dir / "spec06_0.3c.lst"),
+                "--checkpoint-root",
+                str(self.checkpoint_root),
+                "--output-dir",
+                str(self.output_dir),
+            ]
+        )
+
+        self.assertEqual(args.warmup_instructions, 20_000_000)
+        self.assertEqual(args.measure_instructions, 20_000_000)
+
     def test_batch_runner_emits_per_slice_logs_and_aggregate_summary(self):
         self.create_checkpoint("bzip2_source", "555", "0.026526")
         self.create_checkpoint("bzip2_html", "7052", "0.302542")

@@ -270,8 +270,8 @@ struct CPUState {
     std::array<ExecutionUnit, 2> alu_units;      // 2个ALU单元
     std::array<ExecutionUnit, 2> fp_units;       // 2个浮点算术单元
     std::array<ExecutionUnit, 1> branch_units;   // 1个分支单元
-    std::array<ExecutionUnit, 1> load_units;     // 1个加载单元
-    std::array<ExecutionUnit, 1> store_units;    // 1个存储单元
+    std::array<ExecutionUnit, 2> load_units;     // 2个加载单元
+    std::array<ExecutionUnit, 2> store_units;    // 2个存储单元
     
     // 性能统计
     PerfCounterBank perf_counters; // 结构化性能计数器

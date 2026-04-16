@@ -328,7 +328,7 @@ TEST_F(ReservationStationTest, PriorityScheduling) {
 
 // 测试10：当最老ready指令执行单元忙碌时，应该继续尝试后续可调度指令
 TEST_F(ReservationStationTest, SkipBusyUnitAndDispatchOtherReadyInstruction) {
-    // 先占用唯一的LOAD执行单元
+    // 先占用一个 LOAD 执行单元
     auto busy_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
     auto busy_load_inst = createDynamicInst(busy_load, 32, 0, 40, true, true, 0x1000, 1);
     EXPECT_TRUE(rs.issue_instruction(busy_load_inst).success);
@@ -336,21 +336,23 @@ TEST_F(ReservationStationTest, SkipBusyUnitAndDispatchOtherReadyInstruction) {
     EXPECT_TRUE(first_dispatch.success);
     EXPECT_EQ(first_dispatch.unit_type, ExecutionUnitType::LOAD);
 
-    // 再放入一条“更老”的ready LOAD（会因LOAD单元忙而暂时不可调度）
+    // 再放入一条更老的 ready LOAD。由于现在有第二个 LOAD 单元，它应优先被调度。
     auto blocked_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 3, 4, 0);
     auto blocked_load_inst = createDynamicInst(blocked_load, 41, 0, 42, true, true, 0x1004, 2);
     EXPECT_TRUE(rs.issue_instruction(blocked_load_inst).success);
 
-    // 放入一条“更年轻”的ready STORE（STORE单元空闲，应被调度）
+    // 放入一条更年轻的 ready STORE，验证不会越过更老且可执行的 LOAD。
     auto ready_store = createInstruction(InstructionType::S_TYPE, Opcode::STORE, 0, 5, 6);
     auto ready_store_inst = createDynamicInst(ready_store, 43, 44, 0, true, true, 0x1008, 3);
     EXPECT_TRUE(rs.issue_instruction(ready_store_inst).success);
 
     auto second_dispatch = rs.dispatch_instruction();
-    EXPECT_TRUE(second_dispatch.success) << "应跳过执行单元忙的LOAD，继续调度可执行STORE";
-    EXPECT_EQ(second_dispatch.unit_type, ExecutionUnitType::STORE);
+    EXPECT_TRUE(second_dispatch.success) << "第二个 LOAD 单元空闲时，应优先调度更老的 LOAD";
+    EXPECT_EQ(second_dispatch.unit_type, ExecutionUnitType::LOAD);
     EXPECT_EQ(second_dispatch.instruction->get_instruction_id(),
-              ready_store_inst->get_instruction_id());
+              blocked_load_inst->get_instruction_id());
+    EXPECT_NE(second_dispatch.unit_id, first_dispatch.unit_id)
+        << "更老的 LOAD 应占用另一个 LOAD 单元";
 }
 
 TEST_F(ReservationStationTest, BatchDispatchUsesTwoAvailableAluSlots) {
@@ -391,6 +393,23 @@ TEST_F(ReservationStationTest, BatchDispatchUsesIndependentAluAndFpSlots) {
     EXPECT_EQ(results[1].unit_type, ExecutionUnitType::FP);
 }
 
+TEST_F(ReservationStationTest, BatchDispatchUsesTwoAvailableLoadSlots) {
+    auto load1 = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
+    auto load_dyn1 = createDynamicInst(load1, 32, 0, 40, true, true, 0x1000, 1);
+
+    auto load2 = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 3, 4, 0);
+    auto load_dyn2 = createDynamicInst(load2, 41, 0, 42, true, true, 0x1004, 2);
+
+    EXPECT_TRUE(rs.issue_instruction(load_dyn1).success);
+    EXPECT_TRUE(rs.issue_instruction(load_dyn2).success);
+
+    const auto results = rs.dispatch_instructions(2);
+    ASSERT_EQ(results.size(), 2u) << "同拍应能派发两条加载指令";
+    EXPECT_EQ(results[0].unit_type, ExecutionUnitType::LOAD);
+    EXPECT_EQ(results[1].unit_type, ExecutionUnitType::LOAD);
+    EXPECT_NE(results[0].unit_id, results[1].unit_id) << "两条加载指令应占用不同 LOAD 单元";
+}
+
 TEST_F(ReservationStationTest, BatchDispatchSkipsBlockedOlderCandidateForSecondSlot) {
     auto busy_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
     auto busy_load_inst = createDynamicInst(busy_load, 32, 0, 40, true, true, 0x1000, 1);
@@ -411,11 +430,13 @@ TEST_F(ReservationStationTest, BatchDispatchSkipsBlockedOlderCandidateForSecondS
     EXPECT_TRUE(rs.issue_instruction(store_dyn).success);
 
     const auto results = rs.dispatch_instructions(2);
-    ASSERT_EQ(results.size(), 2u) << "应跳过被占用 LOAD 单元挡住的更老候选，继续填满两个槽";
-    EXPECT_EQ(results[0].instruction->get_instruction_id(), alu_dyn->get_instruction_id());
-    EXPECT_EQ(results[1].instruction->get_instruction_id(), store_dyn->get_instruction_id());
-    EXPECT_EQ(results[0].unit_type, ExecutionUnitType::ALU);
-    EXPECT_EQ(results[1].unit_type, ExecutionUnitType::STORE);
+    ASSERT_EQ(results.size(), 2u) << "第二个 LOAD 单元可用时，应先调度更老 LOAD，再调度后续 ALU";
+    EXPECT_EQ(results[0].instruction->get_instruction_id(), blocked_load_inst->get_instruction_id());
+    EXPECT_EQ(results[1].instruction->get_instruction_id(), alu_dyn->get_instruction_id());
+    EXPECT_EQ(results[0].unit_type, ExecutionUnitType::LOAD);
+    EXPECT_EQ(results[1].unit_type, ExecutionUnitType::ALU);
+    EXPECT_NE(results[0].unit_id, first_dispatch.unit_id)
+        << "更老的 LOAD 应分配到另一个 LOAD 单元";
 }
 
 TEST_F(ReservationStationTest, BatchDispatchSkipsPredicateRejectedOlderCandidate) {

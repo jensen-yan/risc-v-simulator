@@ -128,3 +128,4 @@
 - [x] 2026-05-19 OOO recovery 收口：`CommitStage` 的 full-pipeline recovery 与 `ExecuteStage` 的 younger-than recovery 已统一挂到 `OooRecovery`；`CONTEXT.md` 与 `ARCHITECTURE.md` 已记录 **OOO Recovery** 作为稳定领域术语和模块落点。
 - [x] 2026-05-19 追加收口 `ExecuteMemoryOrder` 的 memory-order violation full-pipeline recovery：`ExecuteMemoryOrder` 保留违规检测和 profile 归因，restart PC 与 full cleanup 交给 `OooRecovery`。
 - [x] 2026-05-19 追加收口 `OutOfOrderCPU::flush_pipeline()` 异常 halt 路径：异常触发点也改成 `OooRecovery::recoverFullPipeline` 的薄 wrapper，保留原先不清 store buffer / reservation / execution units 的行为选择；`cmake --build build -j`、聚焦 OooRecovery/ExecuteMemoryOrder/ExecuteStage/OutOfOrderCPU/Simulator 测试、全量 `ctest` 318/318 通过。
+- [x] 2026-05-19 继续深化 `CommitStage`：先抽 `CommitRetireEffects`，集中成功退休后的 store-buffer / rename checkpoint / load-store profile bookkeeping，减少主 commit loop 的横向细节；`cmake --build build -j`、聚焦 CommitRetireEffects/CommitStage/OOO 测试通过。

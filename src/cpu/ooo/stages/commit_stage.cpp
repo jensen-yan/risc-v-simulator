@@ -1,5 +1,6 @@
 #include "cpu/ooo/stages/commit_stage.h"
 #include "cpu/ooo/branch_predictor.h"
+#include "cpu/ooo/commit_retire_effects.h"
 #include "cpu/ooo/dynamic_inst.h"
 #include "core/csr_utils.h"
 #include "core/instruction_executor.h"
@@ -362,58 +363,7 @@ void CommitStage::execute(Context& context) {
         state.perf_counters.increment(PerfCounterId::COMMIT_UTILIZED_SLOTS);
         committed_this_cycle++;
         
-        // Store Buffer清理：提交指令时，清除该指令及之前的Store条目
-        // 这确保Store指令提交到内存后，相应的Store Buffer条目被清除
-        state.store_buffer->retire_stores_before(committed_inst->get_instruction_id());
-        state.rename_checkpoints.erase(committed_inst->get_instruction_id());
-
-        if (committed_inst->is_load_instruction()) {
-            const auto& memory_info = committed_inst->get_memory_info();
-            auto& profile = state.load_profiles[committed_inst->get_pc()];
-            profile.executions++;
-            profile.replay_total += memory_info.replay_count;
-            if (memory_info.replay_count != 0) {
-                profile.replayed_loads++;
-            }
-            profile.replay_host_comm += memory_info.replay_host_comm_count;
-            profile.replay_rob_store_amo += memory_info.replay_rob_store_amo_count;
-            profile.replay_rob_store_addr_unknown += memory_info.replay_rob_store_addr_unknown_count;
-            profile.replay_rob_store_overlap += memory_info.replay_rob_store_overlap_count;
-            profile.replay_store_buffer_overlap += memory_info.replay_store_buffer_overlap_count;
-            if (memory_info.speculated_past_addr_unknown_store) {
-                profile.speculated_addr_unknown++;
-                state.trainLoadAddrUnknownPredictor(committed_inst->get_pc(), true);
-            }
-            if (memory_info.blocked_by_addr_unknown_pair) {
-                profile.blocked_addr_unknown_pair++;
-            }
-
-            switch (memory_info.load_final_source) {
-                case DynamicInst::MemoryInfo::LoadFinalSource::ForwardedFull:
-                    profile.forwarded_full++;
-                    break;
-                case DynamicInst::MemoryInfo::LoadFinalSource::ForwardedPartial:
-                    profile.forwarded_partial++;
-                    break;
-                case DynamicInst::MemoryInfo::LoadFinalSource::FromMemory:
-                    profile.from_memory++;
-                    break;
-                case DynamicInst::MemoryInfo::LoadFinalSource::None:
-                    break;
-            }
-        }
-
-        if (committed_inst->is_store_instruction()) {
-            const auto& memory_info = committed_inst->get_memory_info();
-            auto& profile = state.store_profiles[committed_inst->get_pc()];
-            profile.executions++;
-            profile.forwarded_full += memory_info.caused_forwarded_full_count;
-            profile.forwarded_partial += memory_info.caused_forwarded_partial_count;
-            profile.blocked_rob_addr_unknown += memory_info.caused_rob_addr_unknown_block_count;
-            profile.blocked_rob_overlap += memory_info.caused_rob_overlap_block_count;
-            profile.blocked_store_buffer_overlap +=
-                memory_info.caused_store_buffer_overlap_block_count;
-        }
+        CommitRetireEffects::afterInstructionRetired(state, committed_inst);
 
         // ====== 控制流：commit仅在预测错时redirect/flush ======
         const bool is_control_flow =

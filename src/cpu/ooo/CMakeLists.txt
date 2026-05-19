@@ -1,6 +1,7 @@
 target_sources(risc-v-sim-lib PRIVATE
     ooo_cpu.cpp
     branch_predictor.cpp
+    commit_retire_effects.cpp
     dynamic_inst.cpp
     execute_memory_order.cpp
     execute_semantics.cpp

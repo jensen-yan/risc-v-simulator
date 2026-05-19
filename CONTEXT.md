@@ -21,6 +21,10 @@ _Avoid_: scattering addr-unknown speculation and recovery rules inside `ExecuteS
 The out-of-order pipeline rules that remove speculative work after a redirect, trap, fence, or other pipeline recovery reason.
 _Avoid_: scattering flush cleanup rules across individual stages
 
+**Commit Retire Effects**:
+The bookkeeping that happens after an instruction is successfully retired, including store-buffer retirement, rename checkpoint cleanup, and load/store profile updates.
+_Avoid_: mixing retired-work bookkeeping into the main commit loop
+
 **Addr-Unknown Store**:
 An older store whose effective address is not yet known when a younger load is considered for dispatch or execution.
 _Avoid_: unresolved store, pending store address
@@ -34,6 +38,7 @@ _Avoid_: blacklist entry
 - An **Out-of-Order Pipeline** executes each stage through a **Stage Context**.
 - **Execute Memory Order** observes **Addr-Unknown Store** state when deciding whether a younger load may proceed.
 - **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
+- **Commit Retire Effects** runs after the instruction's architectural state has been committed.
 - A **Bad Addr-Unknown Pair** causes **Execute Memory Order** to block later speculation for the same load/store PC pair.
 
 ## Example Dialogue

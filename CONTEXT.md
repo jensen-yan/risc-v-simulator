@@ -29,6 +29,10 @@ _Avoid_: duplicating D$ request bookkeeping inside load/store execution branches
 The execute-side formatting rule that turns raw load bytes into the architectural value, including signed/unsigned integer extension and FLW NaN-boxing.
 _Avoid_: duplicating load value extension switches across forwarding and memory paths
 
+**Execute Host-Comm Access**:
+The execute-side serialization rule for tohost/fromhost memory-mapped accesses, which must wait until the instruction is at the ROB head before touching host communication state.
+_Avoid_: hiding host-comm MMIO ordering checks inside individual load/store completion branches
+
 **OOO Recovery**:
 The out-of-order pipeline rules that remove speculative work after a redirect, trap, fence, or other pipeline recovery reason.
 _Avoid_: scattering flush cleanup rules across individual stages
@@ -68,6 +72,7 @@ _Avoid_: blacklist entry
 - **Execute Control Recovery** runs when an execution unit completes a control-flow instruction before commit has seen it.
 - **Execute DCache Access** is the cache timing submodule used by execute-side load/store paths.
 - **Execute Load Value** is shared by store-forwarded loads and memory-loaded values before writeback.
+- **Execute Host-Comm Access** protects tohost/fromhost accesses from observing state before older instructions retire.
 - **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
 - **Commit Retire Effects** runs after the instruction's architectural state has been committed.
 - **Commit Memory Effects** runs before generic retire bookkeeping so store/AMO state becomes architectural first.

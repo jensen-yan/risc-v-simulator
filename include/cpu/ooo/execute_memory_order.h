@@ -25,6 +25,11 @@ public:
         const AddrUnknownStoreSnapshot& snapshot);
     static bool tryRecoverViolation(const DynamicInstPtr& store_instruction,
                                     CPUState& state);
+    static void recordLoadReplayBucket(const DynamicInstPtr& instruction,
+                                       CPUState& state);
+    static void recordLoadReplayReason(const DynamicInstPtr& instruction,
+                                       CPUState& state,
+                                       PerfCounterId reason_counter_id);
 };
 
 } // namespace riscv

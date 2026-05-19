@@ -66,6 +66,22 @@ TEST(ExecuteMemoryOrderTest, MarksBlockedAddrUnknownPairOnce) {
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::LOADS_BLOCKED_ADDR_UNKNOWN_PAIR), 1u);
 }
 
+TEST(ExecuteMemoryOrderTest, RecordsLoadReplayReasonAndBucket) {
+    CPUState state;
+    auto load = create_dynamic_inst(makeMemoryInstruction(Opcode::LOAD), 0x200, 2);
+    auto& memory_info = load->get_memory_info();
+    memory_info.replay_count = 2;
+
+    ExecuteMemoryOrder::recordLoadReplayReason(
+        load, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN);
+    ExecuteMemoryOrder::recordLoadReplayBucket(load, state);
+
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::LOAD_REPLAYS), 1u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN), 1u);
+    EXPECT_EQ(memory_info.replay_rob_store_addr_unknown_count, 1u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::LOAD_REPLAY_BUCKET_2), 1u);
+}
+
 TEST(ExecuteMemoryOrderTest, RecoversOverlappingAddrUnknownSpeculationViolation) {
     CPUState state;
     state.reorder_buffer = std::make_unique<ReorderBuffer>();

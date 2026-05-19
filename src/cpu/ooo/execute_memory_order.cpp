@@ -206,4 +206,57 @@ bool ExecuteMemoryOrder::tryRecoverViolation(const DynamicInstPtr& store_instruc
     return true;
 }
 
+void ExecuteMemoryOrder::recordLoadReplayBucket(const DynamicInstPtr& instruction,
+                                                CPUState& state) {
+    if (!instruction) {
+        return;
+    }
+
+    const auto& memory_info = instruction->get_memory_info();
+    const uint32_t replay_count = memory_info.replay_count;
+    if (replay_count == 0) {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_0);
+    } else if (replay_count == 1) {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_1);
+    } else if (replay_count == 2) {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_2);
+    } else if (replay_count == 3) {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_3);
+    } else {
+        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_4_PLUS);
+    }
+}
+
+void ExecuteMemoryOrder::recordLoadReplayReason(const DynamicInstPtr& instruction,
+                                                CPUState& state,
+                                                PerfCounterId reason_counter_id) {
+    state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
+    state.perf_counters.increment(reason_counter_id);
+
+    if (!instruction) {
+        return;
+    }
+
+    auto& memory_info = instruction->get_memory_info();
+    switch (reason_counter_id) {
+        case PerfCounterId::LOAD_REPLAYS_HOST_COMM:
+            memory_info.replay_host_comm_count++;
+            break;
+        case PerfCounterId::LOAD_REPLAYS_ROB_STORE_AMO:
+            memory_info.replay_rob_store_amo_count++;
+            break;
+        case PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN:
+            memory_info.replay_rob_store_addr_unknown_count++;
+            break;
+        case PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP:
+            memory_info.replay_rob_store_overlap_count++;
+            break;
+        case PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP:
+            memory_info.replay_store_buffer_overlap_count++;
+            break;
+        default:
+            break;
+    }
+}
+
 } // namespace riscv

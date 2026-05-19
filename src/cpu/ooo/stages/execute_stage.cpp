@@ -292,7 +292,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                          "inst=%" PRId64 " LOAD%zu waits for ROB head before host-comm access",
                          blocked_inst->get_instruction_id(), i);
                     blocked_inst->get_memory_info().replay_count++;
-                    record_load_replay_reason(
+                    ExecuteMemoryOrder::recordLoadReplayReason(
                         blocked_inst, state, PerfCounterId::LOAD_REPLAYS_HOST_COMM);
                     continue;
                 }
@@ -326,7 +326,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     switch (hazard_kind) {
                         case ReorderBuffer::StoreHazardKind::Amo:
                             if (!speculated_past_addr_unknown) {
-                                record_load_replay_reason(
+                                ExecuteMemoryOrder::recordLoadReplayReason(
                                     blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_AMO);
                             }
                             break;
@@ -336,7 +336,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                                     .caused_rob_addr_unknown_block_count++;
                             }
                             if (!speculated_past_addr_unknown) {
-                                record_load_replay_reason(
+                                ExecuteMemoryOrder::recordLoadReplayReason(
                                     blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN);
                             }
                             break;
@@ -346,7 +346,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                                     .caused_rob_overlap_block_count++;
                             }
                             if (!speculated_past_addr_unknown) {
-                                record_load_replay_reason(
+                                ExecuteMemoryOrder::recordLoadReplayReason(
                                     blocked_inst, state, PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP);
                             }
                             break;
@@ -369,7 +369,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, replay and release load unit",
                         blocked_inst->get_instruction_id(), i);
                     blocked_inst->get_memory_info().replay_count++;
-                    record_load_replay_reason(
+                    ExecuteMemoryOrder::recordLoadReplayReason(
                         blocked_inst, state, PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP);
                     continue;
                 }
@@ -398,7 +398,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 if (load_result == LoadExecutionResult::Exception) {
                     LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu raised exception: %s",
                         unit.instruction->get_instruction_id(), i, unit.exception_msg.c_str());
-                    record_load_replay_bucket(unit.instruction, state);
+                    ExecuteMemoryOrder::recordLoadReplayBucket(unit.instruction, state);
                     complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
                     continue;
                 }
@@ -408,7 +408,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     i, (load_result == LoadExecutionResult::Forwarded ? "(store-forwarded)" : "(loaded-from-memory)"),
                     unit.result);
 
-                record_load_replay_bucket(unit.instruction, state);
+                ExecuteMemoryOrder::recordLoadReplayBucket(unit.instruction, state);
                 
                 complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
             }
@@ -500,7 +500,7 @@ void ExecuteStage::update_memory_access_inflight(CPUState& state) {
                  "inst=%" PRId64 " LOAD inflight done, result=0x%" PRIx64 " -> CDB",
                  inflight.instruction->get_instruction_id(),
                  inflight.result);
-            record_load_replay_bucket(inflight.instruction, state);
+            ExecuteMemoryOrder::recordLoadReplayBucket(inflight.instruction, state);
             complete_execution_unit(inflight, ExecutionUnitType::LOAD, 0, state, /*release_dispatch_unit=*/false);
         } else {
             inflight.result = 0;
@@ -804,58 +804,6 @@ void ExecuteStage::erase_younger_rename_checkpoints(CPUState& state, uint64_t in
         } else {
             ++it;
         }
-    }
-}
-
-void ExecuteStage::record_load_replay_bucket(const DynamicInstPtr& instruction, CPUState& state) {
-    if (!instruction) {
-        return;
-    }
-
-    const auto& memory_info = instruction->get_memory_info();
-    const uint32_t replay_count = memory_info.replay_count;
-    if (replay_count == 0) {
-        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_0);
-    } else if (replay_count == 1) {
-        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_1);
-    } else if (replay_count == 2) {
-        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_2);
-    } else if (replay_count == 3) {
-        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_3);
-    } else {
-        state.perf_counters.increment(PerfCounterId::LOAD_REPLAY_BUCKET_4_PLUS);
-    }
-}
-
-void ExecuteStage::record_load_replay_reason(const DynamicInstPtr& instruction,
-                                             CPUState& state,
-                                             PerfCounterId reason_counter_id) {
-    state.perf_counters.increment(PerfCounterId::LOAD_REPLAYS);
-    state.perf_counters.increment(reason_counter_id);
-
-    if (!instruction) {
-        return;
-    }
-
-    auto& memory_info = instruction->get_memory_info();
-    switch (reason_counter_id) {
-        case PerfCounterId::LOAD_REPLAYS_HOST_COMM:
-            memory_info.replay_host_comm_count++;
-            break;
-        case PerfCounterId::LOAD_REPLAYS_ROB_STORE_AMO:
-            memory_info.replay_rob_store_amo_count++;
-            break;
-        case PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN:
-            memory_info.replay_rob_store_addr_unknown_count++;
-            break;
-        case PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP:
-            memory_info.replay_rob_store_overlap_count++;
-            break;
-        case PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP:
-            memory_info.replay_store_buffer_overlap_count++;
-            break;
-        default:
-            break;
     }
 }
 

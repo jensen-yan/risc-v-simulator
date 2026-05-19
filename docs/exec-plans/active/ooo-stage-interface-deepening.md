@@ -118,3 +118,4 @@
 - [x] 2026-05-19 第四轮新增 `ExecuteMemoryOrder` Module，从 `ExecuteStage` 抽出 addr-unknown speculation guard 与 memory-order violation recovery，并新增模块级测试。
 - [x] 2026-05-19 验证 ExecuteMemoryOrder 第四轮：`cmake --build build -j`、聚焦 memory-order 相关 `ctest`、`ctest --test-dir build --output-on-failure`，全量 308/308 通过。
 - [x] 2026-05-19 创建 `CONTEXT.md`，记录 Stage Context、Execute Memory Order、Addr-Unknown Store、Bad Addr-Unknown Pair 等领域术语。
+- [x] 2026-05-19 第五轮继续深化 `ExecuteMemoryOrder`：迁移 load replay reason / replay bucket 归因，减少 `ExecuteStage` 对 memory-order 统计细节的所有权；`cmake --build build -j`、聚焦 ExecuteMemoryOrder/ExecuteStage/memory-order 测试、全量 `ctest` 309/309 通过。

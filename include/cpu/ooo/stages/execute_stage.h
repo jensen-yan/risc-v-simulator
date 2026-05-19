@@ -108,11 +108,6 @@ private:
                                        size_t current_unit_index);
     void erase_younger_rename_checkpoints(CPUState& state, uint64_t instruction_id);
 
-    // 记录load replay分布桶
-    void record_load_replay_bucket(const DynamicInstPtr& instruction, CPUState& state);
-    void record_load_replay_reason(const DynamicInstPtr& instruction,
-                                   CPUState& state,
-                                   PerfCounterId reason_counter_id);
 };
 
 } // namespace riscv 

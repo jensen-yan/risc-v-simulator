@@ -14,14 +14,11 @@ public:
     WritebackStage();
     virtual ~WritebackStage() = default;
     
-    // 实现PipelineStage接口
-    void execute(CPUState& state) override;
-    void flush() override;
-    void reset() override;
+    void execute(CPUState& state);
     const char* get_stage_name() const override { return "WRITEBACK"; }
 
 private:
 
 };
 
-} // namespace riscv 
+} // namespace riscv

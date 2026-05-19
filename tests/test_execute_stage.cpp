@@ -8,7 +8,7 @@ namespace riscv {
  * ExecuteStage模块单元测试
  * 当前覆盖率：28.9% -> 目标：65%+
  * 
- * 注意：由于CPUState结构复杂，这里主要测试ExecuteStage的基本接口
+ * 注意：ExecuteStage 行为仍依赖完整 CPUState；当前只保留阶段观测面测试。
  */
 class ExecuteStageTest : public ::testing::Test {
 protected:
@@ -30,28 +30,10 @@ TEST_F(ExecuteStageTest, BasicInitialization) {
     EXPECT_STREQ(execute_stage_->get_stage_name(), "EXECUTE") << "阶段名称应该是EXECUTE";
 }
 
-// ========== 重置功能测试 ==========
-
-TEST_F(ExecuteStageTest, ResetFunctionality) {
-    // 测试重置不会崩溃
-    EXPECT_NO_THROW({
-        execute_stage_->reset();
-    }) << "重置操作不应该崩溃";
-}
-
-// ========== 清空功能测试 ==========
-
-TEST_F(ExecuteStageTest, FlushFunctionality) {
-    // 测试清空不会崩溃
-    EXPECT_NO_THROW({
-        execute_stage_->flush();
-    }) << "清空操作不应该崩溃";
-}
-
 // ========== 基本接口测试 ==========
 
 TEST_F(ExecuteStageTest, BasicInterfaceTest) {
-    // 验证ExecuteStage实现了PipelineStage接口
+    // 验证ExecuteStage保留了PipelineStage观测接口
     PipelineStage* stage = execute_stage_.get();
     EXPECT_NE(stage, nullptr) << "ExecuteStage应该实现PipelineStage接口";
     

@@ -72,12 +72,4 @@ void DecodeStage::execute(CPUState& state) {
     state.perf_counters.increment(PerfCounterId::DECODE_UTILIZED_SLOTS, decoded_this_cycle);
 }
 
-void DecodeStage::flush() {
-    LOGT(DECODE, "decode stage flushed");
-}
-
-void DecodeStage::reset() {
-    LOGT(DECODE, "decode stage reset");
-}
-
 } // namespace riscv 

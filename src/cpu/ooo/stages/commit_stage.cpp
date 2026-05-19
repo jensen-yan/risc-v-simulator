@@ -726,16 +726,6 @@ void CommitStage::execute(CPUState& state) {
     }
 }
 
-void CommitStage::flush() {
-    // 刷新提交阶段状态
-    LOGT(COMMIT, "commit stage flushed");
-}
-
-void CommitStage::reset() {
-    // 重置提交阶段到初始状态
-    LOGT(COMMIT, "commit stage reset");
-}
-
 bool CommitStage::handle_ecall(CPUState& state, uint64_t instruction_pc) {
     // 处理系统调用
     LOGT(COMMIT, "detected ECALL at pc=0x%" PRIx64, instruction_pc);

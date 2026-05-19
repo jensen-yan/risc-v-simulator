@@ -1031,14 +1031,6 @@ void ExecuteStage::record_load_replay_reason(const DynamicInstPtr& instruction,
     }
 }
 
-void ExecuteStage::flush() {
-    LOGT(EXECUTE, "execute stage flushed");
-}
-
-void ExecuteStage::reset() {
-    LOGT(EXECUTE, "execute stage reset");
-}
-
 void ExecuteStage::record_dcache_access_result(CPUState& state,
                                                CacheAccessType access_type,
                                                const CacheAccessResult& cache_result) {

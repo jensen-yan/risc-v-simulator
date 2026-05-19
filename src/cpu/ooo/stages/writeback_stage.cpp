@@ -62,12 +62,4 @@ void WritebackStage::execute(CPUState& state) {
     }
 }
 
-void WritebackStage::flush() {
-    LOGT(WRITEBACK, "writeback stage flushed");
-}
-
-void WritebackStage::reset() {
-    LOGT(WRITEBACK, "writeback stage reset");
-}
-
 } // namespace riscv 

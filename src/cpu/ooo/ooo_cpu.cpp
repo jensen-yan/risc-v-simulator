@@ -211,7 +211,8 @@ void OutOfOrderCPU::step() {
         execute_stage_->execute(cpu_state_);   // 执行阶段
         issue_stage_->execute(cpu_state_);     // 发射阶段
         decode_stage_->execute(cpu_state_);    // 译码阶段
-        fetch_stage_->execute(cpu_state_);     // 取指阶段
+        FetchStage::Context fetch_context(cpu_state_);
+        fetch_stage_->execute(fetch_context);  // 取指阶段
         
         // 增加周期计数
         cpu_state_.cycle_count++;

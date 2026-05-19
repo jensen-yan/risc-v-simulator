@@ -305,12 +305,4 @@ void IssueStage::execute(CPUState& state) {
     state.perf_counters.increment(PerfCounterId::ISSUE_UTILIZED_SLOTS, issued_this_cycle);
 }
 
-void IssueStage::flush() {
-    LOGT(ISSUE, "issue stage flushed");
-}
-
-void IssueStage::reset() {
-    LOGT(ISSUE, "issue stage reset");
-}
-
 } // namespace riscv 

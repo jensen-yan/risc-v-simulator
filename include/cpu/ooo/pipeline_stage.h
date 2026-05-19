@@ -4,37 +4,20 @@
 
 namespace riscv {
 
-// 前向声明
-struct CPUState;
-
 /**
- * 流水线阶段基础接口
- * 所有流水线阶段都必须实现这个接口
+ * 流水线阶段基础接口。
+ *
+ * 这里只保留稳定的观测面。各阶段的执行 Interface 可以按阶段逐步收窄，
+ * 避免共同基类强制所有 Stage 暴露同一个 CPUState 级宽接口。
  */
 class PipelineStage {
 public:
     virtual ~PipelineStage() = default;
-    
-    /**
-     * 执行该阶段的逻辑
-     * @param state CPU共享状态
-     */
-    virtual void execute(CPUState& state) = 0;
-    
-    /**
-     * 刷新该阶段的状态（用于分支预测错误等情况）
-     */
-    virtual void flush() = 0;
-    
-    /**
-     * 重置该阶段到初始状态
-     */
-    virtual void reset() = 0;
-    
+
     /**
      * 获取该阶段的名称（用于调试）
      */
     virtual const char* get_stage_name() const = 0;
 };
 
-} // namespace riscv 
+} // namespace riscv

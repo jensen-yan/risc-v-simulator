@@ -206,7 +206,8 @@ void OutOfOrderCPU::step() {
         }
 
         // 流水线阶段执行（反向顺序以维护依赖关系）
-        commit_stage_->execute(cpu_state_);    // 提交阶段
+        CommitStage::Context commit_context(cpu_state_);
+        commit_stage_->execute(commit_context); // 提交阶段
         writeback_stage_->execute(cpu_state_); // 写回阶段
         ExecuteStage::Context execute_context(cpu_state_);
         execute_stage_->execute(execute_context); // 执行阶段

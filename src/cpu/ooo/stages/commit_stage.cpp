@@ -83,36 +83,43 @@ CommitStage::CommitStage() {
     // 构造函数：初始化提交阶段
 }
 
-void CommitStage::execute(CPUState& state) {
-    const size_t effective_commit_width =
-        (state.commit_width_override == 0)
-            ? OOOPipelineConfig::COMMIT_WIDTH
-            : std::min(OOOPipelineConfig::COMMIT_WIDTH, state.commit_width_override);
+size_t CommitStage::Context::effectiveCommitWidth() const {
+    return (state_.commit_width_override == 0)
+        ? OOOPipelineConfig::COMMIT_WIDTH
+        : std::min(OOOPipelineConfig::COMMIT_WIDTH, state_.commit_width_override);
+}
 
-    state.perf_counters.increment(PerfCounterId::COMMIT_SLOTS, effective_commit_width);
+size_t CommitStage::Context::reorderBufferUsedEntryCount() const {
+    return ReorderBuffer::MAX_ROB_ENTRIES - reorderBufferFreeEntryCount();
+}
+
+void CommitStage::execute(Context& context) {
+    CPUState& state = context.stateForLegacyCommitInternals();
+    const size_t effective_commit_width = context.effectiveCommitWidth();
+
+    context.incrementCounter(PerfCounterId::COMMIT_SLOTS, effective_commit_width);
 
     // 添加ROB状态调试信息
-    size_t free_entries = state.reorder_buffer->get_free_entry_count();
-    size_t used_entries = ReorderBuffer::MAX_ROB_ENTRIES - free_entries;
+    size_t used_entries = context.reorderBufferUsedEntryCount();
     LOGT(COMMIT, "rob state: used=%zu/%d, empty=%s, full=%s",
         used_entries, ReorderBuffer::MAX_ROB_ENTRIES,
-        (state.reorder_buffer->is_empty() ? "yes" : "no"),
-        (state.reorder_buffer->is_full() ? "yes" : "no"));
+        (context.reorderBufferEmpty() ? "yes" : "no"),
+        (context.reorderBufferFull() ? "yes" : "no"));
     
     // 添加ROB状态检查
-    if (state.reorder_buffer->is_empty()) {
+    if (context.reorderBufferEmpty()) {
         LOGT(COMMIT, "rob empty, cannot commit");
         return;
     }
     
     // 检查头部指令的状态
-    auto head_entry_id = state.reorder_buffer->get_head_entry();
+    auto head_entry_id = context.robHeadEntry();
     if (head_entry_id == ReorderBuffer::MAX_ROB_ENTRIES) {
         LOGT(COMMIT, "no valid head entry");
         return;
     }
     
-    const auto& head_entry = state.reorder_buffer->get_entry(head_entry_id);
+    const auto& head_entry = context.robEntry(head_entry_id);
     const char* state_str;
     if (head_entry) {
         switch (head_entry->get_status()) {
@@ -133,16 +140,16 @@ void CommitStage::execute(CPUState& state) {
             (head_entry->is_completed() ? "yes" : "no"));
     }
     
-    if (!state.reorder_buffer->can_commit()) {
+    if (!context.canCommit()) {
         LOGT(COMMIT, "head instruction not completed, cannot commit");
         return;
     }
     
     // 尝试提交指令
     size_t committed_this_cycle = 0;
-    while (state.reorder_buffer->can_commit() &&
+    while (context.canCommit() &&
            committed_this_cycle < effective_commit_width) {
-        auto commit_result = state.reorder_buffer->commit_instruction();
+        auto commit_result = context.commitInstruction();
         if (!commit_result.success) {
             LOGW(COMMIT, "commit failed: %s", commit_result.error_message.c_str());
             break;
@@ -184,7 +191,7 @@ void CommitStage::execute(CPUState& state) {
         };
         PipelineTracer::FlushSummary flush_summary;
 
-        committed_inst->set_retire_cycle(state.cycle_count);
+        committed_inst->set_retire_cycle(context.cycleCount());
 
         // 检查是否有异常
         if (committed_inst->has_exception()) {

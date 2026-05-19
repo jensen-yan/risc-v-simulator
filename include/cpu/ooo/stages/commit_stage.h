@@ -13,8 +13,40 @@ class CommitStage : public PipelineStage {
 public:
     CommitStage();
     virtual ~CommitStage() = default;
-    
-    void execute(CPUState& state);
+
+    class Context {
+    public:
+        explicit Context(CPUState& state) : state_(state) {}
+
+        size_t effectiveCommitWidth() const;
+        void incrementCounter(PerfCounterId id, uint64_t amount = 1) {
+            state_.perf_counters.increment(id, amount);
+        }
+
+        size_t reorderBufferFreeEntryCount() const {
+            return state_.reorder_buffer->get_free_entry_count();
+        }
+        size_t reorderBufferUsedEntryCount() const;
+        bool reorderBufferEmpty() const { return state_.reorder_buffer->is_empty(); }
+        bool reorderBufferFull() const { return state_.reorder_buffer->is_full(); }
+        ROBEntry robHeadEntry() const { return state_.reorder_buffer->get_head_entry(); }
+        DynamicInstPtr robEntry(ROBEntry entry) const { return state_.reorder_buffer->get_entry(entry); }
+        bool canCommit() const { return state_.reorder_buffer->can_commit(); }
+        ReorderBuffer::CommitResult commitInstruction() {
+            return state_.reorder_buffer->commit_instruction();
+        }
+        uint64_t cycleCount() const { return state_.cycle_count; }
+
+        // CommitStage still owns broad retire side effects (CSR/trap, DiffTest,
+        // tracer, profile, and flush). Keep the wide access explicit until
+        // those effects move into deeper modules.
+        CPUState& stateForLegacyCommitInternals() { return state_; }
+
+    private:
+        CPUState& state_;
+    };
+
+    void execute(Context& context);
     const char* get_stage_name() const override { return "COMMIT"; }
 
 private:

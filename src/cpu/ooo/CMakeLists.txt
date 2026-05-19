@@ -11,6 +11,7 @@ target_sources(risc-v-sim-lib PRIVATE
     execute_dcache_access.cpp
     execute_host_comm_access.cpp
     execute_load_value.cpp
+    execute_memory_inflight.cpp
     execute_memory_order.cpp
     execute_semantics.cpp
     ooo_recovery.cpp

@@ -3,14 +3,13 @@
 #include "cpu/ooo/execute_dcache_access.h"
 #include "cpu/ooo/execute_host_comm_access.h"
 #include "cpu/ooo/execute_load_value.h"
+#include "cpu/ooo/execute_memory_inflight.h"
 #include "cpu/ooo/execute_memory_order.h"
 #include "cpu/ooo/execute_semantics.h"
 #include "common/debug_types.h"
 #include "common/types.h"
 #include "core/instruction_executor.h"
 #include <algorithm>
-#include <limits>
-#include <vector>
 
 namespace riscv {
 
@@ -19,10 +18,7 @@ ExecuteStage::ExecuteStage() {
 }
 
 bool ExecuteStage::Context::hasInflightMemoryAccess() const {
-    return std::any_of(
-        state_.memory_access_inflight.begin(),
-        state_.memory_access_inflight.end(),
-        [](const MemoryAccessInFlight& entry) { return entry.valid; });
+    return ExecuteMemoryInflight::hasAny(state_);
 }
 
 ExecutionUnit* ExecuteStage::Context::executionUnit(ExecutionUnitType unit_type, int unit_id) {
@@ -51,7 +47,12 @@ void ExecuteStage::execute(Context& context) {
 
     // 首先更新正在执行的指令的状态
     update_execution_units(state);
-    update_memory_access_inflight(state);
+    ExecuteMemoryInflight::advance(
+        state,
+        [this, &state](ExecutionUnit& unit, ExecutionUnitType unit_type) {
+            complete_execution_unit(
+                unit, unit_type, 0, state, /*release_dispatch_unit=*/false);
+        });
 
     context.incrementCounter(PerfCounterId::DISPATCH_SLOTS, OOOPipelineConfig::DISPATCH_WIDTH);
     const auto addr_unknown_store_snapshot =
@@ -343,7 +344,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 }
                 if (load_result == LoadExecutionResult::WaitingForCache) {
                     if (unit.dcache.request_sent &&
-                        move_memory_access_to_inflight(unit, ExecutionUnitType::LOAD, i, state)) {
+                        ExecuteMemoryInflight::tryMove(unit, ExecutionUnitType::LOAD, i, state)) {
                         continue;
                     }
 
@@ -407,7 +408,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 if (!ExecuteDCacheAccess::startOrWait(
                         unit, state, CacheAccessType::Write, PerfCounterId::CACHE_L1D_STALL_CYCLES_STORE)) {
                     if (unit.dcache.request_sent &&
-                        move_memory_access_to_inflight(unit, ExecutionUnitType::STORE, i, state)) {
+                        ExecuteMemoryInflight::tryMove(unit, ExecutionUnitType::STORE, i, state)) {
                         continue;
                     }
 
@@ -442,109 +443,6 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             }
         }
     }
-}
-
-void ExecuteStage::update_memory_access_inflight(CPUState& state) {
-    for (auto& entry : state.memory_access_inflight) {
-        if (!entry.valid || !entry.state.instruction) {
-            continue;
-        }
-
-        auto& inflight = entry.state;
-        if (inflight.remaining_cycles > 0) {
-            --inflight.remaining_cycles;
-        }
-
-        if (inflight.remaining_cycles > 0) {
-            LOGT(EXECUTE,
-                 "inst=%" PRId64 " %s inflight waiting, remaining=%d",
-                 inflight.instruction->get_instruction_id(),
-                 entry.unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE",
-                 inflight.remaining_cycles);
-            continue;
-        }
-
-        if (entry.unit_type == ExecutionUnitType::LOAD) {
-            LOGT(EXECUTE,
-                 "inst=%" PRId64 " LOAD inflight done, result=0x%" PRIx64 " -> CDB",
-                 inflight.instruction->get_instruction_id(),
-                 inflight.result);
-            ExecuteMemoryOrder::recordLoadReplayBucket(inflight.instruction, state);
-            complete_execution_unit(inflight, ExecutionUnitType::LOAD, 0, state, /*release_dispatch_unit=*/false);
-        } else {
-            inflight.result = 0;
-            LOGT(EXECUTE,
-                 "inst=%" PRId64 " STORE inflight done, notify ROB",
-                 inflight.instruction->get_instruction_id());
-            if (ExecuteMemoryOrder::tryRecoverViolation(inflight.instruction, state)) {
-                resetMemoryAccessInFlightState(entry);
-                return;
-            }
-            complete_execution_unit(inflight, ExecutionUnitType::STORE, 0, state, /*release_dispatch_unit=*/false);
-        }
-
-        resetMemoryAccessInFlightState(entry);
-    }
-}
-
-ExecutionUnit* ExecuteStage::get_available_unit(ExecutionUnitType type, CPUState& state) {
-    switch (type) {
-        case ExecutionUnitType::ALU:
-            for (auto& unit : state.alu_units) {
-                if (!unit.busy) return &unit;
-            }
-            break;
-        case ExecutionUnitType::FP:
-            for (auto& unit : state.fp_units) {
-                if (!unit.busy) return &unit;
-            }
-            break;
-        case ExecutionUnitType::BRANCH:
-            for (auto& unit : state.branch_units) {
-                if (!unit.busy) return &unit;
-            }
-            break;
-        case ExecutionUnitType::LOAD:
-            for (auto& unit : state.load_units) {
-                if (!unit.busy) return &unit;
-            }
-            break;
-        case ExecutionUnitType::STORE:
-            for (auto& unit : state.store_units) {
-                if (!unit.busy) return &unit;
-            }
-            break;
-    }
-    return nullptr;
-}
-
-bool ExecuteStage::move_memory_access_to_inflight(ExecutionUnit& unit,
-                                                  ExecutionUnitType unit_type,
-                                                  size_t unit_index,
-                                                  CPUState& state) {
-    for (auto& entry : state.memory_access_inflight) {
-        if (entry.valid) {
-            continue;
-        }
-
-        entry.valid = true;
-        entry.unit_type = unit_type;
-        entry.state = unit;
-        const RSEntry rs_entry = unit.instruction->get_rs_entry();
-        state.reservation_station->release_entry(rs_entry);
-        unit.instruction->set_rs_entry(std::numeric_limits<RSEntry>::max());
-        state.reservation_station->release_execution_unit(unit_type, static_cast<int>(unit_index));
-        LOGT(EXECUTE,
-             "inst=%" PRId64 " move %s%zu request to inflight queue, remaining=%d",
-             unit.instruction->get_instruction_id(),
-             unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE",
-             unit_index,
-             unit.remaining_cycles);
-        resetExecutionUnitState(unit);
-        return true;
-    }
-
-    return false;
 }
 
 void ExecuteStage::complete_execution_unit(ExecutionUnit& unit,

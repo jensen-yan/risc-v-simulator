@@ -14,6 +14,7 @@
 - `ExecuteStage` 和 `CommitStage` 已经包含大量跨领域逻辑，后续 flush/recovery 与 LSU memory-order 重构会受到当前宽 Interface 影响。
 - 第一轮落地后，`PipelineStage` 只保留 `get_stage_name()` 观测面，`FetchStage` 改为通过 `FetchStage::Context` 执行，`OutOfOrderCPU::step()` 在调用取指阶段前创建 Fetch context。
 - 第二轮继续按相同模式推进 `DecodeStage`，目标是形成 Fetch + Decode 两个相邻阶段的稳定样板，再进入更复杂的 Execute。
+- 第三轮先对 `ExecuteStage` 做入口收口：新增 `ExecuteStage::Context`，让顶层调度/no-ready 路径先通过 Context；LSU/recovery 相关宽访问先显式标为 legacy internals，后续再拆深模块。
 
 ## 候选重构点
 
@@ -111,4 +112,6 @@
 - [x] 2026-05-19 验证通过：`cmake --build build -j`、`ctest --test-dir build -R "FetchStage|ExecuteStage" --output-on-failure`、`ctest --test-dir build --output-on-failure`，全量 302/302 通过。
 - [x] 2026-05-19 第二轮推进 `DecodeStage::Context`，让 Decode 不再直接接收整份 `CPUState&`，并补不依赖完整 `OutOfOrderCPU` 的 Decode 行为测试。
 - [x] 2026-05-19 验证通过：`cmake --build build -j`、`ctest --test-dir build -R "DecodeStage|FetchStage" --output-on-failure`、`ctest --test-dir build --output-on-failure`，全量 304/304 通过。
+- [x] 2026-05-19 第三轮推进 `ExecuteStage::Context` 入口收口，先覆盖 dispatch/no-ready 路径，并明确 LSU/recovery 仍待深模块化。
+- [x] 2026-05-19 验证 ExecuteStage 第三轮：`cmake --build build -j`、`ctest --test-dir build -R "ExecuteStage|OutOfOrderCPUTest" --output-on-failure`、`ctest --test-dir build --output-on-failure`，全量 305/305 通过。
 - [ ] 决定是否创建或更新 `CONTEXT.md` 记录新的 domain term。

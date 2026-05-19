@@ -131,41 +131,67 @@ ExecuteStage::ExecuteStage() {
     // 构造函数：初始化执行阶段
 }
 
-void ExecuteStage::execute(CPUState& state) {
+bool ExecuteStage::Context::hasInflightMemoryAccess() const {
+    return std::any_of(
+        state_.memory_access_inflight.begin(),
+        state_.memory_access_inflight.end(),
+        [](const MemoryAccessInFlight& entry) { return entry.valid; });
+}
+
+ExecutionUnit* ExecuteStage::Context::executionUnit(ExecutionUnitType unit_type, int unit_id) {
+    if (unit_id < 0) {
+        return nullptr;
+    }
+
+    const auto index = static_cast<size_t>(unit_id);
+    switch (unit_type) {
+        case ExecutionUnitType::ALU:
+            return index < state_.alu_units.size() ? &state_.alu_units[index] : nullptr;
+        case ExecutionUnitType::FP:
+            return index < state_.fp_units.size() ? &state_.fp_units[index] : nullptr;
+        case ExecutionUnitType::BRANCH:
+            return index < state_.branch_units.size() ? &state_.branch_units[index] : nullptr;
+        case ExecutionUnitType::LOAD:
+            return index < state_.load_units.size() ? &state_.load_units[index] : nullptr;
+        case ExecutionUnitType::STORE:
+            return index < state_.store_units.size() ? &state_.store_units[index] : nullptr;
+    }
+    return nullptr;
+}
+
+void ExecuteStage::execute(Context& context) {
+    CPUState& state = context.stateForLegacyExecuteInternals();
+
     // 首先更新正在执行的指令的状态
     update_execution_units(state);
     update_memory_access_inflight(state);
 
-    state.perf_counters.increment(PerfCounterId::DISPATCH_SLOTS, OOOPipelineConfig::DISPATCH_WIDTH);
+    context.incrementCounter(PerfCounterId::DISPATCH_SLOTS, OOOPipelineConfig::DISPATCH_WIDTH);
     const auto addr_unknown_store_snapshot = captureAddrUnknownStoreSnapshot(state);
 
-    const auto dispatch_results = state.reservation_station->dispatch_instructions(
+    const auto dispatch_results = context.dispatchReadyInstructions(
         OOOPipelineConfig::DISPATCH_WIDTH,
         [&](const DynamicInstPtr& instruction) {
             return !markBlockedAddrUnknownPairIfNeeded(state, instruction, addr_unknown_store_snapshot);
         });
     if (dispatch_results.empty()) {
         LOGT(EXECUTE, "no ready instruction in reservation station");
-        state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
+        context.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
 
-        const bool has_inflight_memory_wait = std::any_of(
-            state.memory_access_inflight.begin(),
-            state.memory_access_inflight.end(),
-            [](const MemoryAccessInFlight& entry) { return entry.valid; });
-        if (has_inflight_memory_wait) {
-            state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
+        if (context.hasInflightMemoryAccess()) {
+            context.incrementCounter(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
             return;
         }
 
-        const size_t rs_occupied = state.reservation_station->get_occupied_entry_count();
+        const size_t rs_occupied = context.reservationStationOccupiedCount();
         if (rs_occupied == 0) {
-            state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
+            context.incrementCounter(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
         } else {
-            const size_t rs_ready = state.reservation_station->get_ready_entry_count();
+            const size_t rs_ready = context.reservationStationReadyCount();
             if (rs_ready == 0) {
-                state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
+                context.incrementCounter(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
             } else {
-                state.perf_counters.increment(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
+                context.incrementCounter(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
             }
         }
     }
@@ -178,39 +204,22 @@ void ExecuteStage::execute(CPUState& state) {
 
         const auto& decoded_info = dispatch_result.instruction->get_decoded_info();
         if (decoded_info.opcode == Opcode::AMO &&
-            state.reorder_buffer->has_earlier_store_uncommitted(dispatch_result.instruction->get_instruction_id())) {
+            context.hasEarlierStoreUncommitted(dispatch_result.instruction->get_instruction_id())) {
             dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
-            state.reservation_station->release_execution_unit(dispatch_result.unit_type, dispatch_result.unit_id);
-            state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
+            context.releaseExecutionUnit(dispatch_result.unit_type, dispatch_result.unit_id);
+            context.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
             LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay dispatch",
                  dispatch_result.instruction->get_instruction_id());
             continue;
         }
 
-        ExecutionUnit* unit = nullptr;
-        switch (dispatch_result.unit_type) {
-            case ExecutionUnitType::ALU:
-                unit = &state.alu_units[dispatch_result.unit_id];
-                break;
-            case ExecutionUnitType::FP:
-                unit = &state.fp_units[dispatch_result.unit_id];
-                break;
-            case ExecutionUnitType::BRANCH:
-                unit = &state.branch_units[dispatch_result.unit_id];
-                break;
-            case ExecutionUnitType::LOAD:
-                unit = &state.load_units[dispatch_result.unit_id];
-                break;
-            case ExecutionUnitType::STORE:
-                unit = &state.store_units[dispatch_result.unit_id];
-                break;
-        }
+        ExecutionUnit* unit = context.executionUnit(dispatch_result.unit_type, dispatch_result.unit_id);
 
         if (!unit || unit->busy) {
             dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
-            state.reservation_station->release_execution_unit(dispatch_result.unit_type, dispatch_result.unit_id);
+            context.releaseExecutionUnit(dispatch_result.unit_type, dispatch_result.unit_id);
             LOGT(EXECUTE, "no available execution unit");
-            state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_UNIT);
+            context.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_UNIT);
             continue;
         }
 
@@ -224,7 +233,7 @@ void ExecuteStage::execute(CPUState& state) {
             auto& memory_info = dispatch_result.instruction->get_memory_info();
             if (markBlockedAddrUnknownPairIfNeeded(state, dispatch_result.instruction, addr_unknown_store_snapshot)) {
                 dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
-                state.reservation_station->release_execution_unit(
+                context.releaseExecutionUnit(
                     ExecutionUnitType::LOAD, dispatch_result.unit_id);
                 continue;
             }
@@ -238,7 +247,7 @@ void ExecuteStage::execute(CPUState& state) {
                     memory_info.speculated_past_addr_unknown_store = true;
                     memory_info.has_speculated_addr_unknown_source = true;
                     memory_info.speculated_addr_unknown_store_pc = store_pc;
-                    state.perf_counters.increment(PerfCounterId::LOADS_SPECULATED_ADDR_UNKNOWN);
+                    context.incrementCounter(PerfCounterId::LOADS_SPECULATED_ADDR_UNKNOWN);
                     LOGT(EXECUTE,
                          "inst=%" PRId64
                          " load dispatch speculates past unresolved STORE pc=0x%" PRIx64,
@@ -273,13 +282,14 @@ void ExecuteStage::execute(CPUState& state) {
              dispatch_result.unit_id,
              unit->remaining_cycles);
 
-        state.perf_counters.increment(PerfCounterId::DISPATCHED_INSTRUCTIONS);
-        dispatch_result.instruction->set_execute_cycle(state.cycle_count);
-        OOOExecuteSemantics::executeInstruction(*unit, dispatch_result.instruction, state);
+        context.incrementCounter(PerfCounterId::DISPATCHED_INSTRUCTIONS);
+        dispatch_result.instruction->set_execute_cycle(context.cycleCount());
+        OOOExecuteSemantics::executeInstruction(
+            *unit, dispatch_result.instruction, context.stateForExecuteSemantics());
         dispatched_this_cycle++;
     }
 
-    state.perf_counters.increment(PerfCounterId::DISPATCH_UTILIZED_SLOTS, dispatched_this_cycle);
+    context.incrementCounter(PerfCounterId::DISPATCH_UTILIZED_SLOTS, dispatched_this_cycle);
 }
 
 void ExecuteStage::update_execution_units(CPUState& state) {

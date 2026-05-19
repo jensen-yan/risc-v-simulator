@@ -8,7 +8,8 @@ namespace riscv {
  * ExecuteStage模块单元测试
  * 当前覆盖率：28.9% -> 目标：65%+
  * 
- * 注意：ExecuteStage 行为仍依赖完整 CPUState；当前只保留阶段观测面测试。
+ * 注意：ExecuteStage 仍包含 LSU/recovery 等宽依赖；当前先覆盖 Context 入口的
+ * no-ready 行为，后续随深模块拆分继续补行为测试。
  */
 class ExecuteStageTest : public ::testing::Test {
 protected:
@@ -41,7 +42,19 @@ TEST_F(ExecuteStageTest, BasicInterfaceTest) {
     EXPECT_STREQ(stage->get_stage_name(), "EXECUTE") << "阶段名称应该正确";
 }
 
-// 注意：更复杂的功能测试需要完整的CPU状态，这里暂时跳过
-// 在实际的集成测试中会进行更全面的测试
+TEST_F(ExecuteStageTest, EmptyReservationStationRecordsFrontendStarvedThroughContext) {
+    CPUState state;
+    state.reservation_station = std::make_unique<ReservationStation>();
+    state.reorder_buffer = std::make_unique<ReorderBuffer>();
+    state.store_buffer = std::make_unique<StoreBuffer>();
+
+    ExecuteStage::Context context(state);
+    execute_stage_->execute(context);
+
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DISPATCH_SLOTS), 2u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DISPATCH_UTILIZED_SLOTS), 0u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_EXECUTE_NO_READY), 1u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED), 1u);
+}
 
 } // namespace riscv

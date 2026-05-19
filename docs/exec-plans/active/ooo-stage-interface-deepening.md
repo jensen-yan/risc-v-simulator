@@ -123,3 +123,4 @@
 - [x] 2026-05-19 第七轮推进 `CommitStage::Context`，先收口提交阶段执行入口，保留 retire effects / flush / trap / DiffTest 为显式 legacy 内部区，并新增 CommitStage context 行为测试；`cmake --build build -j`、聚焦 Commit/OOO 测试、全量 `ctest` 313/313 通过。
 - [x] 2026-05-19 第八轮推进 `WritebackStage::Context`，收口 CDB、RS operand wakeup、rename physical writeback 和 ROB complete 入口，并新增 WritebackStage context 行为测试；`cmake --build build -j`、聚焦 Writeback/OOO 测试、全量 `ctest` 315/315 通过。
 - [x] 2026-05-19 收口检查：`rg "void execute\\(CPUState&|execute\\(cpu_state_\\)" include/cpu/ooo src/cpu/ooo tests -n` 无剩余命中；`ARCHITECTURE.md` 已补充 OOO Stage Context 边界说明。
+- [x] 2026-05-19 第九轮启动 `OooRecovery` Module，先迁移 commit-time full-pipeline recovery，集中 full flush 计数、ROB/RS/rename/CDB/store/cache/execution-unit 清理规则；`cmake --build build -j`、聚焦 OooRecovery/Commit/OOO 测试、全量 `ctest` 317/317 通过。

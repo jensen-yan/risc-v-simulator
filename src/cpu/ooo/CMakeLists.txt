@@ -4,6 +4,7 @@ target_sources(risc-v-sim-lib PRIVATE
     dynamic_inst.cpp
     execute_memory_order.cpp
     execute_semantics.cpp
+    ooo_recovery.cpp
     perf_counters.cpp
     register_rename.cpp
     reorder_buffer.cpp

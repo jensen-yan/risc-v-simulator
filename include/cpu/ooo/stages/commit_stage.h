@@ -2,6 +2,7 @@
 
 #include "cpu/ooo/pipeline_stage.h"
 #include "cpu/ooo/cpu_state.h"
+#include "cpu/ooo/ooo_recovery.h"
 
 namespace riscv {
 
@@ -50,16 +51,6 @@ public:
     const char* get_stage_name() const override { return "COMMIT"; }
 
 private:
-    enum class FlushReason {
-        BranchMispredict,
-        UnconditionalRedirect,
-        Trap,
-        Mret,
-        FenceI,
-        Exception,
-        Other
-    };
-
     // 处理系统调用
     bool handle_ecall(CPUState& state, uint64_t instruction_pc);
     bool handle_ebreak(CPUState& state, uint64_t instruction_pc);
@@ -71,7 +62,7 @@ private:
     void handle_exception(CPUState& state, const std::string& exception_msg, uint64_t pc);
     
     // 流水线刷新（用于跳转/异常返回/fence.i 等需要重新取指的场景）
-    void flush_pipeline_after_commit(CPUState& state, FlushReason reason);
+    void flush_pipeline_after_commit(CPUState& state, OooRecovery::Reason reason);
 };
 
 } // namespace riscv 

@@ -157,33 +157,10 @@ void CommitStage::execute(Context& context) {
         
         const auto& committed_inst = commit_result.instruction;
         const auto& decoded_info = committed_inst->get_decoded_info();
-        auto make_flush_summary = [&](FlushReason reason) {
+        auto make_flush_summary = [&](OooRecovery::Reason reason) {
             PipelineTracer::FlushSummary summary;
             summary.triggered = true;
-            switch (reason) {
-                case FlushReason::BranchMispredict:
-                    summary.reason = "branch_mispredict";
-                    break;
-                case FlushReason::UnconditionalRedirect:
-                    summary.reason = "unconditional_redirect";
-                    break;
-                case FlushReason::Trap:
-                    summary.reason = "trap";
-                    break;
-                case FlushReason::Mret:
-                    summary.reason = "mret";
-                    break;
-                case FlushReason::FenceI:
-                    summary.reason = "fencei";
-                    break;
-                case FlushReason::Exception:
-                    summary.reason = "exception";
-                    break;
-                case FlushReason::Other:
-                default:
-                    summary.reason = "other";
-                    break;
-            }
+            summary.reason = OooRecovery::reasonName(reason);
             summary.flushed_rob_entries =
                 static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES - state.reorder_buffer->get_free_entry_count());
             summary.fetch_buffer_dropped = state.fetch_buffer.size();
@@ -204,7 +181,7 @@ void CommitStage::execute(Context& context) {
         }
 
         if (committed_inst->has_trap()) {
-            flush_summary = make_flush_summary(FlushReason::Trap);
+            flush_summary = make_flush_summary(OooRecovery::Reason::Trap);
             state.instruction_count++;
             state.perf_counters.increment(PerfCounterId::INSTRUCTIONS_RETIRED);
             enter_machine_trap(state,
@@ -446,7 +423,7 @@ void CommitStage::execute(Context& context) {
 
         bool need_redirect_flush = false;
         uint64_t redirect_pc = 0;
-        FlushReason flush_reason = FlushReason::Other;
+        OooRecovery::Reason flush_reason = OooRecovery::Reason::Other;
 
         if (is_control_flow) {
             const uint64_t instruction_pc = committed_inst->get_pc();
@@ -627,8 +604,8 @@ void CommitStage::execute(Context& context) {
                 need_redirect_flush = true;
                 redirect_pc = actual_next_pc;
                 flush_reason = (decoded_info.opcode == Opcode::BRANCH)
-                                   ? FlushReason::BranchMispredict
-                                   : FlushReason::UnconditionalRedirect;
+                                   ? OooRecovery::Reason::BranchMispredict
+                                   : OooRecovery::Reason::UnconditionalRedirect;
                 flush_summary = make_flush_summary(flush_reason);
                 flush_summary.has_redirect_pc = true;
                 flush_summary.redirect_pc = redirect_pc;
@@ -666,7 +643,7 @@ void CommitStage::execute(Context& context) {
                 // ECALL
                 const bool enters_trap = csr::machineTrapVectorBase(state.csr_registers) != 0;
                 if (enters_trap) {
-                    flush_summary = make_flush_summary(FlushReason::Trap);
+                    flush_summary = make_flush_summary(OooRecovery::Reason::Trap);
                 }
                 should_stop_commit = handle_ecall(state, committed_inst->get_pc());
                 if (enters_trap && should_stop_commit) {
@@ -675,7 +652,7 @@ void CommitStage::execute(Context& context) {
                 }
             } else if (InstructionExecutor::isBreakpoint(sys_inst)) {
                 // EBREAK
-                flush_summary = make_flush_summary(FlushReason::Trap);
+                flush_summary = make_flush_summary(OooRecovery::Reason::Trap);
                 should_stop_commit = handle_ebreak(state, committed_inst->get_pc());
                 if (should_stop_commit) {
                     flush_summary.has_redirect_pc = true;
@@ -683,7 +660,7 @@ void CommitStage::execute(Context& context) {
                 }
             } else if (InstructionExecutor::isMachineReturn(sys_inst)) {
                 // MRET
-                flush_summary = make_flush_summary(FlushReason::Mret);
+                flush_summary = make_flush_summary(OooRecovery::Reason::Mret);
                 should_stop_commit = handle_mret(state);
                 if (should_stop_commit) {
                     flush_summary.has_redirect_pc = true;
@@ -692,7 +669,7 @@ void CommitStage::execute(Context& context) {
             }
         } else if (decoded_info.opcode == Opcode::MISC_MEM &&
                    static_cast<uint8_t>(decoded_info.funct3) == kFenceIFunct3) {
-            flush_summary = make_flush_summary(FlushReason::FenceI);
+            flush_summary = make_flush_summary(OooRecovery::Reason::FenceI);
             should_stop_commit = handle_fencei(state, committed_inst->get_pc(), decoded_info.is_compressed);
             if (should_stop_commit) {
                 flush_summary.has_redirect_pc = true;
@@ -785,7 +762,7 @@ bool CommitStage::handle_mret(CPUState& state) {
         state.privilege_state->setMode(*restored_mode);
     }
     state.pc = csr::read(state.csr_registers, csr::kMepc);
-    flush_pipeline_after_commit(state, FlushReason::Mret);
+    flush_pipeline_after_commit(state, OooRecovery::Reason::Mret);
     return true;
 }
 
@@ -793,7 +770,7 @@ bool CommitStage::handle_fencei(CPUState& state, uint64_t instruction_pc, bool i
     const uint64_t next_pc = instruction_pc + (is_compressed ? 2ULL : 4ULL);
     LOGT(COMMIT, "detected FENCE.I at pc=0x%" PRIx64 ", refetch from 0x%" PRIx64, instruction_pc, next_pc);
     state.pc = next_pc;
-    flush_pipeline_after_commit(state, FlushReason::FenceI);
+    flush_pipeline_after_commit(state, OooRecovery::Reason::FenceI);
     return true;
 }
 
@@ -816,7 +793,7 @@ void CommitStage::enter_machine_trap(CPUState& state,
         state.privilege_state->setMode(PrivilegeMode::MACHINE);
         state.privilege_state->setMstatus(csr::read(state.csr_registers, csr::kMstatus));
     }
-    flush_pipeline_after_commit(state, FlushReason::Trap);
+    flush_pipeline_after_commit(state, OooRecovery::Reason::Trap);
 }
 
 void CommitStage::handle_exception(CPUState& state, const std::string& exception_msg, uint64_t pc) {
@@ -827,96 +804,13 @@ void CommitStage::handle_exception(CPUState& state, const std::string& exception
     state.halted = true;
 }
 
-void CommitStage::flush_pipeline_after_commit(CPUState& state, FlushReason reason) {
+void CommitStage::flush_pipeline_after_commit(CPUState& state, OooRecovery::Reason reason) {
     LOGT(COMMIT, "serializing event committed, start pipeline flush");
-
-    const uint64_t rob_used =
-        static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES - state.reorder_buffer->get_free_entry_count());
-
-    state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSHES);
-    switch (reason) {
-        case FlushReason::BranchMispredict:
-            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_BRANCH_MISPREDICT);
-            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_BRANCH_MISPREDICT, rob_used);
-            break;
-        case FlushReason::UnconditionalRedirect:
-            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_UNCONDITIONAL_REDIRECT);
-            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_UNCONDITIONAL_REDIRECT, rob_used);
-            break;
-        case FlushReason::Trap:
-            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_TRAP);
-            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_TRAP, rob_used);
-            break;
-        case FlushReason::Mret:
-            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_MRET);
-            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_MRET, rob_used);
-            break;
-        case FlushReason::FenceI:
-            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_FENCEI);
-            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_FENCEI, rob_used);
-            break;
-        case FlushReason::Exception:
-            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_EXCEPTION);
-            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_EXCEPTION, rob_used);
-            break;
-        case FlushReason::Other:
-        default:
-            state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_OTHER);
-            state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_OTHER, rob_used);
-            break;
-    }
-
-    state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, rob_used);
-
-    if (state.branch_predictor && reason != FlushReason::BranchMispredict) {
-        // 分支误预测由recover_after_branch_mispredict负责回滚；其它flush统一丢弃投机历史。
-        state.branch_predictor->on_pipeline_flush();
-    }
-    
-    // 1. 清空取指缓冲区（错误推测的指令）
-    while (!state.fetch_buffer.empty()) {
-        state.fetch_buffer.pop();
-    }
-    
-    // 2. 刷新保留站中所有未执行的指令
-    state.reservation_station->flush_pipeline();
-    
-    // 3. 刷新ROB中所有未提交的指令
-    state.reorder_buffer->flush_pipeline();
-    
-    // 4. 关键修复：调用flush_pipeline方法而不是重新创建对象
-    // 这样可以保留已提交的架构状态，只清除推测性重命名
-    state.register_rename->flush_pipeline();
-    state.rename_checkpoints.clear();
-    
-    // 5. 清空CDB队列（安全，因为当前指令已提交）
-    while (!state.cdb_queue.empty()) {
-        state.cdb_queue.pop();
-    }
-    
-    // 6. 清空Store Buffer（刷新时清除所有推测性Store）
-    state.store_buffer->flush();
-
-    // 6.5 清空cache在途请求。FENCE.I 需要额外失效 I$ 行状态。
-    if (state.l1i_cache) {
-        if (reason == FlushReason::FenceI) {
-            state.l1i_cache->reset();
-        } else {
-            state.l1i_cache->flushInFlight();
-        }
-    }
-    if (state.l1d_cache) {
-        state.l1d_cache->flushInFlight();
-    }
-    state.icache.reset();
-
-    // 7. 清除LR/SC预留状态，避免被冲刷的推测性LR残留可见状态。
-    state.reservation_valid = false;
-    state.reservation_addr = 0;
-    
-    // 8. 重置所有执行单元（安全，因为当前指令已提交）
-    state.resetExecutionUnits();
-    
+    OooRecovery::FullPipelineRequest request;
+    request.reason = reason;
+    request.clear_reservation = true;
+    request.reset_execution_units = true;
+    OooRecovery::recoverFullPipeline(state, request);
     LOGT(COMMIT, "pipeline flush completed, restart fetch");
 }
 

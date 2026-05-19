@@ -1,8 +1,6 @@
 #include "cpu/ooo/stages/execute_stage.h"
 #include "cpu/ooo/execute_control_recovery.h"
-#include "cpu/ooo/execute_host_comm_access.h"
-#include "cpu/ooo/execute_load_access.h"
-#include "cpu/ooo/execute_load_hazard.h"
+#include "cpu/ooo/execute_load_completion.h"
 #include "cpu/ooo/execute_memory_inflight.h"
 #include "cpu/ooo/execute_memory_order.h"
 #include "cpu/ooo/execute_semantics.h"
@@ -251,81 +249,10 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                if (ExecuteHostCommAccess::mustSerialize(
-                        state, unit.instruction, unit.load_address, unit.load_size)) {
-                    auto blocked_inst = unit.instruction;
-                    blocked_inst->set_status(DynamicInst::Status::ISSUED);
-                    state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, static_cast<int>(i));
-                    resetExecutionUnitState(unit);
-                    LOGT(EXECUTE,
-                         "inst=%" PRId64 " LOAD%zu waits for ROB head before host-comm access",
-                         blocked_inst->get_instruction_id(), i);
-                    blocked_inst->get_memory_info().replay_count++;
-                    ExecuteMemoryOrder::recordLoadReplayReason(
-                        blocked_inst, state, PerfCounterId::LOAD_REPLAYS_HOST_COMM);
-                    continue;
-                }
-
-                if (ExecuteLoadHazard::handleEarlierStoreHazard(unit, i, state) ==
-                    ExecuteLoadHazard::Decision::Replayed) {
-                    continue;
-                }
-                
-                // 没有Store依赖，可以完成
-                // 尝试Store-to-Load Forwarding/内存读取
-                const auto load_result = ExecuteLoadAccess::perform(unit, state);
-                if (load_result == ExecuteLoadAccess::Result::BlockedByStore) {
-                    auto blocked_inst = unit.instruction;
-                    blocked_inst->set_status(DynamicInst::Status::ISSUED);
-                    state.reservation_station->release_execution_unit(ExecutionUnitType::LOAD, static_cast<int>(i));
-                    resetExecutionUnitState(unit);
-                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu blocked by older store overlap, replay and release load unit",
-                        blocked_inst->get_instruction_id(), i);
-                    blocked_inst->get_memory_info().replay_count++;
-                    ExecuteMemoryOrder::recordLoadReplayReason(
-                        blocked_inst, state, PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP);
-                    continue;
-                }
-                if (load_result == ExecuteLoadAccess::Result::WaitingForCache) {
-                    if (unit.dcache.request_sent &&
-                        ExecuteMemoryInflight::tryMove(unit, ExecutionUnitType::LOAD, i, state)) {
-                        continue;
-                    }
-
-                    if (!unit.dcache.request_sent) {
-                        auto blocked_inst = unit.instruction;
-                        blocked_inst->set_status(DynamicInst::Status::ISSUED);
-                        state.reservation_station->release_execution_unit(
-                            ExecutionUnitType::LOAD, static_cast<int>(i));
-                        resetExecutionUnitState(unit);
-                        LOGT(EXECUTE,
-                             "inst=%" PRId64 " LOAD%zu blocked by dcache outstanding limit, release and retry",
-                             blocked_inst->get_instruction_id(), i);
-                        continue;
-                    }
-
-                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu waiting for dcache, remaining=%d",
-                        unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
-                    continue;
-                }
-                if (load_result == ExecuteLoadAccess::Result::Exception) {
-                    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu raised exception: %s",
-                        unit.instruction->get_instruction_id(), i, unit.exception_msg.c_str());
-                    ExecuteMemoryOrder::recordLoadReplayBucket(unit.instruction, state);
+                if (ExecuteLoadCompletion::perform(unit, i, state) ==
+                    ExecuteLoadCompletion::Result::Completed) {
                     complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
-                    continue;
                 }
-                
-                LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu done, %s result=0x%" PRIx64 " -> CDB",
-                    unit.instruction->get_instruction_id(),
-                    i,
-                    (load_result == ExecuteLoadAccess::Result::Forwarded ? "(store-forwarded)"
-                                                                         : "(loaded-from-memory)"),
-                    unit.result);
-
-                ExecuteMemoryOrder::recordLoadReplayBucket(unit.instruction, state);
-                
-                complete_execution_unit(unit, ExecutionUnitType::LOAD, i, state);
             }
         }
     }

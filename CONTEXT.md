@@ -45,6 +45,10 @@ _Avoid_: spreading ROB store-hazard kind mapping, replay counters, and caused-by
 The execute-side load access path after hazard checks, including store-to-load forwarding, optional memory merge, D$ read timing, exception capture, and final value publication.
 _Avoid_: keeping forwarding, memory read, cache wait, and result formatting interleaved in `ExecuteStage`
 
+**Execute Load Completion**:
+The execute-side orchestration that decides whether a ready load completes, replays, moves to memory inflight, waits on cache pressure, or publishes an exception.
+_Avoid_: making `ExecuteStage` stitch together host-comm replay, ROB hazard replay, cache wait, and load result publication
+
 **Execute Store Access**:
 The execute-side store completion path, including host-comm serialization, D$ write timing, inflight movement, and memory-order violation recovery trigger.
 _Avoid_: mixing store cache timing and recovery-trigger decisions directly into `ExecuteStage`
@@ -92,6 +96,7 @@ _Avoid_: blacklist entry
 - **Execute Memory Inflight** owns already-issued load/store cache misses until they complete or request recovery.
 - **Execute Load Hazard** decides whether a load replays or may continue before forwarding/memory access.
 - **Execute Load Access** runs after **Execute Load Hazard** allows the load to proceed.
+- **Execute Load Completion** orchestrates **Execute Load Hazard**, **Execute Load Access**, and cache/inflight follow-up for a ready load unit.
 - **Execute Store Access** runs when a store execution unit reaches completion and may either finish, replay, move to inflight, or trigger recovery.
 - **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
 - **Commit Retire Effects** runs after the instruction's architectural state has been committed.

@@ -37,6 +37,10 @@ _Avoid_: spreading integer/floating-point writeback and rename commit rules thro
 The predictor/profile/counter updates and redirect decision applied when a branch, JAL, or JALR retires.
 _Avoid_: mixing predictor training, profile accounting, and commit-loop flush orchestration in one block
 
+**Commit System Effects**:
+The CSR, trap, syscall, MRET, and FENCE.I effects applied when a serializing instruction retires.
+_Avoid_: keeping privileged/system instruction semantics as ad hoc branches in the commit loop
+
 **Addr-Unknown Store**:
 An older store whose effective address is not yet known when a younger load is considered for dispatch or execution.
 _Avoid_: unresolved store, pending store address
@@ -54,6 +58,7 @@ _Avoid_: blacklist entry
 - **Commit Memory Effects** runs before generic retire bookkeeping so store/AMO state becomes architectural first.
 - **Commit Register Effects** runs after memory effects and before generic retire bookkeeping so integer/floating-point register state is architectural before DiffTest/tracing.
 - **Commit Control Flow Effects** runs after retire bookkeeping and reports only the redirect flush decision back to `CommitStage`.
+- **Commit System Effects** reports stop/flush metadata back to `CommitStage`; it owns the privileged state mutation and serializing recovery.
 - A **Bad Addr-Unknown Pair** causes **Execute Memory Order** to block later speculation for the same load/store PC pair.
 
 ## Example Dialogue

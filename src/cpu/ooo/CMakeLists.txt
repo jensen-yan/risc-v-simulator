@@ -5,6 +5,7 @@ target_sources(risc-v-sim-lib PRIVATE
     commit_memory_effects.cpp
     commit_register_effects.cpp
     commit_retire_effects.cpp
+    commit_system_effects.cpp
     dynamic_inst.cpp
     execute_memory_order.cpp
     execute_semantics.cpp

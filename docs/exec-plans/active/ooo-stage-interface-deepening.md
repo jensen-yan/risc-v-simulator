@@ -125,3 +125,4 @@
 - [x] 2026-05-19 收口检查：`rg "void execute\\(CPUState&|execute\\(cpu_state_\\)" include/cpu/ooo src/cpu/ooo tests -n` 无剩余命中；`ARCHITECTURE.md` 已补充 OOO Stage Context 边界说明。
 - [x] 2026-05-19 第九轮启动 `OooRecovery` Module，先迁移 commit-time full-pipeline recovery，集中 full flush 计数、ROB/RS/rename/CDB/store/cache/execution-unit 清理规则；`cmake --build build -j`、聚焦 OooRecovery/Commit/OOO 测试、全量 `ctest` 317/317 通过。
 - [x] 2026-05-19 第十轮继续深化 `OooRecovery`：迁移 ExecuteStage early control recovery 的 younger-than 清理规则，让 ExecuteStage 只保留控制流判断、predictor 更新和计数归因；`cmake --build build -j`、聚焦 OooRecovery/Execute/OOO 测试、全量 `ctest` 318/318 通过。
+- [x] 2026-05-19 OOO recovery 收口：`CommitStage` 的 full-pipeline recovery 与 `ExecuteStage` 的 younger-than recovery 已统一挂到 `OooRecovery`；`CONTEXT.md` 与 `ARCHITECTURE.md` 已记录 **OOO Recovery** 作为稳定领域术语和模块落点。

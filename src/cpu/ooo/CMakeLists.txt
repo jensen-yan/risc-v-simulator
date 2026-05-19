@@ -8,6 +8,7 @@ target_sources(risc-v-sim-lib PRIVATE
     commit_system_effects.cpp
     dynamic_inst.cpp
     execute_control_recovery.cpp
+    execute_dcache_access.cpp
     execute_memory_order.cpp
     execute_semantics.cpp
     ooo_recovery.cpp

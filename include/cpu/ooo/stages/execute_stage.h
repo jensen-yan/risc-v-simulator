@@ -79,17 +79,10 @@ private:
     void update_memory_access_inflight(CPUState& state);
     ExecutionUnit* get_available_unit(ExecutionUnitType type, CPUState& state);
     LoadExecutionResult perform_load_execution(ExecutionUnit& unit, CPUState& state);
-    bool start_or_wait_dcache_access(ExecutionUnit& unit,
-                                     CPUState& state,
-                                     CacheAccessType access_type,
-                                     PerfCounterId stall_counter_id);
     bool move_memory_access_to_inflight(ExecutionUnit& unit,
                                         ExecutionUnitType unit_type,
                                         size_t unit_index,
                                         CPUState& state);
-    void record_dcache_access_result(CPUState& state,
-                                     CacheAccessType access_type,
-                                     const CacheAccessResult& cache_result);
     
     // 执行单元完成时的公共处理逻辑
     void complete_execution_unit(ExecutionUnit& unit,

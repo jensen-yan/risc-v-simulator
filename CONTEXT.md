@@ -21,6 +21,10 @@ _Avoid_: scattering addr-unknown speculation and recovery rules inside `ExecuteS
 The execute-side early recovery path for resolved branch/JALR mispredictions, including rename checkpoint restore, younger-work cleanup, RAS repair, and recovery counters.
 _Avoid_: burying early control recovery inside generic execution-unit completion
 
+**Execute DCache Access**:
+The execute-side D$ timing handshake for load/store execution, including request start, blocked/outstanding handling, latency accounting, and cache counter updates.
+_Avoid_: duplicating D$ request bookkeeping inside load/store execution branches
+
 **OOO Recovery**:
 The out-of-order pipeline rules that remove speculative work after a redirect, trap, fence, or other pipeline recovery reason.
 _Avoid_: scattering flush cleanup rules across individual stages
@@ -58,6 +62,7 @@ _Avoid_: blacklist entry
 - An **Out-of-Order Pipeline** executes each stage through a **Stage Context**.
 - **Execute Memory Order** observes **Addr-Unknown Store** state when deciding whether a younger load may proceed.
 - **Execute Control Recovery** runs when an execution unit completes a control-flow instruction before commit has seen it.
+- **Execute DCache Access** is the cache timing submodule used by execute-side load/store paths.
 - **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
 - **Commit Retire Effects** runs after the instruction's architectural state has been committed.
 - **Commit Memory Effects** runs before generic retire bookkeeping so store/AMO state becomes architectural first.

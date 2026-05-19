@@ -1,0 +1,1259 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RISC-V Simulator OOO / LSU / Cache 架构复习</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --surface: #ffffff;
+      --surface-2: #eef3f7;
+      --ink: #17202a;
+      --muted: #5d6875;
+      --line: #d8e0e8;
+      --blue: #2563eb;
+      --teal: #0f766e;
+      --amber: #b45309;
+      --rose: #be123c;
+      --green: #15803d;
+      --violet: #6d28d9;
+      --shadow: 0 16px 40px rgba(20, 32, 45, 0.10);
+      --radius: 8px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.62;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code,
+    .mono {
+      font-family: var(--mono);
+      font-size: 0.93em;
+    }
+
+    .shell {
+      white-space: nowrap;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 292px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 24px 20px;
+      background: #111827;
+      color: #e5edf5;
+      border-right: 1px solid #273244;
+    }
+
+    aside h1 {
+      margin: 0 0 6px;
+      font-size: 20px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    aside p {
+      margin: 0 0 20px;
+      color: #aab7c7;
+      font-size: 13px;
+    }
+
+    nav {
+      display: grid;
+      gap: 7px;
+      margin-top: 20px;
+    }
+
+    nav a {
+      color: #dbe7f3;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+
+    nav a:hover,
+    nav a.active {
+      background: #1f2937;
+      border-color: #344256;
+      text-decoration: none;
+    }
+
+    main {
+      padding: 34px min(5vw, 64px) 72px;
+      max-width: 1320px;
+      width: 100%;
+    }
+
+    .hero {
+      display: grid;
+      gap: 18px;
+      padding: 34px 0 24px;
+    }
+
+    .eyebrow {
+      margin: 0;
+      color: var(--teal);
+      font-weight: 760;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    h2,
+    h3,
+    h4 {
+      letter-spacing: 0;
+      line-height: 1.22;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(34px, 4vw, 56px);
+    }
+
+    h3 {
+      margin: 44px 0 14px;
+      font-size: 28px;
+    }
+
+    h4 {
+      margin: 24px 0 10px;
+      font-size: 18px;
+    }
+
+    .lead {
+      margin: 0;
+      max-width: 940px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .quick-facts {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .fact {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+      min-height: 116px;
+      box-shadow: 0 2px 12px rgba(20, 32, 45, .04);
+    }
+
+    .fact b {
+      display: block;
+      font-size: 24px;
+      margin-bottom: 4px;
+    }
+
+    .fact span {
+      display: block;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    section {
+      margin-top: 34px;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+      box-shadow: 0 2px 12px rgba(20, 32, 45, .04);
+    }
+
+    .band {
+      background: var(--surface-2);
+      border-block: 1px solid var(--line);
+      margin-inline: calc(min(5vw, 64px) * -1);
+      padding: 34px min(5vw, 64px);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .module-map {
+      display: grid;
+      gap: 10px;
+    }
+
+    .module-row {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .module-row:last-child {
+      border-bottom: 0;
+    }
+
+    .module-row strong {
+      color: #1f2937;
+    }
+
+    .module-row p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .flow {
+      display: grid;
+      gap: 12px;
+      margin: 18px 0;
+    }
+
+    .flow-row {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(110px, 1fr));
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .node {
+      position: relative;
+      min-height: 92px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 12px;
+    }
+
+    .node::after {
+      content: "";
+      position: absolute;
+      right: -9px;
+      top: 42%;
+      border-left: 8px solid #9ca8b6;
+      border-top: 7px solid transparent;
+      border-bottom: 7px solid transparent;
+    }
+
+    .node:last-child::after {
+      display: none;
+    }
+
+    .node b {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 15px;
+    }
+
+    .node span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .node.blue {
+      border-top: 4px solid var(--blue);
+    }
+
+    .node.teal {
+      border-top: 4px solid var(--teal);
+    }
+
+    .node.amber {
+      border-top: 4px solid var(--amber);
+    }
+
+    .node.rose {
+      border-top: 4px solid var(--rose);
+    }
+
+    .node.green {
+      border-top: 4px solid var(--green);
+    }
+
+    .node.violet {
+      border-top: 4px solid var(--violet);
+    }
+
+    .callout {
+      border-left: 4px solid var(--teal);
+      background: #eef8f6;
+      padding: 14px 16px;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      color: #134e4a;
+    }
+
+    .warning {
+      border-left-color: var(--amber);
+      background: #fff7ed;
+      color: #78350f;
+    }
+
+    .danger {
+      border-left-color: var(--rose);
+      background: #fff1f2;
+      color: #881337;
+    }
+
+    .tabs,
+    .stepper {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0 18px;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 9px 12px;
+      font: inherit;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: #9aa8b6;
+    }
+
+    button.active {
+      background: #162033;
+      color: #fff;
+      border-color: #162033;
+    }
+
+    .tab-pane,
+    .step-pane {
+      display: none;
+    }
+
+    .tab-pane.active,
+    .step-pane.active {
+      display: block;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 10px 14px;
+      align-items: start;
+    }
+
+    .cycle {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      background: #162033;
+      color: #fff;
+      border-radius: 50%;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .timeline-item {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 14px 16px;
+    }
+
+    .timeline-item p {
+      margin: 4px 0 0;
+      color: var(--muted);
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+    }
+
+    .decision .path {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      background: var(--surface);
+    }
+
+    .path h4 {
+      margin-top: 0;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 8px 14px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .kv:last-child {
+      border-bottom: 0;
+    }
+
+    .kv .k {
+      color: #111827;
+      font-weight: 760;
+    }
+
+    .kv .v {
+      color: var(--muted);
+    }
+
+    .code-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .code-list li {
+      display: grid;
+      grid-template-columns: minmax(220px, 340px) minmax(0, 1fr);
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .code-list li:last-child {
+      border-bottom: 0;
+    }
+
+    .code-list span {
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 2px 9px;
+      background: #edf2ff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 10px;
+    }
+
+    .diagram {
+      overflow-x: auto;
+      padding: 6px 0 2px;
+    }
+
+    svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .swimlane {
+      min-width: 900px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .swim-row {
+      display: grid;
+      grid-template-columns: 170px repeat(6, 1fr);
+      min-height: 54px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .swim-row:last-child {
+      border-bottom: 0;
+    }
+
+    .lane-title {
+      padding: 12px;
+      background: #f1f5f9;
+      border-right: 1px solid var(--line);
+      font-weight: 760;
+    }
+
+    .swim-cell {
+      display: grid;
+      place-items: center;
+      padding: 8px;
+      border-right: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .swim-cell:last-child {
+      border-right: 0;
+    }
+
+    .active-cell {
+      background: #ecfeff;
+      color: #155e75;
+      font-weight: 760;
+    }
+
+    .test-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .test-item {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      background: #fff;
+    }
+
+    .test-item b {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .test-item span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    footer {
+      margin-top: 50px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        position: static;
+        height: auto;
+      }
+
+      main {
+        padding: 26px 18px 52px;
+      }
+
+      .band {
+        margin-inline: -18px;
+        padding-inline: 18px;
+      }
+
+      .quick-facts,
+      .grid-2,
+      .grid-3,
+      .decision,
+      .test-list {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-row {
+        grid-template-columns: 1fr;
+      }
+
+      .node::after {
+        right: 50%;
+        top: auto;
+        bottom: -12px;
+        transform: translateX(50%) rotate(90deg);
+      }
+
+      .module-row,
+      .code-list li,
+      .kv {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <h1>OOO / LSU / Cache<br>架构复习</h1>
+      <p>基于本地 <span class="mono">risc-v-simulator</span> 当前源码整理。重点是乱序细节、分布式 LSU、L1 blocking cache。</p>
+      <nav aria-label="页面导航">
+        <a href="#overview" class="active">总览</a>
+        <a href="#mental-model">心智模型</a>
+        <a href="#ooo">OOO 乱序核心</a>
+        <a href="#lsu">LSU / Store Buffer</a>
+        <a href="#cache">Cache / Memory</a>
+        <a href="#walkthrough">执行走读</a>
+        <a href="#code-map">源码地图</a>
+        <a href="#review">复习清单</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="hero" id="overview">
+        <p class="eyebrow">RISC-V Simulator Architecture Note</p>
+        <h2>从 “指令语义” 切回 “乱序时序”</h2>
+        <p class="lead">
+          这个 OOO 实现的核心不是把 RISC-V 指令语义重新写一遍，而是用
+          <code>DynamicInstPtr</code> 串起 ROB、rename、RS、执行单元、CDB、commit、store forwarding
+          和 cache 等待。学习时要把“算什么结果”和“什么时候对谁可见”分开。
+        </p>
+        <div class="quick-facts" aria-label="关键事实">
+          <div class="fact">
+            <b>2-wide</b>
+            <span>当前 fetch / decode / issue / dispatch / commit 宽度都是 2，见 <code>OOOPipelineConfig</code>。</span>
+          </div>
+          <div class="fact">
+            <b>96 ROB</b>
+            <span><code>ReorderBuffer::MAX_ROB_ENTRIES</code> 为 96，StoreBuffer 容量也对齐到 96。</span>
+          </div>
+          <div class="fact">
+            <b>48 RS</b>
+            <span>Reservation Station 管理 48 个 entry，以及 ALU / FP / BR / LOAD / STORE 单元。</span>
+          </div>
+          <div class="fact">
+            <b>L1 only</b>
+            <span>当前没有独立 L2、memory bus 或完整 MSHR，主要是 L1 blocking cache + inflight token。</span>
+          </div>
+        </div>
+      </header>
+
+      <section id="mental-model" class="band">
+        <h3>一眼心智模型</h3>
+        <div class="flow">
+          <div class="flow-row">
+            <div class="node blue">
+              <b>Fetch</b>
+              <span>I$ / branch predictor / fetch buffer</span>
+            </div>
+            <div class="node teal">
+              <b>Decode</b>
+              <span>decode + allocate ROB + create DynamicInst</span>
+            </div>
+            <div class="node amber">
+              <b>Issue</b>
+              <span>rename + insert Reservation Station</span>
+            </div>
+            <div class="node rose">
+              <b>Execute</b>
+              <span>dispatch FU / LSU / cache wait / recovery</span>
+            </div>
+            <div class="node green">
+              <b>Writeback</b>
+              <span>CDB wakeup + physical reg + ROB completed</span>
+            </div>
+            <div class="node violet">
+              <b>Commit</b>
+              <span>ROB head only, arch state and real store visibility</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <h4>每周期执行顺序</h4>
+            <p>
+              <code>OutOfOrderCPU::step()</code> 先 tick I$/D$，再按
+              <code>commit -> writeback -> execute -> issue -> decode -> fetch</code>
+              的反向顺序推进。这不是随便排的：同周期老结果先提交/唤醒，新指令再进入前端，读代码时要按这个顺序脑内单步。
+            </p>
+            <p class="mono shell">src/cpu/ooo/ooo_cpu.cpp:195, 200, 208</p>
+          </div>
+          <div class="panel">
+            <h4>单一事实来源</h4>
+            <p>
+              ROB、RS、执行单元之间传的是同一个 <code>DynamicInstPtr</code>。所以状态、寄存器重命名结果、
+              memory info、分支预测信息、异常和 timing cycle 都挂在同一个动态指令对象上。
+            </p>
+            <p class="mono shell">include/cpu/ooo/dynamic_inst.h:17, 31, 66</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="ooo">
+        <h3>OOO 乱序核心</h3>
+        <div class="tabs" role="tablist" aria-label="OOO 子主题">
+          <button class="tab active" data-tab="ooo-pipeline" type="button">流水线</button>
+          <button class="tab" data-tab="ooo-rename" type="button">Rename</button>
+          <button class="tab" data-tab="ooo-rs-rob" type="button">RS / ROB</button>
+          <button class="tab" data-tab="ooo-recovery" type="button">恢复机制</button>
+        </div>
+
+        <div class="tab-pane active" id="ooo-pipeline">
+          <div class="grid-2">
+            <div class="panel">
+              <h4>Decode 只分配 ROB，不做 rename</h4>
+              <p>
+                <code>DecodeStage</code> 从 <code>fetch_buffer</code> 取一条 instruction，调用 decoder，
+                然后 <code>reorder_buffer->allocate_entry(...)</code> 创建 <code>DynamicInst</code>。
+                此时指令状态还是 <code>ALLOCATED</code>，源/目的物理寄存器还没真正绑定。
+              </p>
+              <p class="mono shell">src/cpu/ooo/stages/decode_stage.cpp:35, 49</p>
+            </div>
+            <div class="panel">
+              <h4>Issue = Rename + 插入 RS</h4>
+              <p>
+                这个项目的 <code>IssueStage</code> 更像教材里的 rename/dispatch 组合：从 ROB 找
+                <code>ALLOCATED</code> 指令，检查串行化约束、CSR 约束、RS 空间，然后做寄存器重命名并塞入 RS。
+              </p>
+              <p class="mono shell">src/cpu/ooo/stages/issue_stage.cpp:149, 246, 268</p>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top: 16px;">
+            <h4>动态指令生命周期</h4>
+            <div class="diagram">
+              <div class="swimlane" aria-label="动态指令生命周期表">
+                <div class="swim-row">
+                  <div class="lane-title">状态</div>
+                  <div class="swim-cell active-cell">ALLOCATED</div>
+                  <div class="swim-cell active-cell">ISSUED</div>
+                  <div class="swim-cell active-cell">EXECUTING</div>
+                  <div class="swim-cell active-cell">COMPLETED</div>
+                  <div class="swim-cell active-cell">RETIRED</div>
+                  <div class="swim-cell">flushed</div>
+                </div>
+                <div class="swim-row">
+                  <div class="lane-title">主要位置</div>
+                  <div class="swim-cell">ROB</div>
+                  <div class="swim-cell">ROB + RS</div>
+                  <div class="swim-cell">ExecutionUnit / inflight</div>
+                  <div class="swim-cell">ROB completed</div>
+                  <div class="swim-cell">架构状态</div>
+                  <div class="swim-cell">恢复路径清理</div>
+                </div>
+                <div class="swim-row">
+                  <div class="lane-title">触发者</div>
+                  <div class="swim-cell">Decode</div>
+                  <div class="swim-cell">Issue</div>
+                  <div class="swim-cell">Execute dispatch</div>
+                  <div class="swim-cell">CDB / Writeback</div>
+                  <div class="swim-cell">Commit</div>
+                  <div class="swim-cell">branch / trap / violation</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-pane" id="ooo-rename">
+          <div class="panel">
+            <h4>Rename 解决 WAW / WAR，RAW 仍靠 ready bit 和 CDB</h4>
+            <div class="kv">
+              <div class="k">Rename table</div>
+              <div class="v">逻辑寄存器到物理寄存器映射，整数和 FP 分开维护。</div>
+            </div>
+            <div class="kv">
+              <div class="k">Free list</div>
+              <div class="v">为新目的寄存器分配物理寄存器；<code>x0</code> 不需要真实目的物理寄存器。</div>
+            </div>
+            <div class="kv">
+              <div class="k">Arch map</div>
+              <div class="v">提交时更新，用来表示已退休的体系结构映射，也帮助异常/flush 后恢复。</div>
+            </div>
+            <div class="kv">
+              <div class="k">Checkpoint</div>
+              <div class="v">BRANCH / JALR issue 时保存 rename checkpoint，执行阶段可用于控制流早恢复。</div>
+            </div>
+          </div>
+          <div class="callout" style="margin-top: 16px;">
+            <b>一个容易漏的细节：</b>
+            <code>rd == rs1/rs2</code> 时，源操作数必须读取旧物理寄存器，而不是刚给目的寄存器分配的新物理寄存器。
+            相关修正在 <code>register_rename.cpp:194</code> 附近。
+          </div>
+        </div>
+
+        <div class="tab-pane" id="ooo-rs-rob">
+          <div class="grid-2">
+            <div class="panel">
+              <h4>Reservation Station</h4>
+              <p>
+                RS 不是复制一份 instruction，而是持有 <code>DynamicInstPtr</code>。它负责等待操作数、监听 CDB、
+                按 ready + 执行单元可用 + instruction_id 优先级选择指令。
+              </p>
+              <div class="badge-row">
+                <span class="pill">48 entries</span>
+                <span class="pill">2 ALU</span>
+                <span class="pill">2 FP</span>
+                <span class="pill">1 BR</span>
+                <span class="pill">2 LOAD</span>
+                <span class="pill">2 STORE</span>
+              </div>
+              <p class="mono shell">include/cpu/ooo/reservation_station.h:17, 29, 83</p>
+            </div>
+            <div class="panel">
+              <h4>Reorder Buffer</h4>
+              <p>
+                ROB 保证顺序提交、精确异常，也在 LSU 中扮演 “older store hazard oracle”。
+                load 完成前会问 ROB：前面有没有 AMO、地址未知 store、或重叠 store。
+              </p>
+              <div class="badge-row">
+                <span class="pill">96 entries</span>
+                <span class="pill">head commit</span>
+                <span class="pill">exception</span>
+                <span class="pill">store hazard</span>
+              </div>
+              <p class="mono shell">include/cpu/ooo/reorder_buffer.h:25, 153, 156</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-pane" id="ooo-recovery">
+          <div class="decision">
+            <div class="path">
+              <h4>控制流早恢复</h4>
+              <p>
+                BRANCH / JALR 在 execute 阶段发现预测 next PC 不等于实际 next PC 时，可用 rename checkpoint
+                清掉 younger ROB/RS/store buffer/CDB/execution units，并把 fetch PC 改到正确路径。
+              </p>
+              <p class="mono shell">src/cpu/ooo/stages/execute_stage.cpp:683, 715, 722</p>
+            </div>
+            <div class="path">
+              <h4>全流水线恢复</h4>
+              <p>
+                trap、FENCE.I、memory-order violation 等路径会更重：清 ROB、RS、rename、store buffer、CDB、执行单元、
+                cache in-flight，并重启取指。
+              </p>
+              <p class="mono shell">src/cpu/ooo/stages/execute_stage.cpp:877, 946</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="lsu" class="band">
+        <h3>LSU：这里没有一个传统 LoadStoreQueue 类</h3>
+        <p class="lead">
+          这个实现更像 “分布式 LSU”：ROB 做顺序与 older-store hazard 查询，StoreBuffer 做 forwarding 可见性，
+          ExecuteStage 做 replay / cache wait / memory-order violation recovery，CommitStage 做真实 store 可见性。
+        </p>
+
+        <div class="grid-3" style="margin-top: 18px;">
+          <div class="panel">
+            <h4>DynamicInst::MemoryInfo</h4>
+            <p>每条 load/store 自带地址、值、大小、address_ready、forwarding、replay、推测越过地址未知 store 等状态。</p>
+            <p class="mono shell">include/cpu/ooo/dynamic_inst.h:66</p>
+          </div>
+          <div class="panel">
+            <h4>StoreBuffer</h4>
+            <p>保存已知地址和值的更老 store，服务 younger load 的 full forwarding、partial merge 或 overlap 阻塞。</p>
+            <p class="mono shell">include/cpu/ooo/store_buffer.h:23</p>
+          </div>
+          <div class="panel">
+            <h4>ExecuteStage</h4>
+            <p>load/store 调度、hazard 检查、cache 等待、inflight 搬移、order violation recovery 都集中在这里。</p>
+            <p class="mono shell">src/cpu/ooo/stages/execute_stage.cpp:134</p>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <h4>Load 完成前的决策树</h4>
+          <div class="stepper" aria-label="LSU 决策步骤">
+            <button class="step active" data-step="lsu-step-1" type="button">1. 地址计算</button>
+            <button class="step" data-step="lsu-step-2" type="button">2. ROB hazard</button>
+            <button class="step" data-step="lsu-step-3" type="button">3. Store forwarding</button>
+            <button class="step" data-step="lsu-step-4" type="button">4. L1D / inflight</button>
+            <button class="step" data-step="lsu-step-5" type="button">5. 提交画像</button>
+          </div>
+
+          <div class="step-pane active" id="lsu-step-1">
+            <h4>地址不是 Issue 算，而是 Execute semantics 算</h4>
+            <p>
+              Load 用 <code>rs1 + imm</code> 算虚拟地址，再走 <code>translateLoadAddress()</code> 得到物理地址，
+              写入 <code>unit.load_address</code> 和 <code>MemoryInfo</code>。Store 同理，但还记录 store value。
+            </p>
+            <p class="mono shell">src/cpu/ooo/execute_semantics.cpp:192, 313</p>
+          </div>
+
+          <div class="step-pane" id="lsu-step-2">
+            <h4>ROB 先回答：前面有没有更老 store 风险</h4>
+            <p>
+              load 完成前调用 <code>get_earlier_store_hazard_info()</code>。返回值不是简单 true/false，
+              而是 <code>Amo</code>、<code>AddressUnknown</code>、<code>Overlap</code> 或 <code>None</code>。
+              地址未知 store 有预测器允许 load 推测越过，错了再恢复。
+            </p>
+            <p class="mono shell">include/cpu/ooo/reorder_buffer.h:27, 157</p>
+          </div>
+
+          <div class="step-pane" id="lsu-step-3">
+            <h4>StoreBuffer 做 byte-mask 级 forwarding</h4>
+            <p>
+              <code>analyze_load_forwarding()</code> 只看比当前 load 更老的 store，按 instruction id 从新到旧合并字节。
+              完全覆盖可直接返回；部分覆盖会读内存再 merge；有重叠但不能安全合并则 replay。
+            </p>
+            <p class="mono shell">src/cpu/ooo/store_buffer.cpp:95, 139, 179</p>
+          </div>
+
+          <div class="step-pane" id="lsu-step-4">
+            <h4>D-cache miss 不一定长期占着 load/store unit</h4>
+            <p>
+              如果 cache 访问已经发出且还需要等，执行单元状态会搬到 <code>memory_access_inflight</code>，
+              同时释放 RS entry 和 dispatch unit。这样另一个 ready load/store 还有机会继续走。
+            </p>
+            <p class="mono shell">src/cpu/ooo/stages/execute_stage.cpp:619, 545</p>
+          </div>
+
+          <div class="step-pane" id="lsu-step-5">
+            <h4>真实 store 写入只在 Commit 阶段发生</h4>
+            <p>
+              Store execute 阶段可以发布到 StoreBuffer，也可以做 D$ 时序访问，但这不等于体系结构内存已改变。
+              到 ROB head 且 completed 后，Commit 才调用 <code>l1d_cache->commitStore()</code> 或直接写 Memory。
+            </p>
+            <p class="mono shell">src/cpu/ooo/stages/commit_stage.cpp:227, 238, 381</p>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top: 16px;">
+          <div class="callout warning">
+            <b>不要把 StoreBuffer 当提交队列。</b>
+            它更像 “forwarding 可见性结构”。Store 对 younger load 可见，不等于已经对体系结构内存可见。
+          </div>
+          <div class="callout danger">
+            <b>乱序 load 不是无条件越过 store。</b>
+            它会被 AMO、地址未知 store、重叠 store、MMIO host-comm 串行化等情况挡住或 replay。
+          </div>
+        </div>
+      </section>
+
+      <section id="cache">
+        <h3>Cache / Memory：轻量 L1 blocking 模型</h3>
+        <div class="grid-2">
+          <div class="panel">
+            <h4>当前已经有什么</h4>
+            <ul>
+              <li>L1I / L1D 都是 <code>BlockingCache</code>。</li>
+              <li>默认 32KB、64B line、4-way、hit 1 cycle、miss penalty 20。</li>
+              <li>L1D 默认 <code>max_outstanding_misses = 2</code>，并默认启用 next-line prefetch。</li>
+              <li>cache 直接访问共享 <code>Memory</code>，没有独立 memory bus。</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h4>当前还没有什么</h4>
+            <ul>
+              <li>没有独立 L2 类或 L2 pipeline。</li>
+              <li>没有真实 cache-coherent bus / fabric。</li>
+              <li>没有完整 MSHR：没有同地址合并、target list、refill response 对象。</li>
+              <li>miss 功能上立即装行，时序上靠 pending cycle token 模拟等待。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <h4>BlockingCache 的访问模型</h4>
+          <div class="timeline">
+            <div class="cycle">A</div>
+            <div class="timeline-item">
+              <b>access / load / fetchInstruction 入口</b>
+              <p><code>access()</code> 只建模驻留和时序；<code>load()</code> 还会从 cache line 拼小端值；<code>fetchInstruction()</code> 处理 16/32 位指令。</p>
+            </div>
+            <div class="cycle">B</div>
+            <div class="timeline-item">
+              <b>bypass 检查</b>
+              <p><code>tohost/fromhost</code> 这种 MMIO 地址直接 bypass cache，并且 execute 侧要求 host-comm 访问等到 ROB head。</p>
+            </div>
+            <div class="cycle">C</div>
+            <div class="timeline-item">
+              <b>outstanding miss 限制</b>
+              <p>如果 <code>outstanding_miss_cycles_.size() >= max_outstanding_misses</code>，返回 <code>blocked=true</code>。</p>
+            </div>
+            <div class="cycle">D</div>
+            <div class="timeline-item">
+              <b>hit / miss</b>
+              <p>hit 更新 LRU；miss 立即 <code>installLine()</code> 从 Memory 填行，返回 <code>hit_latency + miss_penalty</code>。</p>
+            </div>
+            <div class="cycle">E</div>
+            <div class="timeline-item">
+              <b>tick 倒计时</b>
+              <p>CPU 每周期 tick I$/D$，pending cycle 归零后从 token 列表移除。这个 token 就是当前的轻量 pending request。</p>
+            </div>
+          </div>
+          <p class="mono shell">src/cpu/ooo/cache/blocking_cache.cpp:51, 217, 230, 277, 178</p>
+        </div>
+
+        <div class="grid-2" style="margin-top: 16px;">
+          <div class="panel">
+            <h4>替换与写回</h4>
+            <p>
+              cache 是 set-associative LRU：先找 invalid line，否则选 <code>lru_stamp</code> 最小的 victim。
+              dirty victim 在 <code>installLine()</code> 里逐字节写回 Memory。Store commit 则用非时序
+              <code>commitStore()</code> 写 cache line 并同步主存镜像。
+            </p>
+            <p class="mono shell">blocking_cache.cpp:340, 361, 136</p>
+          </div>
+          <div class="panel">
+            <h4>Prefetch</h4>
+            <p>
+              next-line prefetch 由 demand miss 触发，直接安装下一条 line，并统计 already resident、set throttle、
+              useful hit、unused eviction。CLI 支持开关 <code>--l1d-next-line-prefetch=on|off</code>。
+            </p>
+            <p class="mono shell">blocking_cache.cpp:382; src/main.cpp:93, 261</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="walkthrough" class="band">
+        <h3>两条典型路径走读</h3>
+        <div class="tabs" role="tablist" aria-label="走读路径">
+          <button class="tab active" data-tab="walk-load" type="button">Load miss + forwarding</button>
+          <button class="tab" data-tab="walk-store" type="button">Store execute + commit</button>
+          <button class="tab" data-tab="walk-branch" type="button">Branch mispredict</button>
+        </div>
+
+        <div class="tab-pane active" id="walk-load">
+          <div class="timeline">
+            <div class="cycle">1</div>
+            <div class="timeline-item"><b>Decode</b><p>分配 ROB entry，创建 <code>DynamicInst</code>。</p></div>
+            <div class="cycle">2</div>
+            <div class="timeline-item"><b>Issue</b><p>rename 源寄存器，分配目的物理寄存器，插入 RS。</p></div>
+            <div class="cycle">3</div>
+            <div class="timeline-item"><b>Execute semantics</b><p>计算地址、翻译地址、写入 <code>MemoryInfo</code>。</p></div>
+            <div class="cycle">4</div>
+            <div class="timeline-item"><b>Hazard + forwarding</b><p>先问 ROB 更老 store 风险，再问 StoreBuffer 能否 full/partial forwarding。</p></div>
+            <div class="cycle">5</div>
+            <div class="timeline-item"><b>L1D</b><p>若需要访问 cache，miss 会产生 latency；请求可被搬到 <code>memory_access_inflight</code>。</p></div>
+            <div class="cycle">6</div>
+            <div class="timeline-item"><b>CDB / Writeback / Commit</b><p>完成后 CDB 广播，ROB 标 completed，到 head 后提交架构寄存器。</p></div>
+          </div>
+        </div>
+
+        <div class="tab-pane" id="walk-store">
+          <div class="timeline">
+            <div class="cycle">1</div>
+            <div class="timeline-item"><b>Issue</b><p>store 本身没有普通整数目的寄存器，但依赖地址源和值源。</p></div>
+            <div class="cycle">2</div>
+            <div class="timeline-item"><b>Execute semantics</b><p>地址和值 ready 后写入 <code>MemoryInfo</code>，并发布到 StoreBuffer。</p></div>
+            <div class="cycle">3</div>
+            <div class="timeline-item"><b>D$ 时序访问</b><p>store execute 可以用 <code>BlockingCache::access()</code> 建模 miss penalty，但不做真实架构写。</p></div>
+            <div class="cycle">4</div>
+            <div class="timeline-item"><b>Memory order check</b><p>如果发现 younger load 曾错误越过地址未知 store，触发 memory-order violation recovery。</p></div>
+            <div class="cycle">5</div>
+            <div class="timeline-item"><b>Commit</b><p>到 ROB head 后，<code>commitStore()</code> 写 L1D / Memory，并 retire StoreBuffer entry。</p></div>
+          </div>
+        </div>
+
+        <div class="tab-pane" id="walk-branch">
+          <div class="timeline">
+            <div class="cycle">1</div>
+            <div class="timeline-item"><b>Fetch</b><p>branch predictor 生成 predicted next PC 和 meta，必要时保存 RAS checkpoint。</p></div>
+            <div class="cycle">2</div>
+            <div class="timeline-item"><b>Issue</b><p>BRANCH / JALR 保存 rename checkpoint。</p></div>
+            <div class="cycle">3</div>
+            <div class="timeline-item"><b>Execute resolve</b><p>比较 predicted next PC 和 actual next PC。</p></div>
+            <div class="cycle">4</div>
+            <div class="timeline-item"><b>Early recovery</b><p>若错预测，flush younger ROB/RS/store buffer/CDB/execution units，恢复 rename checkpoint，PC 指向正确路径。</p></div>
+            <div class="cycle">5</div>
+            <div class="timeline-item"><b>Commit accounting</b><p>提交阶段更新 predictor profile、DiffTest 和 retired count；已早恢复的指令不重复清一次。</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="code-map">
+        <h3>源码地图</h3>
+        <div class="panel">
+          <ul class="code-list">
+            <li>
+              <a href="../include/cpu/ooo/ooo_cpu.h"><code>include/cpu/ooo/ooo_cpu.h</code></a>
+              <span>OOO CPU 外壳、阶段对象、对外 CPU 接口。</span>
+            </li>
+            <li>
+              <a href="../src/cpu/ooo/ooo_cpu.cpp"><code>src/cpu/ooo/ooo_cpu.cpp</code></a>
+              <span>组件初始化、每周期 step 顺序、L1 cache 默认配置、外部写 invalidate。</span>
+            </li>
+            <li>
+              <a href="../include/cpu/ooo/cpu_state.h"><code>include/cpu/ooo/cpu_state.h</code></a>
+              <span>共享状态：ROB、RS、rename、StoreBuffer、L1I/L1D、执行单元、CDB、perf profile。</span>
+            </li>
+            <li>
+              <a href="../include/cpu/ooo/dynamic_inst.h"><code>include/cpu/ooo/dynamic_inst.h</code></a>
+              <span>动态指令统一载体；读 OOO 时最值得优先建立对象模型。</span>
+            </li>
+            <li>
+              <a href="../src/cpu/ooo/stages/decode_stage.cpp"><code>src/cpu/ooo/stages/decode_stage.cpp</code></a>
+              <span>fetch buffer 到 ROB allocation；注意这里还没有 rename。</span>
+            </li>
+            <li>
+              <a href="../src/cpu/ooo/stages/issue_stage.cpp"><code>src/cpu/ooo/stages/issue_stage.cpp</code></a>
+              <span>rename、串行化约束、插入 RS、分支 rename checkpoint。</span>
+            </li>
+            <li>
+              <a href="../src/cpu/ooo/stages/execute_stage.cpp"><code>src/cpu/ooo/stages/execute_stage.cpp</code></a>
+              <span>执行单元推进、RS dispatch、load/store hazard、cache wait、inflight、recovery。</span>
+            </li>
+            <li>
+              <a href="../src/cpu/ooo/stages/writeback_stage.cpp"><code>src/cpu/ooo/stages/writeback_stage.cpp</code></a>
+              <span>CDB 消费，唤醒 RS、更新物理寄存器、标记 ROB completed。</span>
+            </li>
+            <li>
+              <a href="../src/cpu/ooo/stages/commit_stage.cpp"><code>src/cpu/ooo/stages/commit_stage.cpp</code></a>
+              <span>ROB head 顺序提交、架构寄存器、store/AMO 可见性、trap/flush/DiffTest。</span>
+            </li>
+            <li>
+              <a href="../src/cpu/ooo/execute_semantics.cpp"><code>src/cpu/ooo/execute_semantics.cpp</code></a>
+              <span>指令语义入口；load/store 地址计算与地址翻译也在这里。</span>
+            </li>
+            <li>
+              <a href="../include/cpu/ooo/store_buffer.h"><code>include/cpu/ooo/store_buffer.h</code></a>
+              <span>StoreBuffer forwarding API 和 full/partial/blocked 分类。</span>
+            </li>
+            <li>
+              <a href="../src/cpu/ooo/cache/blocking_cache.cpp"><code>src/cpu/ooo/cache/blocking_cache.cpp</code></a>
+              <span>L1 cache hit/miss、LRU、dirty writeback、prefetch、pending cycles。</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="review" class="band">
+        <h3>复习清单</h3>
+        <div class="grid-2">
+          <div class="panel">
+            <h4>先回答这些问题</h4>
+            <ol>
+              <li>为什么 <code>DecodeStage</code> 分配 ROB，但 <code>IssueStage</code> 才做 rename？</li>
+              <li><code>DynamicInst</code> 为什么能避免 ROB/RS/执行单元三份状态漂移？</li>
+              <li>StoreBuffer 里可见的 store，为什么还不能说已经提交到内存？</li>
+              <li>load 遇到更老地址未知 store 时，有哪几种选择？</li>
+              <li>为什么 D$ miss 可以搬到 <code>memory_access_inflight</code>？这和完整 MSHR 差在哪里？</li>
+              <li>控制流早恢复和 memory-order violation recovery 清理范围有什么不同？</li>
+            </ol>
+          </div>
+          <div class="panel">
+            <h4>建议跑的测试</h4>
+            <div class="test-list">
+              <div class="test-item">
+                <b><code>test_reorder_buffer</code></b>
+                <span>理解 ROB allocation / commit / flush / store hazard。</span>
+              </div>
+              <div class="test-item">
+                <b><code>test_reservation_station</code></b>
+                <span>理解 RS ready、CDB wakeup、执行单元调度。</span>
+              </div>
+              <div class="test-item">
+                <b><code>test_store_buffer</code></b>
+                <span>理解 full forwarding、partial merge、overlap block。</span>
+              </div>
+              <div class="test-item">
+                <b><code>test_blocking_cache</code></b>
+                <span>理解 L1 hit/miss、dirty eviction、prefetch、pending。</span>
+              </div>
+              <div class="test-item">
+                <b><code>test_ooo_cache</code></b>
+                <span>理解 OOO 中 I$/D$ stall、miss inflight、多 outstanding。</span>
+              </div>
+              <div class="test-item">
+                <b><code>test_ooo_cpu</code></b>
+                <span>从完整 CPU 角度验证乱序执行与提交。</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout" style="margin-top: 16px;">
+          <b>一句话收束：</b>
+          这个模拟器目前最适合用来学习 “小型 OOO CPU 里，指令生命周期、依赖消除、精确提交、store forwarding、cache stall 如何拼在一起”。
+          如果要研究更真实的 memory hierarchy、non-blocking L1、L2 仲裁、多核一致性，那会是下一层模型，而不是当前代码已经完整具备的东西。
+        </div>
+      </section>
+
+      <footer>
+        生成位置：<code>docs/ooo-lsu-cache-architecture.html</code>。本页不依赖外部网络资源，直接用浏览器打开即可。
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    const tabs = document.querySelectorAll(".tab");
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const id = tab.dataset.tab;
+        const group = tab.parentElement;
+        group.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+        tab.classList.add("active");
+        const section = group.parentElement;
+        section.querySelectorAll(".tab-pane").forEach((pane) => pane.classList.remove("active"));
+        const pane = section.querySelector("#" + id);
+        if (pane) {
+          pane.classList.add("active");
+        }
+      });
+    });
+
+    const steps = document.querySelectorAll(".step");
+    steps.forEach((step) => {
+      step.addEventListener("click", () => {
+        const id = step.dataset.step;
+        const group = step.parentElement;
+        group.querySelectorAll(".step").forEach((item) => item.classList.remove("active"));
+        step.classList.add("active");
+        const panel = group.parentElement;
+        panel.querySelectorAll(".step-pane").forEach((pane) => pane.classList.remove("active"));
+        const pane = panel.querySelector("#" + id);
+        if (pane) {
+          pane.classList.add("active");
+        }
+      });
+    });
+
+    const navLinks = document.querySelectorAll("aside nav a");
+    const sections = Array.from(navLinks).map((link) => document.querySelector(link.getAttribute("href"))).filter(Boolean);
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (!visible) {
+        return;
+      }
+      navLinks.forEach((link) => {
+        link.classList.toggle("active", link.getAttribute("href") === "#" + visible.target.id);
+      });
+    }, { rootMargin: "-20% 0px -65% 0px", threshold: [0.05, 0.2, 0.5] });
+    sections.forEach((section) => observer.observe(section));
+  </script>
+</body>
+</html>

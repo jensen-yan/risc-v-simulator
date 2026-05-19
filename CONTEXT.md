@@ -41,6 +41,10 @@ _Avoid_: scattering inflight queue movement, wait-cycle advancement, and complet
 The execute-side replay decision for a load that sees an older AMO, address-unknown store, or overlapping store before it can read memory.
 _Avoid_: spreading ROB store-hazard kind mapping, replay counters, and caused-by counters through load completion
 
+**Execute Load Access**:
+The execute-side load access path after hazard checks, including store-to-load forwarding, optional memory merge, D$ read timing, exception capture, and final value publication.
+_Avoid_: keeping forwarding, memory read, cache wait, and result formatting interleaved in `ExecuteStage`
+
 **OOO Recovery**:
 The out-of-order pipeline rules that remove speculative work after a redirect, trap, fence, or other pipeline recovery reason.
 _Avoid_: scattering flush cleanup rules across individual stages
@@ -83,6 +87,7 @@ _Avoid_: blacklist entry
 - **Execute Host-Comm Access** protects tohost/fromhost accesses from observing state before older instructions retire.
 - **Execute Memory Inflight** owns already-issued load/store cache misses until they complete or request recovery.
 - **Execute Load Hazard** decides whether a load replays or may continue before forwarding/memory access.
+- **Execute Load Access** runs after **Execute Load Hazard** allows the load to proceed.
 - **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
 - **Commit Retire Effects** runs after the instruction's architectural state has been committed.
 - **Commit Memory Effects** runs before generic retire bookkeeping so store/AMO state becomes architectural first.

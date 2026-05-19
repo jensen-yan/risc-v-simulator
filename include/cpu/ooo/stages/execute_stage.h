@@ -66,17 +66,8 @@ public:
     const char* get_stage_name() const override { return "EXECUTE"; }
 
 private:
-    enum class LoadExecutionResult {
-        Forwarded,
-        LoadedFromMemory,
-        WaitingForCache,
-        BlockedByStore,
-        Exception
-    };
-
     // 辅助方法
     void update_execution_units(CPUState& state);
-    LoadExecutionResult perform_load_execution(ExecutionUnit& unit, CPUState& state);
     
     // 执行单元完成时的公共处理逻辑
     void complete_execution_unit(ExecutionUnit& unit,

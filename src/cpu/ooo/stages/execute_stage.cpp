@@ -1,12 +1,12 @@
 #include "cpu/ooo/stages/execute_stage.h"
 #include "cpu/ooo/execute_control_recovery.h"
-#include "cpu/ooo/execute_dcache_access.h"
 #include "cpu/ooo/execute_host_comm_access.h"
 #include "cpu/ooo/execute_load_access.h"
 #include "cpu/ooo/execute_load_hazard.h"
 #include "cpu/ooo/execute_memory_inflight.h"
 #include "cpu/ooo/execute_memory_order.h"
 #include "cpu/ooo/execute_semantics.h"
+#include "cpu/ooo/execute_store_access.h"
 #include "common/debug_types.h"
 #include "common/types.h"
 #include "core/instruction_executor.h"
@@ -339,53 +339,13 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                if (ExecuteHostCommAccess::mustSerialize(
-                        state, unit.instruction, unit.load_address, unit.load_size)) {
-                    auto blocked_inst = unit.instruction;
-                    blocked_inst->set_status(DynamicInst::Status::ISSUED);
-                    state.reservation_station->release_execution_unit(ExecutionUnitType::STORE, static_cast<int>(i));
-                    resetExecutionUnitState(unit);
-                    LOGT(EXECUTE,
-                         "inst=%" PRId64 " STORE%zu waits for ROB head before host-comm access",
-                         blocked_inst->get_instruction_id(), i);
-                    continue;
-                }
-
-                if (!ExecuteDCacheAccess::startOrWait(
-                        unit, state, CacheAccessType::Write, PerfCounterId::CACHE_L1D_STALL_CYCLES_STORE)) {
-                    if (unit.dcache.request_sent &&
-                        ExecuteMemoryInflight::tryMove(unit, ExecutionUnitType::STORE, i, state)) {
-                        continue;
-                    }
-
-                    if (!unit.dcache.request_sent) {
-                        auto blocked_inst = unit.instruction;
-                        blocked_inst->set_status(DynamicInst::Status::ISSUED);
-                        state.reservation_station->release_execution_unit(
-                            ExecutionUnitType::STORE, static_cast<int>(i));
-                        resetExecutionUnitState(unit);
-                        LOGT(EXECUTE,
-                             "inst=%" PRId64 " STORE%zu blocked by dcache outstanding limit, release and retry",
-                             blocked_inst->get_instruction_id(), i);
-                        continue;
-                    }
-
-                    LOGT(EXECUTE, "inst=%" PRId64 " STORE%zu waiting for dcache, remaining=%d",
-                        unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
-                    continue;
-                }
-
-                // 存储指令结果为0
-                unit.result = 0;
-                
-                LOGT(EXECUTE, "inst=%" PRId64 " STORE%zu done, notify ROB",
-                    unit.instruction->get_instruction_id(), i);
-
-                if (ExecuteMemoryOrder::tryRecoverViolation(unit.instruction, state)) {
+                const auto store_result = ExecuteStoreAccess::perform(unit, i, state);
+                if (store_result == ExecuteStoreAccess::Result::RecoveryTriggered) {
                     return;
                 }
-                
-                complete_execution_unit(unit, ExecutionUnitType::STORE, i, state);
+                if (store_result == ExecuteStoreAccess::Result::Completed) {
+                    complete_execution_unit(unit, ExecutionUnitType::STORE, i, state);
+                }
             }
         }
     }

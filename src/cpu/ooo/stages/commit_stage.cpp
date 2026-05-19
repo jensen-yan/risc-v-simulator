@@ -1,5 +1,5 @@
 #include "cpu/ooo/stages/commit_stage.h"
-#include "cpu/ooo/branch_predictor.h"
+#include "cpu/ooo/commit_control_flow_effects.h"
 #include "cpu/ooo/commit_memory_effects.h"
 #include "cpu/ooo/commit_register_effects.h"
 #include "cpu/ooo/commit_retire_effects.h"
@@ -20,12 +20,6 @@ constexpr uint32_t kMinstretCsrAddr = 0xB02;
 constexpr uint32_t kCycleCsrAddr = 0xC00;
 constexpr uint32_t kInstretCsrAddr = 0xC02;
 
-enum class JalrProfileKind {
-    ReturnLike,
-    CallLike,
-    Other,
-};
-
 void syncBasicPerfCounters(CPUState& state) {
     // 与 in-order 保持一致：四个基础计数器统一跟随已提交指令数。
     const uint64_t retired = state.instruction_count;
@@ -33,10 +27,6 @@ void syncBasicPerfCounters(CPUState& state) {
     csr::write(state.csr_registers, kMinstretCsrAddr, retired);
     csr::write(state.csr_registers, kCycleCsrAddr, retired);
     csr::write(state.csr_registers, kInstretCsrAddr, retired);
-}
-
-bool isLinkRegister(RegNum reg) {
-    return reg == 1 || reg == 5;
 }
 
 void writeCommittedCsr(CPUState& state, uint32_t csr_addr, uint64_t value) {
@@ -47,15 +37,6 @@ void writeCommittedCsr(CPUState& state, uint32_t csr_addr, uint64_t value) {
     csr::write(state.csr_registers, csr_addr, value);
 }
 
-JalrProfileKind classifyJalrKind(const DecodedInstruction& decoded) {
-    if (decoded.rd == 0 && decoded.imm == 0 && isLinkRegister(decoded.rs1)) {
-        return JalrProfileKind::ReturnLike;
-    }
-    if (isLinkRegister(decoded.rd)) {
-        return JalrProfileKind::CallLike;
-    }
-    return JalrProfileKind::Other;
-}
 }  // namespace
 
 CommitStage::CommitStage() {
@@ -210,215 +191,11 @@ void CommitStage::execute(Context& context) {
         
         CommitRetireEffects::afterInstructionRetired(state, committed_inst);
 
-        // ====== 控制流：commit仅在预测错时redirect/flush ======
-        const bool is_control_flow =
-            (decoded_info.opcode == Opcode::BRANCH ||
-             decoded_info.opcode == Opcode::JAL ||
-             decoded_info.opcode == Opcode::JALR);
-
-        bool need_redirect_flush = false;
-        uint64_t redirect_pc = 0;
-        OooRecovery::Reason flush_reason = OooRecovery::Reason::Other;
-
-        if (is_control_flow) {
-            const uint64_t instruction_pc = committed_inst->get_pc();
-            const uint64_t fallthrough = instruction_pc + (decoded_info.is_compressed ? 2ULL : 4ULL);
-            const uint64_t actual_next_pc = committed_inst->is_jump()
-                                                ? committed_inst->get_jump_target()
-                                                : fallthrough;
-            const uint64_t predicted_next_pc = committed_inst->has_predicted_next_pc()
-                                                   ? committed_inst->get_predicted_next_pc()
-                                                   : fallthrough;
-            const bool correct = (predicted_next_pc == actual_next_pc);
-
-            if (correct) {
-                state.perf_counters.increment(PerfCounterId::PREDICTOR_CONTROL_CORRECT);
-            } else {
-                state.perf_counters.increment(PerfCounterId::PREDICTOR_CONTROL_INCORRECT);
-            }
-
-            // 统计：真实控制流改变（taken branch + jump）
-            if (committed_inst->is_jump()) {
-                state.perf_counters.increment(PerfCounterId::CONTROL_REDIRECTS);
-                if (decoded_info.opcode == Opcode::JAL || decoded_info.opcode == Opcode::JALR) {
-                    state.perf_counters.increment(PerfCounterId::UNCONDITIONAL_REDIRECTS);
-                }
-            }
-
-            // 条件分支：预测对/错、以及BRANCH_MISPREDICTS口径统一到commit
-            if (decoded_info.opcode == Opcode::BRANCH) {
-                const BranchPredictor::BranchMeta* branch_meta = nullptr;
-                if (committed_inst->has_branch_predict_meta()) {
-                    branch_meta = &committed_inst->get_branch_predict_meta();
-                }
-
-                auto& profile = state.branch_profiles[instruction_pc];
-                profile.executions++;
-                if (committed_inst->is_jump()) {
-                    profile.taken++;
-                }
-                if (predicted_next_pc != fallthrough) {
-                    profile.predicted_taken++;
-                }
-                if (!correct) {
-                    profile.mispredicts++;
-                }
-
-                if (branch_meta && branch_meta->valid) {
-                    const bool actual_taken = committed_inst->is_jump();
-                    const bool local_correct = (branch_meta->local_pred_taken == actual_taken);
-                    const bool global_correct = (branch_meta->global_pred_taken == actual_taken);
-                    const bool chooser_correct = correct;
-
-                    if (local_correct) {
-                        profile.local_correct++;
-                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_LOCAL_CORRECT);
-                    } else {
-                        profile.local_incorrect++;
-                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_LOCAL_INCORRECT);
-                    }
-
-                    if (global_correct) {
-                        profile.global_correct++;
-                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_GLOBAL_CORRECT);
-                    } else {
-                        profile.global_incorrect++;
-                        state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_GLOBAL_INCORRECT);
-                    }
-
-                    if (branch_meta->chooser_use_global) {
-                        profile.chooser_selected_global++;
-                    } else {
-                        profile.chooser_selected_local++;
-                    }
-
-                    if (chooser_correct) {
-                        profile.chooser_correct++;
-                    } else {
-                        profile.chooser_incorrect++;
-                    }
-
-                    if (local_correct && global_correct) {
-                        profile.both_correct++;
-                    } else if (!local_correct && !global_correct) {
-                        profile.both_incorrect++;
-                    } else {
-                        const bool chosen_component_correct =
-                            branch_meta->chooser_use_global ? global_correct : local_correct;
-                        if (!chosen_component_correct) {
-                            profile.chooser_misses++;
-                        }
-                    }
-
-                    if (branch_meta->loop_override_used) {
-                        profile.loop_override_used++;
-                        if (chooser_correct) {
-                            profile.loop_override_correct++;
-                            state.perf_counters.increment(PerfCounterId::PREDICTOR_LOOP_CORRECT);
-                        } else {
-                            profile.loop_override_incorrect++;
-                            state.perf_counters.increment(PerfCounterId::PREDICTOR_LOOP_INCORRECT);
-                        }
-                    }
-                }
-
-                if (correct) {
-                    state.perf_counters.increment(PerfCounterId::PREDICTOR_BHT_CORRECT);
-                } else {
-                    state.perf_counters.increment(PerfCounterId::PREDICTOR_BHT_INCORRECT);
-                    state.recordBranchMispredict();
-                }
-            }
-
-            // JALR：预测错次数
-            if (decoded_info.opcode == Opcode::JALR && !correct) {
-                state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_MISPREDICTS);
-
-                const auto jalr_kind = classifyJalrKind(decoded_info);
-                switch (jalr_kind) {
-                    case JalrProfileKind::ReturnLike:
-                        state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_RETURN_MISPREDICTS);
-                        break;
-                    case JalrProfileKind::CallLike:
-                        state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_CALL_MISPREDICTS);
-                        break;
-                    case JalrProfileKind::Other:
-                        state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_OTHER_MISPREDICTS);
-                        break;
-                }
-
-                if (predicted_next_pc == fallthrough) {
-                    state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_FALLTHROUGH_MISPREDICTS);
-                } else {
-                    state.perf_counters.increment(PerfCounterId::PREDICTOR_JALR_WRONG_TARGET_MISPREDICTS);
-                }
-            }
-
-            if (decoded_info.opcode == Opcode::JALR) {
-                auto& profile = state.jalr_profiles[instruction_pc];
-                profile.executions++;
-                if (!correct) {
-                    profile.mispredicts++;
-                    if (predicted_next_pc == fallthrough) {
-                        profile.predicted_fallthrough++;
-                    } else {
-                        profile.wrong_target++;
-                    }
-                }
-
-                switch (classifyJalrKind(decoded_info)) {
-                    case JalrProfileKind::ReturnLike:
-                        profile.return_like++;
-                        break;
-                    case JalrProfileKind::CallLike:
-                        profile.call_like++;
-                        break;
-                    case JalrProfileKind::Other:
-                        profile.other++;
-                        break;
-                }
-            }
-
-            // Commit阶段训练预测器（flush不应清空预测器状态）
-            if (state.branch_predictor) {
-                const bool actual_taken = committed_inst->is_jump();
-                const BranchPredictor::BranchMeta* branch_meta = nullptr;
-                if (decoded_info.opcode == Opcode::BRANCH && committed_inst->has_branch_predict_meta()) {
-                    branch_meta = &committed_inst->get_branch_predict_meta();
-                }
-                state.branch_predictor->update(instruction_pc, decoded_info, actual_taken, actual_next_pc, branch_meta);
-
-                if (!correct && decoded_info.opcode == Opcode::BRANCH &&
-                    !committed_inst->is_control_recovered_early()) {
-                    state.branch_predictor->recover_after_branch_mispredict(instruction_pc, actual_taken, branch_meta);
-                    state.perf_counters.increment(PerfCounterId::PREDICTOR_TOURNAMENT_RECOVERIES);
-                }
-            }
-
-            if (!correct && !committed_inst->is_control_recovered_early()) {
-                need_redirect_flush = true;
-                redirect_pc = actual_next_pc;
-                flush_reason = (decoded_info.opcode == Opcode::BRANCH)
-                                   ? OooRecovery::Reason::BranchMispredict
-                                   : OooRecovery::Reason::UnconditionalRedirect;
-                flush_summary = make_flush_summary(flush_reason);
-                flush_summary.has_redirect_pc = true;
-                flush_summary.redirect_pc = redirect_pc;
-                LOGT(COMMIT,
-                     "inst=%" PRId64 " control-flow mispredict: pc=0x%" PRIx64
-                     " predicted_next=0x%" PRIx64 " actual_next=0x%" PRIx64 " -> redirect+flush",
-                     committed_inst->get_instruction_id(), instruction_pc, predicted_next_pc, actual_next_pc);
-            } else if (!correct) {
-                LOGT(COMMIT,
-                     "inst=%" PRId64 " control-flow mispredict already recovered early: pc=0x%" PRIx64
-                     " predicted_next=0x%" PRIx64 " actual_next=0x%" PRIx64,
-                     committed_inst->get_instruction_id(), instruction_pc, predicted_next_pc, actual_next_pc);
-            } else {
-                LOGT(COMMIT,
-                     "inst=%" PRId64 " control-flow correct: pc=0x%" PRIx64
-                     " next=0x%" PRIx64,
-                     committed_inst->get_instruction_id(), instruction_pc, actual_next_pc);
-            }
+        const auto control_flow_effect = CommitControlFlowEffects::apply(state, committed_inst);
+        if (control_flow_effect.needs_redirect_flush) {
+            flush_summary = make_flush_summary(control_flow_effect.flush_reason);
+            flush_summary.has_redirect_pc = true;
+            flush_summary.redirect_pc = control_flow_effect.redirect_pc;
         }
         
         bool should_stop_commit = false;
@@ -487,9 +264,9 @@ void CommitStage::execute(Context& context) {
             state.pipeline_tracer->recordCommittedInstruction(committed_inst, flush_summary);
         }
 
-        if (need_redirect_flush) {
-            state.pc = redirect_pc;
-            flush_pipeline_after_commit(state, flush_reason);
+        if (control_flow_effect.needs_redirect_flush) {
+            state.pc = control_flow_effect.redirect_pc;
+            flush_pipeline_after_commit(state, control_flow_effect.flush_reason);
             break;
         }
 

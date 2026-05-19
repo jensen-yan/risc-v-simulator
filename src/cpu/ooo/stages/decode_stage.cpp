@@ -10,10 +10,16 @@ DecodeStage::DecodeStage() {
     // 构造函数：初始化译码阶段
 }
 
-void DecodeStage::execute(CPUState& state) {
-    state.perf_counters.increment(PerfCounterId::DECODE_SLOTS, OOOPipelineConfig::DECODE_WIDTH);
+FetchedInstruction DecodeStage::Context::popFetchedInstruction() {
+    FetchedInstruction fetched = state_.fetch_buffer.front();
+    state_.fetch_buffer.pop();
+    return fetched;
+}
 
-    if (state.fetch_buffer.empty()) {
+void DecodeStage::execute(Context& context) {
+    context.incrementCounter(PerfCounterId::DECODE_SLOTS, OOOPipelineConfig::DECODE_WIDTH);
+
+    if (context.fetchBufferEmpty()) {
         LOGT(DECODE, "fetch buffer empty, skip decode");
         return;
     }
@@ -21,42 +27,41 @@ void DecodeStage::execute(CPUState& state) {
     size_t decoded_this_cycle = 0;
 
     for (size_t slot = 0; slot < OOOPipelineConfig::DECODE_WIDTH; ++slot) {
-        if (state.fetch_buffer.empty()) {
+        if (context.fetchBufferEmpty()) {
             break;
         }
-        if (!state.reorder_buffer->has_free_entry()) {
+        if (!context.hasFreeRobEntry()) {
             if (decoded_this_cycle == 0) {
                 LOGT(DECODE, "rob full, decode stalled");
-                state.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
+                context.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
             }
             break;
         }
 
-        FetchedInstruction fetched = state.fetch_buffer.front();
-        state.fetch_buffer.pop();
+        FetchedInstruction fetched = context.popFetchedInstruction();
 
-        uint64_t instruction_id = ++state.global_instruction_id;
+        uint64_t instruction_id = context.nextInstructionId();
 
         DecodedInstruction decoded;
         if (fetched.is_compressed) {
-            decoded = state.decoder.decodeCompressed(static_cast<uint16_t>(fetched.instruction), state.enabled_extensions);
+            decoded = context.decodeCompressedInstruction(static_cast<uint16_t>(fetched.instruction));
             LOGT(DECODE, "slot=%zu compressed instruction decoded", slot);
         } else {
-            decoded = state.decoder.decode(fetched.instruction, state.enabled_extensions);
+            decoded = context.decodeInstruction(fetched.instruction);
             LOGT(DECODE, "slot=%zu normal instruction decoded", slot);
         }
 
-        DynamicInstPtr dynamic_inst = state.reorder_buffer->allocate_entry(decoded, fetched.pc, instruction_id);
+        DynamicInstPtr dynamic_inst = context.allocateRobEntry(decoded, fetched.pc, instruction_id);
         if (!dynamic_inst) {
-            state.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
+            context.recordPipelineStall(PerfCounterId::STALL_DECODE_ROB_FULL);
             break;
         }
 
-        state.perf_counters.increment(PerfCounterId::DECODED_INSTRUCTIONS);
+        context.incrementCounter(PerfCounterId::DECODED_INSTRUCTIONS);
         decoded_this_cycle++;
 
         dynamic_inst->set_fetch_cycle(fetched.fetch_cycle);
-        dynamic_inst->set_decode_cycle(state.cycle_count);
+        dynamic_inst->set_decode_cycle(context.cycleCount());
         dynamic_inst->set_predicted_next_pc(fetched.predicted_next_pc);
         if (fetched.has_branch_meta) {
             dynamic_inst->set_branch_predict_meta(fetched.branch_meta);
@@ -69,7 +74,7 @@ void DecodeStage::execute(CPUState& state) {
              slot, dynamic_inst->get_rob_entry(), fetched.pc, instruction_id);
     }
 
-    state.perf_counters.increment(PerfCounterId::DECODE_UTILIZED_SLOTS, decoded_this_cycle);
+    context.incrementCounter(PerfCounterId::DECODE_UTILIZED_SLOTS, decoded_this_cycle);
 }
 
 } // namespace riscv 

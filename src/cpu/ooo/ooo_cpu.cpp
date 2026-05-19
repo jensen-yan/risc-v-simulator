@@ -210,7 +210,8 @@ void OutOfOrderCPU::step() {
         writeback_stage_->execute(cpu_state_); // 写回阶段
         execute_stage_->execute(cpu_state_);   // 执行阶段
         issue_stage_->execute(cpu_state_);     // 发射阶段
-        decode_stage_->execute(cpu_state_);    // 译码阶段
+        DecodeStage::Context decode_context(cpu_state_);
+        decode_stage_->execute(decode_context); // 译码阶段
         FetchStage::Context fetch_context(cpu_state_);
         fetch_stage_->execute(fetch_context);  // 取指阶段
         

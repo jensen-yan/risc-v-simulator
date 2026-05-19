@@ -29,6 +29,10 @@ _Avoid_: mixing retired-work bookkeeping into the main commit loop
 The architectural memory and LR/SC reservation updates applied when a store, floating-point store, or AMO instruction retires.
 _Avoid_: mixing store/AMO memory side effects into unrelated commit bookkeeping
 
+**Commit Register Effects**:
+The architectural register, floating-point flag, and rename-map updates applied when an instruction retires.
+_Avoid_: spreading integer/floating-point writeback and rename commit rules through the commit loop
+
 **Addr-Unknown Store**:
 An older store whose effective address is not yet known when a younger load is considered for dispatch or execution.
 _Avoid_: unresolved store, pending store address
@@ -44,6 +48,7 @@ _Avoid_: blacklist entry
 - **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
 - **Commit Retire Effects** runs after the instruction's architectural state has been committed.
 - **Commit Memory Effects** runs before generic retire bookkeeping so store/AMO state becomes architectural first.
+- **Commit Register Effects** runs after memory effects and before generic retire bookkeeping so integer/floating-point register state is architectural before DiffTest/tracing.
 - A **Bad Addr-Unknown Pair** causes **Execute Memory Order** to block later speculation for the same load/store PC pair.
 
 ## Example Dialogue

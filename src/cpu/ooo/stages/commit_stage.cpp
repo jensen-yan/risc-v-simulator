@@ -1,6 +1,7 @@
 #include "cpu/ooo/stages/commit_stage.h"
 #include "cpu/ooo/branch_predictor.h"
 #include "cpu/ooo/commit_memory_effects.h"
+#include "cpu/ooo/commit_register_effects.h"
 #include "cpu/ooo/commit_retire_effects.h"
 #include "cpu/ooo/dynamic_inst.h"
 #include "core/csr_utils.h"
@@ -196,87 +197,10 @@ void CommitStage::execute(Context& context) {
             break;
         }
 
-        bool wrote_integer_reg = false;
-        if (InstructionExecutor::isFloatingPointInstruction(decoded_info)) {
-            DynamicInst::FpExecuteInfo fp_info{};
-            if (decoded_info.opcode == Opcode::LOAD_FP) {
-                fp_info.value = committed_inst->get_result();
-                fp_info.write_fp_reg = true;
-            } else if (decoded_info.opcode == Opcode::STORE_FP) {
-                // 无寄存器写回
-            } else {
-                if (!committed_inst->has_fp_execute_info()) {
-                    LOGE(COMMIT, "missing fp execute info at commit, pc=0x%" PRIx64,
-                         committed_inst->get_pc());
-                    handle_exception(state, "missing fp execute info at commit", committed_inst->get_pc());
-                    break;
-                }
-                fp_info = committed_inst->get_fp_execute_info();
-            }
-
-            if (fp_info.fflags != 0) {
-                csr::write(state.csr_registers,
-                           csr::kFflags,
-                           csr::read(state.csr_registers, csr::kFflags) | fp_info.fflags);
-            }
-
-            if (fp_info.write_int_reg && decoded_info.rd != 0) {
-                const uint64_t int_result = fp_info.value;
-                state.arch_registers[decoded_info.rd] = int_result;
-                if (committed_inst->get_physical_dest_kind() == RegisterFileKind::Integer &&
-                    committed_inst->get_physical_dest() != 0) {
-                    state.register_rename->commit_instruction(RegisterFileKind::Integer,
-                                                             committed_inst->get_logical_dest(),
-                                                             committed_inst->get_physical_dest());
-                }
-                state.register_rename->update_architecture_register(RegisterFileKind::Integer,
-                                                                    decoded_info.rd,
-                                                                    int_result);
-                wrote_integer_reg = true;
-                LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
-                    committed_inst->get_instruction_id(), decoded_info.rd, int_result);
-            } else if (fp_info.write_fp_reg) {
-                state.arch_fp_registers[decoded_info.rd] = fp_info.value;
-                if (committed_inst->get_physical_dest_kind() == RegisterFileKind::FloatingPoint) {
-                    state.register_rename->commit_instruction(RegisterFileKind::FloatingPoint,
-                                                             committed_inst->get_logical_dest(),
-                                                             committed_inst->get_physical_dest());
-                    state.register_rename->update_architecture_register(RegisterFileKind::FloatingPoint,
-                                                                        decoded_info.rd,
-                                                                        fp_info.value);
-                }
-                LOGT(COMMIT, "inst=%" PRId64 " f%d = 0x%016" PRIx64,
-                    committed_inst->get_instruction_id(), decoded_info.rd, fp_info.value);
-            } else {
-                LOGT(COMMIT, "inst=%" PRId64 " (no destination register)",
-                    committed_inst->get_instruction_id());
-            }
-        } else {
-            // 提交到架构寄存器
-            if (decoded_info.rd != 0) {  // x0寄存器不能写入
-                state.arch_registers[decoded_info.rd] = committed_inst->get_result();
-                wrote_integer_reg = true;
-                LOGT(COMMIT, "inst=%" PRId64 " x%d = 0x%" PRIx64,
-                    committed_inst->get_instruction_id(),
-                    decoded_info.rd,
-                    committed_inst->get_result());
-            } else {
-                LOGT(COMMIT, "inst=%" PRId64 " (no destination register)",
-                    committed_inst->get_instruction_id());
-            }
-
-            // 释放物理寄存器
-            state.register_rename->commit_instruction(RegisterFileKind::Integer,
-                                                     committed_inst->get_logical_dest(),
-                                                     committed_inst->get_physical_dest());
-
-            // 确保架构寄存器状态与寄存器重命名模块同步
-            // 这是为了确保DiffTest比较时状态一致
-            if (wrote_integer_reg) {
-                state.register_rename->update_architecture_register(RegisterFileKind::Integer,
-                                                                    decoded_info.rd,
-                                                                    committed_inst->get_result());
-            }
+        const auto register_effect = CommitRegisterEffects::apply(state, committed_inst);
+        if (!register_effect.success) {
+            handle_exception(state, register_effect.error_message, committed_inst->get_pc());
+            break;
         }
         
         state.instruction_count++;

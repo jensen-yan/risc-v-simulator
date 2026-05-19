@@ -13,8 +13,64 @@ class IssueStage : public PipelineStage {
 public:
     IssueStage();
     virtual ~IssueStage() = default;
-    
-    void execute(CPUState& state);
+
+    class Context {
+    public:
+        explicit Context(CPUState& state) : state_(state) {}
+
+        void incrementCounter(PerfCounterId id, uint64_t amount = 1) {
+            state_.perf_counters.increment(id, amount);
+        }
+        void recordPipelineStall(PerfCounterId reason) {
+            state_.recordPipelineStall(reason);
+        }
+
+        bool reorderBufferEmpty() const { return state_.reorder_buffer->is_empty(); }
+        DynamicInstPtr dispatchableRobEntry() const {
+            return state_.reorder_buffer->get_dispatchable_entry();
+        }
+        ROBEntry robHeadEntry() const { return state_.reorder_buffer->get_head_entry(); }
+        bool hasOlderInflightSerializingInstruction(uint64_t instruction_id) const;
+
+        bool reservationStationHasFreeEntry() const {
+            return state_.reservation_station->has_free_entry();
+        }
+        ReservationStation::IssueResult issueToReservationStation(const DynamicInstPtr& instruction) {
+            return state_.reservation_station->issue_instruction(instruction);
+        }
+
+        RegisterRenameUnit::SourceLookupResult lookupSource(RegisterFileKind kind,
+                                                            RegNum reg) const {
+            return state_.register_rename->lookup_source(kind, reg);
+        }
+        RegisterRenameUnit::DestinationAllocateResult allocateDestination(RegisterFileKind kind,
+                                                                          RegNum reg) {
+            return state_.register_rename->allocate_destination(kind, reg);
+        }
+        RegisterRenameUnit::RenameResult renameInstruction(const DecodedInstruction& decoded) {
+            return state_.register_rename->rename_instruction(decoded);
+        }
+        void releasePhysicalRegister(RegisterFileKind kind, PhysRegNum reg) {
+            state_.register_rename->release_physical_register(kind, reg);
+        }
+        RegisterRenameUnit::Checkpoint captureRenameCheckpoint() const {
+            return state_.register_rename->capture_checkpoint();
+        }
+        void saveRenameCheckpoint(uint64_t instruction_id,
+                                  const RegisterRenameUnit::Checkpoint& checkpoint) {
+            state_.rename_checkpoints[instruction_id] = checkpoint;
+        }
+
+        void publishReadyStore(const DynamicInstPtr& instruction) {
+            state_.store_buffer->publish_ready_store(instruction);
+        }
+        uint64_t cycleCount() const { return state_.cycle_count; }
+
+    private:
+        CPUState& state_;
+    };
+
+    void execute(Context& context);
     const char* get_stage_name() const override { return "ISSUE"; }
 
 private:

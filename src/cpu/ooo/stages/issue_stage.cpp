@@ -17,14 +17,14 @@ bool isSerializingControlInstruction(const DecodedInstruction& decoded_info) {
             static_cast<uint8_t>(decoded_info.funct3) == kFenceIFunct3);
 }
 
-bool hasOlderInflightSerializingInstruction(const CPUState& state, uint64_t instruction_id) {
+bool hasOlderInflightSerializingInstruction(ReorderBuffer& reorder_buffer, uint64_t instruction_id) {
     for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
         const auto rob_entry = static_cast<ROBEntry>(i);
-        if (!state.reorder_buffer->is_entry_valid(rob_entry)) {
+        if (!reorder_buffer.is_entry_valid(rob_entry)) {
             continue;
         }
 
-        auto entry = state.reorder_buffer->get_entry(rob_entry);
+        auto entry = reorder_buffer.get_entry(rob_entry);
         if (!entry || entry->is_retired() || entry->get_instruction_id() >= instruction_id) {
             continue;
         }
@@ -136,10 +136,14 @@ IssueStage::IssueStage() {
     // 构造函数：初始化发射阶段
 }
 
-void IssueStage::execute(CPUState& state) {
-    state.perf_counters.increment(PerfCounterId::ISSUE_SLOTS, OOOPipelineConfig::ISSUE_WIDTH);
+bool IssueStage::Context::hasOlderInflightSerializingInstruction(uint64_t instruction_id) const {
+    return riscv::hasOlderInflightSerializingInstruction(*state_.reorder_buffer, instruction_id);
+}
 
-    if (state.reorder_buffer->is_empty()) {
+void IssueStage::execute(Context& context) {
+    context.incrementCounter(PerfCounterId::ISSUE_SLOTS, OOOPipelineConfig::ISSUE_WIDTH);
+
+    if (context.reorderBufferEmpty()) {
         LOGT(ISSUE, "rob empty, skip issue");
         return;
     }
@@ -147,11 +151,11 @@ void IssueStage::execute(CPUState& state) {
     size_t issued_this_cycle = 0;
 
     for (size_t slot = 0; slot < OOOPipelineConfig::ISSUE_WIDTH; ++slot) {
-        auto dispatchable_entry = state.reorder_buffer->get_dispatchable_entry();
+        auto dispatchable_entry = context.dispatchableRobEntry();
         if (!dispatchable_entry) {
             if (issued_this_cycle == 0) {
                 LOGT(ISSUE, "no dispatchable instruction");
-                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE);
+                context.recordPipelineStall(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE);
             }
             break;
         }
@@ -165,13 +169,13 @@ void IssueStage::execute(CPUState& state) {
              slot, dispatchable_entry->get_instruction_id(), dispatchable_entry->get_rob_entry());
 
         const auto& decoded_info = dispatchable_entry->get_decoded_info();
-        const auto head_entry = state.reorder_buffer->get_head_entry();
+        const auto head_entry = context.robHeadEntry();
         const bool is_serializing_control = isSerializingControlInstruction(decoded_info);
 
-        if (hasOlderInflightSerializingInstruction(state, dispatchable_entry->get_instruction_id())) {
+        if (context.hasOlderInflightSerializingInstruction(dispatchable_entry->get_instruction_id())) {
             if (issued_this_cycle == 0) {
                 LOGT(ISSUE, "older serializing control instruction blocks younger issue");
-                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE);
+                context.recordPipelineStall(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE);
             }
             break;
         }
@@ -181,7 +185,7 @@ void IssueStage::execute(CPUState& state) {
             head_entry != dispatchable_entry->get_rob_entry()) {
             if (issued_this_cycle == 0) {
                 LOGT(ISSUE, "csr instruction waits for ROB head commit");
-                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_CSR_HEAD_BLOCKED);
+                context.recordPipelineStall(PerfCounterId::STALL_ISSUE_CSR_HEAD_BLOCKED);
             }
             break;
         }
@@ -189,15 +193,15 @@ void IssueStage::execute(CPUState& state) {
         if (is_serializing_control && head_entry != dispatchable_entry->get_rob_entry()) {
             if (issued_this_cycle == 0) {
                 LOGT(ISSUE, "serializing control instruction waits for ROB head commit");
-                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE);
+                context.recordPipelineStall(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE);
             }
             break;
         }
 
-        if (!state.reservation_station->has_free_entry()) {
+        if (!context.reservationStationHasFreeEntry()) {
             if (issued_this_cycle == 0) {
                 LOGT(ISSUE, "reservation station full, issue stalled");
-                state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
+                context.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
             }
             break;
         }
@@ -210,14 +214,14 @@ void IssueStage::execute(CPUState& state) {
             const auto src3_kind = fpSource3Kind(decoded_info);
             const auto dst_kind = fpDestinationKind(decoded_info);
 
-            const auto src1 = state.register_rename->lookup_source(src1_kind, decoded_info.rs1);
-            const auto src2 = state.register_rename->lookup_source(src2_kind, decoded_info.rs2);
-            const auto src3 = state.register_rename->lookup_source(src3_kind, decoded_info.rs3);
-            const auto dest = state.register_rename->allocate_destination(dst_kind, decoded_info.rd);
+            const auto src1 = context.lookupSource(src1_kind, decoded_info.rs1);
+            const auto src2 = context.lookupSource(src2_kind, decoded_info.rs2);
+            const auto src3 = context.lookupSource(src3_kind, decoded_info.rs3);
+            const auto dest = context.allocateDestination(dst_kind, decoded_info.rd);
             if (!dest.success) {
                 if (issued_this_cycle == 0) {
                     LOGT(ISSUE, "rename failed for fp instruction");
-                    state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RENAME_FAIL);
+                    context.recordPipelineStall(PerfCounterId::STALL_ISSUE_RENAME_FAIL);
                 }
                 break;
             }
@@ -228,26 +232,26 @@ void IssueStage::execute(CPUState& state) {
             dispatchable_entry->set_physical_dest_kind(dst_kind);
             dispatchable_entry->set_physical_dest(dest.dest_reg);
 
-            auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
+            auto issue_result = context.issueToReservationStation(dispatchable_entry);
             if (!issue_result.success) {
-                state.register_rename->release_physical_register(dst_kind, dest.dest_reg);
+                context.releasePhysicalRegister(dst_kind, dest.dest_reg);
                 if (issued_this_cycle == 0) {
                     LOGT(ISSUE, "rs issue failed for fp instruction");
-                    state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
+                    context.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
                 }
                 break;
             }
 
             LOGT(ISSUE, "issued slot=%zu fp inst=%" PRId64 " to rs[%d]",
                  slot, dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
-            state.store_buffer->publish_ready_store(dispatchable_entry);
+            context.publishReadyStore(dispatchable_entry);
             issued = true;
         } else {
-            auto rename_result = state.register_rename->rename_instruction(dispatchable_entry->get_decoded_info());
+            auto rename_result = context.renameInstruction(dispatchable_entry->get_decoded_info());
             if (!rename_result.success) {
                 if (issued_this_cycle == 0) {
                     LOGT(ISSUE, "rename failed, issue stalled");
-                    state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RENAME_FAIL);
+                    context.recordPipelineStall(PerfCounterId::STALL_ISSUE_RENAME_FAIL);
                 }
                 break;
             }
@@ -265,20 +269,19 @@ void IssueStage::execute(CPUState& state) {
             dispatchable_entry->set_src1_ready(rename_result.src1_ready, rename_result.src1_value);
             dispatchable_entry->set_src2_ready(rename_result.src2_ready, rename_result.src2_value);
 
-            auto issue_result = state.reservation_station->issue_instruction(dispatchable_entry);
+            auto issue_result = context.issueToReservationStation(dispatchable_entry);
             if (!issue_result.success) {
-                state.register_rename->release_physical_register(RegisterFileKind::Integer,
-                                                                 rename_result.dest_reg);
+                context.releasePhysicalRegister(RegisterFileKind::Integer, rename_result.dest_reg);
                 if (issued_this_cycle == 0) {
                     LOGT(ISSUE, "rs issue failed, rollback rename");
-                    state.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
+                    context.recordPipelineStall(PerfCounterId::STALL_ISSUE_RS_FULL);
                 }
                 break;
             }
 
             LOGT(ISSUE, "issued slot=%zu inst=%" PRId64 " to rs[%d]",
                  slot, dispatchable_entry->get_instruction_id(), issue_result.rs_entry);
-            state.store_buffer->publish_ready_store(dispatchable_entry);
+            context.publishReadyStore(dispatchable_entry);
             issued = true;
         }
 
@@ -286,12 +289,12 @@ void IssueStage::execute(CPUState& state) {
             break;
         }
 
-        state.perf_counters.increment(PerfCounterId::ISSUED_INSTRUCTIONS);
-        dispatchable_entry->set_issue_cycle(state.cycle_count);
+        context.incrementCounter(PerfCounterId::ISSUED_INSTRUCTIONS);
+        dispatchable_entry->set_issue_cycle(context.cycleCount());
         dispatchable_entry->set_status(DynamicInst::Status::ISSUED);
         if (decoded_info.opcode == Opcode::BRANCH || decoded_info.opcode == Opcode::JALR) {
-            state.rename_checkpoints[dispatchable_entry->get_instruction_id()] =
-                state.register_rename->capture_checkpoint();
+            context.saveRenameCheckpoint(dispatchable_entry->get_instruction_id(),
+                                         context.captureRenameCheckpoint());
         }
         issued_this_cycle++;
 
@@ -302,7 +305,7 @@ void IssueStage::execute(CPUState& state) {
         }
     }
 
-    state.perf_counters.increment(PerfCounterId::ISSUE_UTILIZED_SLOTS, issued_this_cycle);
+    context.incrementCounter(PerfCounterId::ISSUE_UTILIZED_SLOTS, issued_this_cycle);
 }
 
 } // namespace riscv 

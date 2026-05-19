@@ -119,3 +119,4 @@
 - [x] 2026-05-19 验证 ExecuteMemoryOrder 第四轮：`cmake --build build -j`、聚焦 memory-order 相关 `ctest`、`ctest --test-dir build --output-on-failure`，全量 308/308 通过。
 - [x] 2026-05-19 创建 `CONTEXT.md`，记录 Stage Context、Execute Memory Order、Addr-Unknown Store、Bad Addr-Unknown Pair 等领域术语。
 - [x] 2026-05-19 第五轮继续深化 `ExecuteMemoryOrder`：迁移 load replay reason / replay bucket 归因，减少 `ExecuteStage` 对 memory-order 统计细节的所有权；`cmake --build build -j`、聚焦 ExecuteMemoryOrder/ExecuteStage/memory-order 测试、全量 `ctest` 309/309 通过。
+- [x] 2026-05-19 第六轮推进 `IssueStage::Context`，收口发射阶段的 ROB/rename/RS/StoreBuffer 入口，并新增不依赖完整 `OutOfOrderCPU` 的 Issue 行为测试；`cmake --build build -j`、聚焦 Issue/OOO 测试、全量 `ctest` 311/311 通过。

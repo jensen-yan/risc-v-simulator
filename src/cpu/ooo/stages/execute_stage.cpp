@@ -679,10 +679,6 @@ bool ExecuteStage::try_recover_control_mispredict_early(ExecutionUnit& unit,
         }
     }
 
-    if (recovery_result.flushed_l1d_inflight && state.l1d_cache) {
-        state.l1d_cache->flushInFlight();
-    }
-
     instruction->mark_control_recovered_early();
     LOGT(EXECUTE,
          "early control recovery: inst=%" PRId64 " pc=0x%" PRIx64

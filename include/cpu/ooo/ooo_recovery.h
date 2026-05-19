@@ -19,8 +19,11 @@ public:
 
     struct FullPipelineRequest {
         Reason reason = Reason::Other;
+        bool has_restart_pc = false;
+        uint64_t restart_pc = 0;
         bool clear_reservation = true;
         bool reset_execution_units = true;
+        bool flush_store_buffer = true;
     };
 
     struct YoungerThanRequest {

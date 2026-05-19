@@ -1,8 +1,7 @@
 #include "cpu/ooo/execute_memory_order.h"
 
+#include "cpu/ooo/ooo_recovery.h"
 #include "common/debug_types.h"
-
-#include <queue>
 
 namespace riscv {
 
@@ -12,13 +11,6 @@ bool rangesOverlap(uint64_t lhs_addr, uint64_t lhs_size, uint64_t rhs_addr, uint
     const uint64_t lhs_end = lhs_addr + lhs_size - 1;
     const uint64_t rhs_end = rhs_addr + rhs_size - 1;
     return lhs_addr <= rhs_end && rhs_addr <= lhs_end;
-}
-
-template <typename Queue>
-void clearQueue(Queue& queue) {
-    while (!queue.empty()) {
-        queue.pop();
-    }
 }
 
 } // namespace
@@ -161,36 +153,13 @@ bool ExecuteMemoryOrder::tryRecoverViolation(const DynamicInstPtr& store_instruc
         }
     }
 
-    const uint64_t rob_used =
-        static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES -
-                              state.reorder_buffer->get_free_entry_count());
-    state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSHES);
-    state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_OTHER);
-    state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, rob_used);
-    state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_OTHER, rob_used);
     state.perf_counters.increment(PerfCounterId::MEMORY_ORDER_VIOLATION_RECOVERIES);
 
-    state.pc = restart_pc;
-    clearQueue(state.fetch_buffer);
-    clearQueue(state.cdb_queue);
-    state.reservation_station->flush_pipeline();
-    state.reorder_buffer->flush_pipeline();
-    state.register_rename->flush_pipeline();
-    state.rename_checkpoints.clear();
-    state.store_buffer->flush();
-    state.resetExecutionUnits();
-    state.reservation_valid = false;
-    state.reservation_addr = 0;
-    if (state.l1i_cache) {
-        state.l1i_cache->flushInFlight();
-    }
-    if (state.l1d_cache) {
-        state.l1d_cache->flushInFlight();
-    }
-    state.icache.reset();
-    if (state.branch_predictor) {
-        state.branch_predictor->on_pipeline_flush();
-    }
+    OooRecovery::FullPipelineRequest recovery_request;
+    recovery_request.reason = OooRecovery::Reason::MemoryOrderViolation;
+    recovery_request.has_restart_pc = true;
+    recovery_request.restart_pc = restart_pc;
+    OooRecovery::recoverFullPipeline(state, recovery_request);
 
     LOGT(EXECUTE,
          "memory order violation recovery: store inst=%" PRId64 " pc=0x%" PRIx64

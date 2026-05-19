@@ -6,6 +6,7 @@
 #include "cpu/ooo/stages/writeback_stage.h"
 #include "cpu/ooo/stages/commit_stage.h"
 #include "cpu/ooo/branch_predictor.h"
+#include "cpu/ooo/ooo_recovery.h"
 #include "core/csr_utils.h"
 #include "core/instruction_executor.h"
 #include "common/debug_types.h"
@@ -387,47 +388,12 @@ void OutOfOrderCPU::handle_exception(const std::string& exception_msg, uint64_t 
 }
 
 void OutOfOrderCPU::flush_pipeline() {
-    // 异常导致的全流水线flush（通常伴随halt）。计数器用于离线分析。
-    const uint64_t rob_used_entries =
-        cpu_state_.reorder_buffer
-            ? static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES - cpu_state_.reorder_buffer->get_free_entry_count())
-            : 0ULL;
-    cpu_state_.perf_counters.increment(PerfCounterId::PIPELINE_FLUSHES);
-    cpu_state_.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_EXCEPTION);
-    cpu_state_.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, rob_used_entries);
-    cpu_state_.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_EXCEPTION, rob_used_entries);
-
-    if (cpu_state_.branch_predictor) {
-        cpu_state_.branch_predictor->on_pipeline_flush();
-    }
-
-    // 清空取指缓冲区
-    while (!cpu_state_.fetch_buffer.empty()) {
-        cpu_state_.fetch_buffer.pop();
-    }
-    
-    // 刷新保留站
-    cpu_state_.reservation_station->flush_pipeline();
-    
-    // 刷新ROB
-    cpu_state_.reorder_buffer->flush_pipeline();
-    
-    // 保留已提交架构状态，仅清除推测性重命名状态
-    cpu_state_.register_rename->flush_pipeline();
-    cpu_state_.rename_checkpoints.clear();
-
-    // 清空CDB队列
-    while (!cpu_state_.cdb_queue.empty()) {
-        cpu_state_.cdb_queue.pop();
-    }
-
-    if (cpu_state_.l1i_cache) {
-        cpu_state_.l1i_cache->flushInFlight();
-    }
-    if (cpu_state_.l1d_cache) {
-        cpu_state_.l1d_cache->flushInFlight();
-    }
-    cpu_state_.icache.reset();
+    OooRecovery::FullPipelineRequest request;
+    request.reason = OooRecovery::Reason::Exception;
+    request.clear_reservation = false;
+    request.reset_execution_units = false;
+    request.flush_store_buffer = false;
+    OooRecovery::recoverFullPipeline(cpu_state_, request);
 }
 
 bool OutOfOrderCPU::predict_branch(uint64_t pc) {

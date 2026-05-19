@@ -62,10 +62,13 @@ TEST_F(OooRecoveryTest, FullPipelineRecoveryClearsSpeculativeStructuresAndRecord
 
     OooRecovery::FullPipelineRequest request;
     request.reason = OooRecovery::Reason::Trap;
+    request.has_restart_pc = true;
+    request.restart_pc = 0x200;
     request.clear_reservation = true;
     request.reset_execution_units = true;
     const auto result = OooRecovery::recoverFullPipeline(state, request);
 
+    EXPECT_EQ(state.pc, 0x200u);
     EXPECT_EQ(result.flushed_rob_entries, 2u);
     EXPECT_EQ(result.fetch_buffer_dropped, 2u);
     EXPECT_EQ(result.flushed_cdb_entries, 1u);

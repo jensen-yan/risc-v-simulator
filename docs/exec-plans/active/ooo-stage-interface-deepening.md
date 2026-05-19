@@ -126,3 +126,5 @@
 - [x] 2026-05-19 第九轮启动 `OooRecovery` Module，先迁移 commit-time full-pipeline recovery，集中 full flush 计数、ROB/RS/rename/CDB/store/cache/execution-unit 清理规则；`cmake --build build -j`、聚焦 OooRecovery/Commit/OOO 测试、全量 `ctest` 317/317 通过。
 - [x] 2026-05-19 第十轮继续深化 `OooRecovery`：迁移 ExecuteStage early control recovery 的 younger-than 清理规则，让 ExecuteStage 只保留控制流判断、predictor 更新和计数归因；`cmake --build build -j`、聚焦 OooRecovery/Execute/OOO 测试、全量 `ctest` 318/318 通过。
 - [x] 2026-05-19 OOO recovery 收口：`CommitStage` 的 full-pipeline recovery 与 `ExecuteStage` 的 younger-than recovery 已统一挂到 `OooRecovery`；`CONTEXT.md` 与 `ARCHITECTURE.md` 已记录 **OOO Recovery** 作为稳定领域术语和模块落点。
+- [x] 2026-05-19 追加收口 `ExecuteMemoryOrder` 的 memory-order violation full-pipeline recovery：`ExecuteMemoryOrder` 保留违规检测和 profile 归因，restart PC 与 full cleanup 交给 `OooRecovery`。
+- [x] 2026-05-19 追加收口 `OutOfOrderCPU::flush_pipeline()` 异常 halt 路径：异常触发点也改成 `OooRecovery::recoverFullPipeline` 的薄 wrapper，保留原先不清 store buffer / reservation / execution units 的行为选择；`cmake --build build -j`、聚焦 OooRecovery/ExecuteMemoryOrder/ExecuteStage/OutOfOrderCPU/Simulator 测试、全量 `ctest` 318/318 通过。

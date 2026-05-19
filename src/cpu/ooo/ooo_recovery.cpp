@@ -105,6 +105,10 @@ OooRecovery::Result OooRecovery::recoverFullPipeline(CPUState& state,
     LOGT(COMMIT, "ooo recovery full-pipeline reason=%s", reasonName(request.reason));
 
     Result result;
+    if (request.has_restart_pc) {
+        state.pc = request.restart_pc;
+    }
+
     result.flushed_rob_entries = currentRobOccupancy(state);
     recordFlushCounters(state, request.reason, result.flushed_rob_entries);
 
@@ -127,7 +131,7 @@ OooRecovery::Result OooRecovery::recoverFullPipeline(CPUState& state,
 
     result.flushed_cdb_entries = clearQueue(state.cdb_queue);
 
-    if (state.store_buffer) {
+    if (request.flush_store_buffer && state.store_buffer) {
         state.store_buffer->flush();
     }
 
@@ -300,6 +304,9 @@ OooRecovery::Result OooRecovery::recoverYoungerThan(CPUState& state,
     }
     result.flushed_cdb_entries = flushYoungerCdbEntries(state, request.instruction_id);
     result.flushed_l1d_inflight = flushYoungerExecutionUnits(state, request);
+    if (result.flushed_l1d_inflight && state.l1d_cache) {
+        state.l1d_cache->flushInFlight();
+    }
 
     if (request.rename_checkpoint) {
         restoreRenameCheckpointForSurvivingWork(

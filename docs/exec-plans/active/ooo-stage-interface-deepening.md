@@ -129,3 +129,4 @@
 - [x] 2026-05-19 追加收口 `ExecuteMemoryOrder` 的 memory-order violation full-pipeline recovery：`ExecuteMemoryOrder` 保留违规检测和 profile 归因，restart PC 与 full cleanup 交给 `OooRecovery`。
 - [x] 2026-05-19 追加收口 `OutOfOrderCPU::flush_pipeline()` 异常 halt 路径：异常触发点也改成 `OooRecovery::recoverFullPipeline` 的薄 wrapper，保留原先不清 store buffer / reservation / execution units 的行为选择；`cmake --build build -j`、聚焦 OooRecovery/ExecuteMemoryOrder/ExecuteStage/OutOfOrderCPU/Simulator 测试、全量 `ctest` 318/318 通过。
 - [x] 2026-05-19 继续深化 `CommitStage`：先抽 `CommitRetireEffects`，集中成功退休后的 store-buffer / rename checkpoint / load-store profile bookkeeping，减少主 commit loop 的横向细节；`cmake --build build -j`、聚焦 CommitRetireEffects/CommitStage/OOO 测试通过。
+- [x] 2026-05-19 继续深化 `CommitStage`：抽 `CommitMemoryEffects`，集中 store / STORE_FP / AMO 退休时的内存提交、LR/SC reservation 更新和对应 perf counter，保留 CommitStage 负责错误转 halt；`cmake --build build -j`、聚焦 CommitMemoryEffects/CommitStage/OOO/StoreBuffer 测试、全量 `ctest` 325/325 通过。

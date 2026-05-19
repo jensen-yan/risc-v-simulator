@@ -25,6 +25,10 @@ _Avoid_: scattering flush cleanup rules across individual stages
 The bookkeeping that happens after an instruction is successfully retired, including store-buffer retirement, rename checkpoint cleanup, and load/store profile updates.
 _Avoid_: mixing retired-work bookkeeping into the main commit loop
 
+**Commit Memory Effects**:
+The architectural memory and LR/SC reservation updates applied when a store, floating-point store, or AMO instruction retires.
+_Avoid_: mixing store/AMO memory side effects into unrelated commit bookkeeping
+
 **Addr-Unknown Store**:
 An older store whose effective address is not yet known when a younger load is considered for dispatch or execution.
 _Avoid_: unresolved store, pending store address
@@ -39,6 +43,7 @@ _Avoid_: blacklist entry
 - **Execute Memory Order** observes **Addr-Unknown Store** state when deciding whether a younger load may proceed.
 - **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
 - **Commit Retire Effects** runs after the instruction's architectural state has been committed.
+- **Commit Memory Effects** runs before generic retire bookkeeping so store/AMO state becomes architectural first.
 - A **Bad Addr-Unknown Pair** causes **Execute Memory Order** to block later speculation for the same load/store PC pair.
 
 ## Example Dialogue

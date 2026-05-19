@@ -1,6 +1,7 @@
 #include "cpu/ooo/stages/execute_stage.h"
 #include "cpu/ooo/execute_control_recovery.h"
 #include "cpu/ooo/execute_dcache_access.h"
+#include "cpu/ooo/execute_load_value.h"
 #include "cpu/ooo/execute_memory_order.h"
 #include "cpu/ooo/execute_semantics.h"
 #include "common/debug_types.h"
@@ -645,58 +646,14 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
                 }
             }
             if (inst.opcode == Opcode::LOAD_FP) {
-                // FLW 需要nan-box到64位浮点寄存器；FLD 直接写入64位
-                if (access_size == 4) {
-                    unit.result = 0xFFFFFFFF00000000ULL | (forwarded_value & 0xFFFFFFFFULL);
-                } else {
-                    unit.result = forwarded_value;
-                }
+                unit.result = ExecuteLoadValue::format(inst, access_size, forwarded_value);
                 LOGT(EXECUTE, "fp store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64,
                      addr, unit.result);
                 memory_info.memory_value = unit.result;
                 return LoadExecutionResult::Forwarded;
             }
 
-            // 从Store Buffer获得转发数据，根据预解析的符号扩展信息处理
-            if (inst.is_signed_load) {
-            // 符号扩展Load指令：LB, LH, LW
-                switch (access_size) {
-                case 1: // LB
-                        unit.result = static_cast<uint64_t>(static_cast<int8_t>(forwarded_value & 0xFF));
-                        break;
-                case 2: // LH
-                        unit.result = static_cast<uint64_t>(static_cast<int16_t>(forwarded_value & 0xFFFF));
-                        break;
-                case 4: // LW
-                        unit.result = static_cast<uint64_t>(static_cast<int32_t>(forwarded_value & 0xFFFFFFFF));
-                        break;
-                case 8: // LD (64位)
-                    unit.result = forwarded_value;
-                    break;
-                    default:
-                        unit.result = forwarded_value;
-                        break;
-                }
-            } else {
-            // 零扩展Load指令：LBU, LHU, LWU
-                switch (access_size) {
-                case 1: // LBU
-                        unit.result = forwarded_value & 0xFF;
-                        break;
-                case 2: // LHU
-                        unit.result = forwarded_value & 0xFFFF;
-                        break;
-                case 4: // LWU (RV64新增)
-                        unit.result = forwarded_value & 0xFFFFFFFF;
-                        break;
-                case 8: // LD (64位)
-                    unit.result = forwarded_value;
-                    break;
-                    default:
-                        unit.result = forwarded_value;
-                        break;
-                }
-            }
+            unit.result = ExecuteLoadValue::format(inst, access_size, forwarded_value);
 
             LOGT(EXECUTE, "store-to-load forwarding hit: addr=0x%" PRIx64 " value=0x%" PRIx64 " %s-extended",
                            addr, unit.result, inst.is_signed_load ? "sign" : "zero");
@@ -769,45 +726,7 @@ ExecuteStage::LoadExecutionResult ExecuteStage::perform_load_execution(Execution
                 return LoadExecutionResult::BlockedByStore;
             }
 
-            if (inst.opcode == Opcode::LOAD_FP) {
-                if (access_size == 4) {
-                    unit.result = 0xFFFFFFFF00000000ULL | (raw_value & 0xFFFFFFFFULL);
-                } else {
-                    unit.result = raw_value;
-                }
-            } else if (inst.is_signed_load) {
-                switch (access_size) {
-                    case 1:
-                        unit.result = static_cast<uint64_t>(static_cast<int8_t>(raw_value & 0xFF));
-                        break;
-                    case 2:
-                        unit.result = static_cast<uint64_t>(static_cast<int16_t>(raw_value & 0xFFFF));
-                        break;
-                    case 4:
-                        unit.result = static_cast<uint64_t>(static_cast<int32_t>(raw_value & 0xFFFFFFFF));
-                        break;
-                    case 8:
-                    default:
-                        unit.result = raw_value;
-                        break;
-                }
-            } else {
-                switch (access_size) {
-                    case 1:
-                        unit.result = raw_value & 0xFF;
-                        break;
-                    case 2:
-                        unit.result = raw_value & 0xFFFF;
-                        break;
-                    case 4:
-                        unit.result = raw_value & 0xFFFFFFFF;
-                        break;
-                    case 8:
-                    default:
-                        unit.result = raw_value;
-                        break;
-                }
-            }
+            unit.result = ExecuteLoadValue::format(inst, access_size, raw_value);
 
             memory_info.memory_value = unit.result;
             state.perf_counters.increment(PerfCounterId::LOADS_FROM_MEMORY);

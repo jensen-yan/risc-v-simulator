@@ -25,6 +25,10 @@ _Avoid_: burying early control recovery inside generic execution-unit completion
 The execute-side D$ timing handshake for load/store execution, including request start, blocked/outstanding handling, latency accounting, and cache counter updates.
 _Avoid_: duplicating D$ request bookkeeping inside load/store execution branches
 
+**Execute Load Value**:
+The execute-side formatting rule that turns raw load bytes into the architectural value, including signed/unsigned integer extension and FLW NaN-boxing.
+_Avoid_: duplicating load value extension switches across forwarding and memory paths
+
 **OOO Recovery**:
 The out-of-order pipeline rules that remove speculative work after a redirect, trap, fence, or other pipeline recovery reason.
 _Avoid_: scattering flush cleanup rules across individual stages
@@ -63,6 +67,7 @@ _Avoid_: blacklist entry
 - **Execute Memory Order** observes **Addr-Unknown Store** state when deciding whether a younger load may proceed.
 - **Execute Control Recovery** runs when an execution unit completes a control-flow instruction before commit has seen it.
 - **Execute DCache Access** is the cache timing submodule used by execute-side load/store paths.
+- **Execute Load Value** is shared by store-forwarded loads and memory-loaded values before writeback.
 - **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
 - **Commit Retire Effects** runs after the instruction's architectural state has been committed.
 - **Commit Memory Effects** runs before generic retire bookkeeping so store/AMO state becomes architectural first.

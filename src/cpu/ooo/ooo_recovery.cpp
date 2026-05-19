@@ -3,6 +3,9 @@
 #include "common/debug_types.h"
 
 #include <cinttypes>
+#include <queue>
+#include <utility>
+#include <vector>
 
 namespace riscv {
 
@@ -152,6 +155,161 @@ OooRecovery::Result OooRecovery::recoverFullPipeline(CPUState& state,
 
     LOGT(COMMIT, "ooo recovery full-pipeline completed reason=%s flushed_rob=%" PRIu64,
          reasonName(request.reason), result.flushed_rob_entries);
+    return result;
+}
+
+uint64_t OooRecovery::flushYoungerCdbEntries(CPUState& state, uint64_t instruction_id) {
+    if (state.cdb_queue.empty()) {
+        return 0;
+    }
+
+    std::queue<CommonDataBusEntry> kept_entries;
+    uint64_t flushed = 0;
+    while (!state.cdb_queue.empty()) {
+        auto entry = state.cdb_queue.front();
+        state.cdb_queue.pop();
+        if (entry.valid && entry.instruction &&
+            entry.instruction->get_instruction_id() > instruction_id) {
+            ++flushed;
+            continue;
+        }
+        kept_entries.push(std::move(entry));
+    }
+    state.cdb_queue = std::move(kept_entries);
+    return flushed;
+}
+
+bool OooRecovery::flushYoungerExecutionUnits(CPUState& state, const YoungerThanRequest& request) {
+    bool flushed_dcache_request = false;
+
+    auto flush_container = [&](auto& units, ExecutionUnitType unit_type) {
+        for (size_t i = 0; i < units.size(); ++i) {
+            auto& other_unit = units[i];
+            if (!other_unit.busy || !other_unit.instruction) {
+                continue;
+            }
+            if (unit_type == request.current_unit_type && i == request.current_unit_index) {
+                continue;
+            }
+            if (other_unit.instruction->get_instruction_id() <= request.instruction_id) {
+                continue;
+            }
+
+            if ((unit_type == ExecutionUnitType::LOAD || unit_type == ExecutionUnitType::STORE) &&
+                other_unit.dcache.request_sent) {
+                flushed_dcache_request = true;
+            }
+
+            LOGT(EXECUTE, "flush younger execution unit inst=%" PRId64,
+                 other_unit.instruction->get_instruction_id());
+            if (state.reservation_station) {
+                state.reservation_station->release_execution_unit(unit_type, static_cast<int>(i));
+            }
+            resetExecutionUnitState(other_unit);
+        }
+    };
+
+    flush_container(state.alu_units, ExecutionUnitType::ALU);
+    flush_container(state.fp_units, ExecutionUnitType::FP);
+    flush_container(state.branch_units, ExecutionUnitType::BRANCH);
+    flush_container(state.load_units, ExecutionUnitType::LOAD);
+    flush_container(state.store_units, ExecutionUnitType::STORE);
+
+    for (auto& entry : state.memory_access_inflight) {
+        if (!entry.valid || !entry.state.instruction) {
+            continue;
+        }
+        if (entry.state.instruction->get_instruction_id() <= request.instruction_id) {
+            continue;
+        }
+
+        flushed_dcache_request = true;
+        LOGT(EXECUTE, "flush younger inflight memory access inst=%" PRId64,
+             entry.state.instruction->get_instruction_id());
+        resetMemoryAccessInFlightState(entry);
+    }
+    return flushed_dcache_request;
+}
+
+void OooRecovery::restoreRenameCheckpointForSurvivingWork(
+    CPUState& state,
+    uint64_t instruction_id,
+    const RegisterRenameUnit::Checkpoint& checkpoint) {
+    std::vector<PhysRegNum> surviving_live_regs;
+    std::vector<PhysRegNum> surviving_live_fp_regs;
+    surviving_live_regs.reserve(ReorderBuffer::MAX_ROB_ENTRIES);
+    surviving_live_fp_regs.reserve(ReorderBuffer::MAX_ROB_ENTRIES);
+
+    if (state.reorder_buffer) {
+        for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
+            const auto rob_entry = static_cast<ROBEntry>(i);
+            if (!state.reorder_buffer->is_entry_valid(rob_entry)) {
+                continue;
+            }
+
+            const auto live_entry = state.reorder_buffer->get_entry(rob_entry);
+            if (!live_entry || live_entry->get_physical_dest_kind() == RegisterFileKind::None) {
+                continue;
+            }
+
+            if (live_entry->get_physical_dest_kind() == RegisterFileKind::FloatingPoint) {
+                surviving_live_fp_regs.push_back(live_entry->get_physical_dest());
+            } else if (live_entry->get_physical_dest() != 0) {
+                surviving_live_regs.push_back(live_entry->get_physical_dest());
+            }
+        }
+    }
+
+    if (state.register_rename) {
+        state.register_rename->restore_checkpoint(
+            checkpoint, surviving_live_regs, surviving_live_fp_regs);
+    }
+
+    for (auto it = state.rename_checkpoints.begin(); it != state.rename_checkpoints.end();) {
+        if (it->first >= instruction_id) {
+            it = state.rename_checkpoints.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+OooRecovery::Result OooRecovery::recoverYoungerThan(CPUState& state,
+                                                    const YoungerThanRequest& request) {
+    LOGT(EXECUTE, "ooo recovery younger-than inst=%" PRIu64, request.instruction_id);
+
+    Result result;
+    if (request.has_redirect_pc) {
+        state.pc = request.redirect_pc;
+    }
+
+    result.fetch_buffer_dropped = clearQueue(state.fetch_buffer);
+    if (state.l1i_cache) {
+        state.l1i_cache->flushInFlight();
+    }
+    state.icache.reset();
+
+    if (state.reorder_buffer) {
+        result.flushed_rob_entries = state.reorder_buffer->flush_after_entry(request.rob_entry);
+    }
+    if (state.reservation_station) {
+        state.reservation_station->flush_younger_than(request.instruction_id);
+    }
+    if (state.store_buffer) {
+        state.store_buffer->flush_after(request.instruction_id);
+    }
+    result.flushed_cdb_entries = flushYoungerCdbEntries(state, request.instruction_id);
+    result.flushed_l1d_inflight = flushYoungerExecutionUnits(state, request);
+
+    if (request.rename_checkpoint) {
+        restoreRenameCheckpointForSurvivingWork(
+            state, request.instruction_id, *request.rename_checkpoint);
+    }
+
+    LOGT(EXECUTE,
+         "ooo recovery younger-than completed inst=%" PRIu64
+         " flushed_rob=%" PRIu64 " flushed_cdb=%" PRIu64,
+         request.instruction_id, result.flushed_rob_entries, result.flushed_cdb_entries);
     return result;
 }
 

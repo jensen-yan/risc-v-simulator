@@ -1,6 +1,7 @@
 #include "cpu/ooo/stages/execute_stage.h"
 #include "cpu/ooo/execute_memory_order.h"
 #include "cpu/ooo/execute_semantics.h"
+#include "cpu/ooo/ooo_recovery.h"
 #include "common/debug_types.h"
 #include "common/types.h"
 #include "core/instruction_executor.h"
@@ -36,13 +37,6 @@ bool mustSerializeHostCommAccess(const CPUState& state,
     }
 
     return !state.reorder_buffer->is_head_instruction(instruction->get_instruction_id());
-}
-
-template <typename Queue>
-void clearQueue(Queue& queue) {
-    while (!queue.empty()) {
-        queue.pop();
-    }
 }
 
 }  // namespace
@@ -645,43 +639,17 @@ bool ExecuteStage::try_recover_control_mispredict_early(ExecutionUnit& unit,
         return false;
     }
 
-    state.pc = actual_next_pc;
-    clearQueue(state.fetch_buffer);
-    if (state.l1i_cache) {
-        state.l1i_cache->flushInFlight();
-    }
-    state.icache.reset();
+    const auto rename_checkpoint = checkpoint_it->second;
+    OooRecovery::YoungerThanRequest recovery_request;
+    recovery_request.instruction_id = instruction_id;
+    recovery_request.rob_entry = instruction->get_rob_entry();
+    recovery_request.current_unit_type = current_unit_type;
+    recovery_request.current_unit_index = current_unit_index;
+    recovery_request.has_redirect_pc = true;
+    recovery_request.redirect_pc = actual_next_pc;
+    recovery_request.rename_checkpoint = &rename_checkpoint;
+    const auto recovery_result = OooRecovery::recoverYoungerThan(state, recovery_request);
 
-    const size_t rob_flushed = state.reorder_buffer->flush_after_entry(instruction->get_rob_entry());
-    state.reservation_station->flush_younger_than(instruction_id);
-    state.store_buffer->flush_after(instruction_id);
-    const size_t cdb_flushed = flush_younger_cdb_entries(state, instruction_id);
-    const bool flushed_dcache_request =
-        flush_younger_execution_units(state, instruction_id, current_unit_type, current_unit_index);
-
-    std::vector<PhysRegNum> surviving_live_regs;
-    std::vector<PhysRegNum> surviving_live_fp_regs;
-    surviving_live_regs.reserve(ReorderBuffer::MAX_ROB_ENTRIES);
-    surviving_live_fp_regs.reserve(ReorderBuffer::MAX_ROB_ENTRIES);
-    for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
-        if (!state.reorder_buffer->is_entry_valid(static_cast<ROBEntry>(i))) {
-            continue;
-        }
-        const auto live_entry = state.reorder_buffer->get_entry(static_cast<ROBEntry>(i));
-        if (live_entry && live_entry->get_physical_dest_kind() != RegisterFileKind::None) {
-            if (live_entry->get_physical_dest_kind() == RegisterFileKind::FloatingPoint) {
-                surviving_live_fp_regs.push_back(live_entry->get_physical_dest());
-            } else if (live_entry->get_physical_dest() != 0) {
-                surviving_live_regs.push_back(live_entry->get_physical_dest());
-            }
-        }
-    }
-
-    state.register_rename->restore_checkpoint(checkpoint_it->second,
-                                              surviving_live_regs,
-                                              surviving_live_fp_regs);
-    erase_younger_rename_checkpoints(state, instruction_id);
-    state.rename_checkpoints.erase(instruction_id);
     if (state.branch_predictor && instruction->has_ras_checkpoint()) {
         state.branch_predictor->restoreRasCheckpoint(instruction->get_ras_checkpoint());
         state.branch_predictor->applyResolvedControlToSpeculativeRas(
@@ -689,11 +657,12 @@ bool ExecuteStage::try_recover_control_mispredict_early(ExecutionUnit& unit,
     }
 
     state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSHES);
-    state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES, static_cast<uint64_t>(rob_flushed));
+    state.perf_counters.increment(
+        PerfCounterId::ROB_FLUSHED_ENTRIES, recovery_result.flushed_rob_entries);
     if (decoded_info.opcode == Opcode::BRANCH) {
         state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_BRANCH_MISPREDICT);
         state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_BRANCH_MISPREDICT,
-                                      static_cast<uint64_t>(rob_flushed));
+                                      recovery_result.flushed_rob_entries);
         if (state.branch_predictor) {
             const BranchPredictor::BranchMeta* branch_meta =
                 instruction->has_branch_predict_meta() ? &instruction->get_branch_predict_meta() : nullptr;
@@ -704,13 +673,13 @@ bool ExecuteStage::try_recover_control_mispredict_early(ExecutionUnit& unit,
     } else {
         state.perf_counters.increment(PerfCounterId::PIPELINE_FLUSH_UNCONDITIONAL_REDIRECT);
         state.perf_counters.increment(PerfCounterId::ROB_FLUSHED_ENTRIES_UNCONDITIONAL_REDIRECT,
-                                      static_cast<uint64_t>(rob_flushed));
+                                      recovery_result.flushed_rob_entries);
         if (state.branch_predictor) {
             state.branch_predictor->on_pipeline_flush();
         }
     }
 
-    if (flushed_dcache_request && state.l1d_cache) {
+    if (recovery_result.flushed_l1d_inflight && state.l1d_cache) {
         state.l1d_cache->flushInFlight();
     }
 
@@ -719,92 +688,13 @@ bool ExecuteStage::try_recover_control_mispredict_early(ExecutionUnit& unit,
          "early control recovery: inst=%" PRId64 " pc=0x%" PRIx64
          " predicted_next=0x%" PRIx64 " actual_next=0x%" PRIx64
          " flushed_rob=%zu flushed_cdb=%zu",
-         instruction_id, instruction_pc, predicted_next_pc, actual_next_pc, rob_flushed, cdb_flushed);
+         instruction_id,
+         instruction_pc,
+         predicted_next_pc,
+         actual_next_pc,
+         static_cast<size_t>(recovery_result.flushed_rob_entries),
+         static_cast<size_t>(recovery_result.flushed_cdb_entries));
     return true;
-}
-
-size_t ExecuteStage::flush_younger_cdb_entries(CPUState& state, uint64_t instruction_id) {
-    if (state.cdb_queue.empty()) {
-        return 0;
-    }
-
-    std::queue<CommonDataBusEntry> kept_entries;
-    size_t flushed = 0;
-    while (!state.cdb_queue.empty()) {
-        auto entry = state.cdb_queue.front();
-        state.cdb_queue.pop();
-        if (entry.valid && entry.instruction &&
-            entry.instruction->get_instruction_id() > instruction_id) {
-            flushed++;
-            continue;
-        }
-        kept_entries.push(std::move(entry));
-    }
-    state.cdb_queue = std::move(kept_entries);
-    return flushed;
-}
-
-bool ExecuteStage::flush_younger_execution_units(CPUState& state,
-                                                 uint64_t instruction_id,
-                                                 ExecutionUnitType current_unit_type,
-                                                 size_t current_unit_index) {
-    bool flushed_dcache_request = false;
-
-    auto flush_container = [&](auto& units, ExecutionUnitType unit_type) {
-        for (size_t i = 0; i < units.size(); ++i) {
-            auto& other_unit = units[i];
-            if (!other_unit.busy || !other_unit.instruction) {
-                continue;
-            }
-            if (unit_type == current_unit_type && i == current_unit_index) {
-                continue;
-            }
-            if (other_unit.instruction->get_instruction_id() <= instruction_id) {
-                continue;
-            }
-
-            if ((unit_type == ExecutionUnitType::LOAD || unit_type == ExecutionUnitType::STORE) &&
-                other_unit.dcache.request_sent) {
-                flushed_dcache_request = true;
-            }
-
-            LOGT(EXECUTE, "flush younger execution unit inst=%" PRId64,
-                 other_unit.instruction->get_instruction_id());
-            state.reservation_station->release_execution_unit(unit_type, static_cast<int>(i));
-            resetExecutionUnitState(other_unit);
-        }
-    };
-
-    flush_container(state.alu_units, ExecutionUnitType::ALU);
-    flush_container(state.fp_units, ExecutionUnitType::FP);
-    flush_container(state.branch_units, ExecutionUnitType::BRANCH);
-    flush_container(state.load_units, ExecutionUnitType::LOAD);
-    flush_container(state.store_units, ExecutionUnitType::STORE);
-
-    for (auto& entry : state.memory_access_inflight) {
-        if (!entry.valid || !entry.state.instruction) {
-            continue;
-        }
-        if (entry.state.instruction->get_instruction_id() <= instruction_id) {
-            continue;
-        }
-
-        flushed_dcache_request = true;
-        LOGT(EXECUTE, "flush younger inflight memory access inst=%" PRId64,
-             entry.state.instruction->get_instruction_id());
-        resetMemoryAccessInFlightState(entry);
-    }
-    return flushed_dcache_request;
-}
-
-void ExecuteStage::erase_younger_rename_checkpoints(CPUState& state, uint64_t instruction_id) {
-    for (auto it = state.rename_checkpoints.begin(); it != state.rename_checkpoints.end();) {
-        if (it->first > instruction_id) {
-            it = state.rename_checkpoints.erase(it);
-        } else {
-            ++it;
-        }
-    }
 }
 
 void ExecuteStage::record_dcache_access_result(CPUState& state,

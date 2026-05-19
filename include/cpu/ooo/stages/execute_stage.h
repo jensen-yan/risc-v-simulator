@@ -101,12 +101,6 @@ private:
                                               ExecutionUnitType unit_type,
                                               size_t unit_index,
                                               CPUState& state);
-    size_t flush_younger_cdb_entries(CPUState& state, uint64_t instruction_id);
-    bool flush_younger_execution_units(CPUState& state,
-                                       uint64_t instruction_id,
-                                       ExecutionUnitType current_unit_type,
-                                       size_t current_unit_index);
-    void erase_younger_rename_checkpoints(CPUState& state, uint64_t instruction_id);
 
 };
 

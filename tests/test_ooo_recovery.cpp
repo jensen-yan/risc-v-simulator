@@ -106,4 +106,58 @@ TEST_F(OooRecoveryTest, FullPipelineRecoveryCanPreserveReservationAndExecutionUn
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::ROB_FLUSHED_ENTRIES_EXCEPTION), 1u);
 }
 
+TEST_F(OooRecoveryTest, YoungerThanRecoveryFlushesOnlyYoungerWork) {
+    auto older = state.reorder_buffer->allocate_entry(makeAddiInstruction(1, 0, 1), 0x100, 1);
+    auto current = state.reorder_buffer->allocate_entry(makeAddiInstruction(2, 0, 2), 0x104, 2);
+    auto younger = state.reorder_buffer->allocate_entry(makeAddiInstruction(3, 0, 3), 0x108, 3);
+    ASSERT_NE(older, nullptr);
+    ASSERT_NE(current, nullptr);
+    ASSERT_NE(younger, nullptr);
+
+    state.fetch_buffer.push(makeFetched(0x10c));
+    state.cdb_queue.push(CommonDataBusEntry(older));
+    state.cdb_queue.push(CommonDataBusEntry(younger));
+    state.branch_units[0].busy = true;
+    state.branch_units[0].instruction = current;
+    state.alu_units[0].busy = true;
+    state.alu_units[0].instruction = younger;
+    state.memory_access_inflight[0].valid = true;
+    state.memory_access_inflight[0].state.instruction = younger;
+    state.memory_access_inflight[0].unit_type = ExecutionUnitType::LOAD;
+    state.rename_checkpoints.emplace(2, state.register_rename->capture_checkpoint());
+    state.rename_checkpoints.emplace(3, state.register_rename->capture_checkpoint());
+
+    const auto checkpoint = state.register_rename->capture_checkpoint();
+    OooRecovery::YoungerThanRequest request;
+    request.instruction_id = current->get_instruction_id();
+    request.rob_entry = current->get_rob_entry();
+    request.current_unit_type = ExecutionUnitType::BRANCH;
+    request.current_unit_index = 0;
+    request.has_redirect_pc = true;
+    request.redirect_pc = 0x200;
+    request.rename_checkpoint = &checkpoint;
+
+    const auto result = OooRecovery::recoverYoungerThan(state, request);
+
+    EXPECT_EQ(state.pc, 0x200u);
+    EXPECT_EQ(result.flushed_rob_entries, 1u);
+    EXPECT_EQ(result.fetch_buffer_dropped, 1u);
+    EXPECT_EQ(result.flushed_cdb_entries, 1u);
+    EXPECT_TRUE(result.flushed_l1d_inflight);
+    EXPECT_NE(state.reorder_buffer->get_entry(older->get_rob_entry()), nullptr);
+    EXPECT_NE(state.reorder_buffer->get_entry(current->get_rob_entry()), nullptr);
+    EXPECT_EQ(state.reorder_buffer->get_entry(younger->get_rob_entry()), nullptr);
+    ASSERT_FALSE(state.cdb_queue.empty());
+    EXPECT_EQ(state.cdb_queue.front().instruction, older);
+    state.cdb_queue.pop();
+    EXPECT_TRUE(state.cdb_queue.empty());
+    EXPECT_TRUE(state.fetch_buffer.empty());
+    EXPECT_TRUE(state.branch_units[0].busy);
+    EXPECT_EQ(state.branch_units[0].instruction, current);
+    EXPECT_FALSE(state.alu_units[0].busy);
+    EXPECT_EQ(state.alu_units[0].instruction, nullptr);
+    EXPECT_FALSE(state.memory_access_inflight[0].valid);
+    EXPECT_TRUE(state.rename_checkpoints.empty());
+}
+
 } // namespace riscv

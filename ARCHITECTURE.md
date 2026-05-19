@@ -115,6 +115,126 @@ flowchart LR
   如果它解决的是调度、flush、提交一致性、资源竞争，通常属于 OOO。
   如果它解决的是某条指令怎么算、怎么访存、怎么做符号扩展，通常不该只写在 OOO。
 
+### Execute / Commit 模块地图
+
+`ExecuteStage` 和 `CommitStage` 只保留阶段级 orchestration：什么时候推进、什么时候完成、什么时候停止本 cycle。
+具体规则下沉到按领域命名的模块里。做性能实验或新增特性时，优先从下面的路径找入口。
+
+```mermaid
+flowchart TD
+  subgraph Execute["Execute path"]
+    ES["ExecuteStage\n调度 / execution-unit ticking / complete to CDB"]
+    ELC["ExecuteLoadCompletion\nready load 完成状态机"]
+    ELH["ExecuteLoadHazard\nROB older store hazard replay"]
+    ELA["ExecuteLoadAccess\nforwarding / memory read / D$ read / exception"]
+    ELV["ExecuteLoadValue\nload value formatting"]
+    ESA["ExecuteStoreAccess\nstore D$ write / inflight / recovery trigger"]
+    EDC["ExecuteDCacheAccess\nD$ timing handshake"]
+    EMI["ExecuteMemoryInflight\nissued miss queue"]
+    EMO["ExecuteMemoryOrder\naddr-unknown speculation / violation"]
+    ECR["ExecuteControlRecovery\nearly branch/JALR recovery"]
+  end
+
+  subgraph Commit["Commit path"]
+    CS["CommitStage\nROB head retirement loop / halt decision"]
+    CME["CommitMemoryEffects\nstore / AMO architectural memory effects"]
+    CRE["CommitRegisterEffects\nGPR/FPR/fflags/rename commit"]
+    CRT["CommitRetireEffects\nstore-buffer / checkpoint / profile bookkeeping"]
+    CCF["CommitControlFlowEffects\nbranch/JAL/JALR retire redirect"]
+    CSE["CommitSystemEffects\nCSR / trap / MRET / FENCE.I"]
+  end
+
+  REC["OooRecovery\nshared flush / younger cleanup / restart"]
+
+  ES --> ELC
+  ELC --> ELH
+  ELC --> ELA
+  ELA --> ELV
+  ELA --> EDC
+  ELC --> EMI
+  ES --> ESA
+  ESA --> EDC
+  ESA --> EMI
+  ESA --> EMO
+  ES --> ECR
+  ECR --> REC
+  EMO --> REC
+
+  CS --> CME
+  CS --> CRE
+  CS --> CRT
+  CS --> CCF
+  CS --> CSE
+  CCF --> REC
+  CSE --> REC
+```
+
+#### Execute 路径落点
+
+- 改 load 被阻塞、replay 归因、older store/AMO 判定：
+  优先看 `ExecuteLoadHazard`。
+- 改 store-to-load forwarding、partial merge、load 从内存或 D$ 得到最终值：
+  优先看 `ExecuteLoadAccess`，值格式化规则看 `ExecuteLoadValue`。
+- 改 ready load 如何在 replay、cache wait、inflight、exception、complete 之间流转：
+  优先看 `ExecuteLoadCompletion`。
+- 改 store 执行完成、D$ write、store miss 入 inflight、store 触发 memory-order recovery：
+  优先看 `ExecuteStoreAccess`。
+- 改 D$ hit/miss/blocking/outstanding/stall counter：
+  优先看 `ExecuteDCacheAccess`。
+- 改已发出的 load/store miss 如何等待和回到 CDB：
+  优先看 `ExecuteMemoryInflight`。
+- 改 addr-unknown store speculation、Bad Addr-Unknown Pair、load-store violation recovery trigger：
+  优先看 `ExecuteMemoryOrder`。
+- 改执行阶段早恢复、branch/JALR younger cleanup、rename checkpoint restore：
+  优先看 `ExecuteControlRecovery` 和 `OooRecovery`。
+- 改 dispatch 宽度、执行单元分配、AMO dispatch wait、load dispatch speculation：
+  优先看 `ExecuteStage`。这一块当前保留在 stage 内，避免为简单调度循环继续制造薄模块。
+
+#### Commit 路径落点
+
+- 改 store / STORE_FP / AMO 退休时的 architectural memory effect：
+  优先看 `CommitMemoryEffects`。
+- 改整数/浮点寄存器、fflags、rename map 的提交：
+  优先看 `CommitRegisterEffects`。
+- 改退休后的 store-buffer、rename checkpoint、load/store profile bookkeeping：
+  优先看 `CommitRetireEffects`。
+- 改 branch/JAL/JALR 退休时的 predictor/profile/redirect flush：
+  优先看 `CommitControlFlowEffects`。
+- 改 CSR、ECALL、EBREAK、MRET、FENCE.I、trap entry、serializing full flush：
+  优先看 `CommitSystemEffects`。
+- 改 ROB head commit loop、halt/error 策略、pipeline trace 记录时机：
+  优先看 `CommitStage`。
+
+#### Recovery 所有权
+
+- `OooRecovery` 是乱序流水线 flush/reset/younger cleanup 的唯一共享归口。
+- `ExecuteControlRecovery`、`ExecuteMemoryOrder`、`CommitControlFlowEffects`、`CommitSystemEffects` 只负责识别 recovery 原因和 restart 信息。
+- 后续不要在单个 stage 里新增独立 flush/reset 清理规则；需要新恢复语义时，先扩展 `OooRecovery` request/result，再让触发方调用。
+
+#### 拆分停止线
+
+当前 execute/commit 的模块已经足够支撑可维护性，后续不要因为行数继续机械拆分。
+只有满足下面任一条件时，才继续新增模块：
+
+- 一个规则同时被两个以上路径复用，复制会带来一致性风险。
+- 一个规则需要独立测试，而且通过 stage 集成测试很难覆盖边界。
+- 一个性能实验需要替换或比较不同策略，现有模块没有合适落点。
+
+不满足这些条件时，优先把逻辑留在现有模块或补文档导航。
+例如 ALU/FP/BRANCH 的简单 ticking、CDB enqueue 的统一收尾、dispatch loop 的基本形状，暂时保留在 `ExecuteStage` 更直观。
+
+### 性能探索入口索引
+
+| 想探索的问题 | 优先入口 |
+| --- | --- |
+| load 为什么 replay、replay 属于哪一类 | `ExecuteLoadCompletion` / `ExecuteLoadHazard` / `ExecuteMemoryOrder` |
+| load 是否应该绕过地址未知 store | `ExecuteMemoryOrder` |
+| store-to-load forwarding 命中率、partial merge 行为 | `ExecuteLoadAccess` / `StoreBuffer` / `CommitRetireEffects` |
+| D$ miss、outstanding limit、stall 周期 | `ExecuteDCacheAccess` / `ExecuteMemoryInflight` |
+| store miss 是否阻塞执行单元或进入 inflight | `ExecuteStoreAccess` / `ExecuteMemoryInflight` |
+| branch 早恢复是否减少错误路径工作 | `ExecuteControlRecovery` / `CommitControlFlowEffects` / `OooRecovery` |
+| commit 阶段 retire profile 或 architectural state 更新 | `CommitRetireEffects` / `CommitMemoryEffects` / `CommitRegisterEffects` |
+
 ## 改代码时的落点规则
 
 - 新增或修复“指令语义”：

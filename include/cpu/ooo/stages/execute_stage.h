@@ -97,11 +97,6 @@ private:
                                  size_t unit_index,
                                  CPUState& state,
                                  bool release_dispatch_unit = true);
-    bool try_recover_control_mispredict_early(ExecutionUnit& unit,
-                                              ExecutionUnitType unit_type,
-                                              size_t unit_index,
-                                              CPUState& state);
-
 };
 
 } // namespace riscv 

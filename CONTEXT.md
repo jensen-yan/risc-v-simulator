@@ -17,6 +17,10 @@ _Avoid_: passing raw `CPUState` as the stage interface
 The execute-side rules that decide when loads may pass unresolved older stores and how the simulator recovers from a detected ordering violation.
 _Avoid_: scattering addr-unknown speculation and recovery rules inside `ExecuteStage`
 
+**Execute Control Recovery**:
+The execute-side early recovery path for resolved branch/JALR mispredictions, including rename checkpoint restore, younger-work cleanup, RAS repair, and recovery counters.
+_Avoid_: burying early control recovery inside generic execution-unit completion
+
 **OOO Recovery**:
 The out-of-order pipeline rules that remove speculative work after a redirect, trap, fence, or other pipeline recovery reason.
 _Avoid_: scattering flush cleanup rules across individual stages
@@ -53,6 +57,7 @@ _Avoid_: blacklist entry
 
 - An **Out-of-Order Pipeline** executes each stage through a **Stage Context**.
 - **Execute Memory Order** observes **Addr-Unknown Store** state when deciding whether a younger load may proceed.
+- **Execute Control Recovery** runs when an execution unit completes a control-flow instruction before commit has seen it.
 - **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
 - **Commit Retire Effects** runs after the instruction's architectural state has been committed.
 - **Commit Memory Effects** runs before generic retire bookkeeping so store/AMO state becomes architectural first.

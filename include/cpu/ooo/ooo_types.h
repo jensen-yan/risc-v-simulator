@@ -85,6 +85,7 @@ struct OOOPipelineConfig {
     static constexpr size_t LOAD_UNITS = 4;
     static constexpr size_t STORE_UNITS = 4;
     static constexpr size_t MEMORY_INFLIGHT_ENTRIES = 16;
+    static constexpr size_t STORE_BUFFER_ENTRIES = ROB_ENTRIES;
 };
 
 

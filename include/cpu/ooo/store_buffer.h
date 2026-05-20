@@ -2,6 +2,7 @@
 
 #include "common/types.h"
 #include "cpu/ooo/dynamic_inst.h"
+#include "cpu/ooo/ooo_types.h"
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -23,7 +24,7 @@ struct StoreBufferEntry {
 class StoreBuffer {
 public:
     // 需覆盖全部在飞store，避免提早发布后因环形覆盖丢失live entry。
-    static const int MAX_ENTRIES = 96;
+    static const int MAX_ENTRIES = static_cast<int>(OOOPipelineConfig::STORE_BUFFER_ENTRIES);
 
     enum class LoadForwardingKind {
         NoMatch,

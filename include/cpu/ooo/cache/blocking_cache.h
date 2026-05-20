@@ -104,8 +104,9 @@ private:
     BlockingCacheStats stats_{};
 
     struct MshrEntry {
+        uint64_t line_address = 0;
         int remaining_cycles = 0;
-        std::vector<uint64_t> line_addresses;
+        std::vector<uint8_t> fill_data;
     };
 
     std::vector<MshrEntry> mshr_entries_;
@@ -124,6 +125,8 @@ private:
 
     CacheLine* findLine(uint64_t line_address);
     const CacheLine* findLine(uint64_t line_address) const;
+    MshrEntry* findMshrEntry(uint64_t line_address);
+    const MshrEntry* findMshrEntry(uint64_t line_address) const;
     bool isLinePendingFill(uint64_t line_address) const;
     int pendingFillRemainingCycles(const std::vector<uint64_t>& line_addresses) const;
     bool wouldReadyHit(uint64_t address, uint8_t size) const;
@@ -134,15 +137,22 @@ private:
                            bool& dirty_eviction,
                            bool mark_prefetched,
                            bool fill_pending);
-    void markFillComplete(uint64_t line_address);
+    bool startLineFill(const std::shared_ptr<Memory>& memory,
+                       uint64_t line_address,
+                       bool& dirty_eviction);
+    void completeMshrFill(const MshrEntry& entry);
+    void completePendingFills(const std::vector<uint64_t>& line_addresses);
+    void cancelPendingFill(uint64_t line_address);
     void maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory, uint64_t demand_line_address);
     size_t countUnusedPrefetchedLinesInSet(size_t set_index) const;
     void touchLine(CacheLine& line);
 
     static uint64_t readMemoryValue(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size);
     static void writeMemoryValue(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size, uint64_t value);
+    std::vector<uint8_t> readLineDataFromMemory(const std::shared_ptr<Memory>& memory, uint64_t line_address) const;
     void fillLineFromMemory(const std::shared_ptr<Memory>& memory, uint64_t line_address, CacheLine& line);
     void writebackLineToMemory(const std::shared_ptr<Memory>& memory, uint64_t line_address, const CacheLine& line);
+    uint8_t readCacheOrPendingByte(uint64_t address) const;
     uint8_t readCachedByte(uint64_t address) const;
     void writeCachedByte(uint64_t address, uint8_t value, bool mark_dirty);
 };

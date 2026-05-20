@@ -209,6 +209,68 @@ TEST(BlockingCacheTest, PendingFillLineIsNotSelectedAsReplacementVictim) {
     EXPECT_TRUE(original_line.hit);
 }
 
+TEST(BlockingCacheTest, PendingFillReadsUseMshrPayloadUntilLineBecomesReady) {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 128;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 2;
+
+    auto memory = std::make_shared<Memory>(1024);
+    memory->writeWord(0x0, 0x11111111);
+    BlockingCache cache(cfg);
+
+    uint64_t value = 0;
+    const auto miss = cache.load(memory, 0x0, 4, value);
+    EXPECT_FALSE(miss.blocked);
+    EXPECT_FALSE(miss.hit);
+    EXPECT_EQ(value, 0x11111111u);
+
+    memory->writeWord(0x0, 0x22222222);
+
+    const auto merged = cache.load(memory, 0x0, 4, value);
+    EXPECT_FALSE(merged.blocked);
+    EXPECT_TRUE(merged.merged_pending_fill);
+    EXPECT_EQ(value, 0x11111111u);
+
+    drainMiss(cache);
+
+    const auto hit = cache.load(memory, 0x0, 4, value);
+    EXPECT_FALSE(hit.blocked);
+    EXPECT_TRUE(hit.hit);
+    EXPECT_EQ(value, 0x11111111u);
+}
+
+TEST(BlockingCacheTest, CommitStoreToPendingLineIsNotOverwrittenByFillCompletion) {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 128;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 2;
+
+    auto memory = std::make_shared<Memory>(1024);
+    memory->writeWord(0x0, 0x11111111);
+    BlockingCache cache(cfg);
+
+    const auto miss = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(miss.blocked);
+    EXPECT_FALSE(miss.hit);
+    EXPECT_TRUE(cache.hasMissInFlight());
+
+    cache.commitStore(memory, 0x0, 4, 0xAABBCCDD);
+    EXPECT_FALSE(cache.hasMissInFlight());
+
+    uint64_t value = 0;
+    const auto load = cache.load(memory, 0x0, 4, value);
+    EXPECT_FALSE(load.blocked);
+    EXPECT_TRUE(load.hit);
+    EXPECT_EQ(value, 0xAABBCCDDu);
+}
+
 TEST(BlockingCacheTest, CommitStoreUpdatesCachedDataForLaterLoad) {
     auto memory = std::make_shared<Memory>(4096);
     memory->writeWord(0x120, 0x11111111);
@@ -326,6 +388,7 @@ TEST(BlockingCacheTest, NextLinePrefetchTurnsFollowingLineIntoUsefulHit) {
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
     cfg.enable_next_line_prefetch = true;
+    cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(256);
     memory->writeWord(0x0, 0x11111111);
@@ -356,6 +419,7 @@ TEST(BlockingCacheTest, NextLinePrefetchDropsRequestWhenTargetAlreadyResident) {
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
     cfg.enable_next_line_prefetch = true;
+    cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(256);
     memory->writeWord(0x40, 0x22222222);
@@ -389,6 +453,7 @@ TEST(BlockingCacheTest, NextLinePrefetchTracksUnusedEviction) {
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
     cfg.enable_next_line_prefetch = true;
+    cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(256);
     memory->writeWord(0x0, 0x11111111);
@@ -421,6 +486,7 @@ TEST(BlockingCacheTest, NextLinePrefetchIsThrottledWhenSetAlreadyHasUnusedPrefet
     cfg.line_size_bytes = 64;
     cfg.associativity = 3;
     cfg.enable_next_line_prefetch = true;
+    cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(512);
     memory->writeWord(0x0, 0x11111111);
@@ -451,6 +517,7 @@ TEST(BlockingCacheTest, UsefulPrefetchHitClearsSetThrottleState) {
     cfg.line_size_bytes = 64;
     cfg.associativity = 3;
     cfg.enable_next_line_prefetch = true;
+    cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(512);
     memory->writeWord(0x0, 0x11111111);

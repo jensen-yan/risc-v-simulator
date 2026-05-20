@@ -14,6 +14,20 @@ commit message 尽量详细点，用中文
 - 当前任务背景、重构计划、阶段记录优先看 `tasks/`。
 - 如果文档之间有冲突，优先以当前用户要求和 `tasks/` 中最新任务说明为准。
 
+## Agent skills
+
+### Issue tracker
+
+当前项目以本地开发文档为主，GitHub Issues 作为可选共享载体；只有用户明确要求发布到 GitHub issue 时才创建或修改 issue。See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+保留 mattpocock/skills 默认 triage 角色到同名标签的映射；当前不会主动创建 GitHub labels。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+本仓库使用 single-context 领域文档布局：`CONTEXT.md` 记录领域术语，`ARCHITECTURE.md` 记录架构说明，复杂任务继续使用 `PLANS.md`、`docs/exec-plans/` 和 `tasks/`。See `docs/agents/domain.md`.
+
 ## 计划约定（新增）
 - 遇到复杂任务时，不要直接开始改代码或长链路实验，先按 `PLANS.md` 新建或更新对应 ExecPlan。
 - 适合使用 ExecPlan 的任务包括：性能分析、长链路 debug、跨模块重构、分阶段功能开发、需要多轮实验才能收敛的调查任务。

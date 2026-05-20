@@ -43,7 +43,8 @@ TEST_F(CommitStageContextTest, EmptyRobSkipsCommitThroughNarrowContext) {
     commit_stage.execute(context);
 
     EXPECT_EQ(state.instruction_count, 0u);
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::COMMIT_SLOTS), 2u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::COMMIT_SLOTS),
+              OOOPipelineConfig::COMMIT_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::COMMIT_UTILIZED_SLOTS), 0u);
 }
 
@@ -62,7 +63,8 @@ TEST_F(CommitStageContextTest, CommitsCompletedIntegerInstructionThroughNarrowCo
     EXPECT_EQ(state.arch_registers[1], 42u);
     EXPECT_EQ(state.instruction_count, 1u);
     EXPECT_TRUE(state.reorder_buffer->is_empty());
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::COMMIT_SLOTS), 2u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::COMMIT_SLOTS),
+              OOOPipelineConfig::COMMIT_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::INSTRUCTIONS_RETIRED), 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::COMMIT_UTILIZED_SLOTS), 1u);
 }

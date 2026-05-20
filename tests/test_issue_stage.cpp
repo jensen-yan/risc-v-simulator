@@ -51,7 +51,8 @@ TEST_F(IssueStageContextTest, IssuesAllocatedRobEntryThroughNarrowContext) {
     EXPECT_EQ(inst->get_status(), DynamicInst::Status::ISSUED);
     EXPECT_EQ(inst->get_issue_cycle(), 11u);
     EXPECT_EQ(state.reservation_station->get_occupied_entry_count(), 1u);
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::ISSUE_SLOTS), 2u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::ISSUE_SLOTS),
+              OOOPipelineConfig::ISSUE_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::ISSUED_INSTRUCTIONS), 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::ISSUE_UTILIZED_SLOTS), 1u);
 }
@@ -61,7 +62,8 @@ TEST_F(IssueStageContextTest, EmptyRobSkipsIssueThroughNarrowContext) {
     issue_stage.execute(context);
 
     EXPECT_EQ(state.reservation_station->get_occupied_entry_count(), 0u);
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::ISSUE_SLOTS), 2u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::ISSUE_SLOTS),
+              OOOPipelineConfig::ISSUE_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::ISSUE_UTILIZED_SLOTS), 0u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_ISSUE_NO_DISPATCHABLE), 0u);
 }

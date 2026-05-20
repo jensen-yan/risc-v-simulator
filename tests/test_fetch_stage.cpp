@@ -41,30 +41,35 @@ protected:
 };
 
 TEST_F(FetchStageContextTest, FetchesSequentialInstructionsThroughNarrowContext) {
-    memory->writeWord(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
-    memory->writeWord(0x4, createITypeInstruction(2, 0, 0x0, 2, 0x13));
+    for (size_t i = 0; i < OOOPipelineConfig::FETCH_WIDTH; ++i) {
+        memory->writeWord(static_cast<Address>(i * 4),
+                          createITypeInstruction(static_cast<int16_t>(i + 1),
+                                                 0,
+                                                 0x0,
+                                                 static_cast<uint8_t>(i + 1),
+                                                 0x13));
+    }
 
     FetchStage::Context context(state);
     fetch_stage.execute(context);
 
-    ASSERT_EQ(state.fetch_buffer.size(), 2u);
+    ASSERT_EQ(state.fetch_buffer.size(), OOOPipelineConfig::FETCH_WIDTH);
 
-    const auto first = state.fetch_buffer.front();
-    state.fetch_buffer.pop();
-    const auto second = state.fetch_buffer.front();
+    for (size_t i = 0; i < OOOPipelineConfig::FETCH_WIDTH; ++i) {
+        const auto fetched = state.fetch_buffer.front();
+        state.fetch_buffer.pop();
 
-    EXPECT_EQ(first.pc, 0x0u);
-    EXPECT_EQ(first.predicted_next_pc, 0x4u);
-    EXPECT_FALSE(first.is_compressed);
+        EXPECT_EQ(fetched.pc, static_cast<Address>(i * 4));
+        EXPECT_EQ(fetched.predicted_next_pc, static_cast<Address>((i + 1) * 4));
+        EXPECT_FALSE(fetched.is_compressed);
+    }
 
-    EXPECT_EQ(second.pc, 0x4u);
-    EXPECT_EQ(second.predicted_next_pc, 0x8u);
-    EXPECT_FALSE(second.is_compressed);
-
-    EXPECT_EQ(state.pc, 0x8u);
+    EXPECT_EQ(state.pc, static_cast<Address>(OOOPipelineConfig::FETCH_WIDTH * 4));
     EXPECT_FALSE(state.halted);
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::FETCHED_INSTRUCTIONS), 2u);
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::FETCH_UTILIZED_SLOTS), 2u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::FETCHED_INSTRUCTIONS),
+              OOOPipelineConfig::FETCH_WIDTH);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::FETCH_UTILIZED_SLOTS),
+              OOOPipelineConfig::FETCH_WIDTH);
 }
 
 TEST_F(FetchStageContextTest, HaltsWhenZeroInstructionAndPipelineDrained) {

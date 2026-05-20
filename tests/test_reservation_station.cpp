@@ -205,38 +205,43 @@ TEST_F(ReservationStationTest, ExecutionUnitAllocation) {
 
 // 测试6：执行单元忙碌处理  
 TEST_F(ReservationStationTest, ExecutionUnitBusy) {
-    // 发射两个ALU指令
-    auto inst1 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 1, 2, 3);
-    auto dynamic_inst1 = createDynamicInst(inst1, 32, 33, 34, true, true, 0x1000, 1);
-    
-    auto inst2 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 4, 5, 6);
-    auto dynamic_inst2 = createDynamicInst(inst2, 35, 36, 37, true, true, 0x1004, 2);
-    
-    auto inst3 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 7, 8, 9);
-    auto dynamic_inst3 = createDynamicInst(inst3, 38, 39, 40, true, true, 0x1008, 3);
-    
-    // 发射三条指令
-    EXPECT_TRUE(rs.issue_instruction(dynamic_inst1).success);
-    EXPECT_TRUE(rs.issue_instruction(dynamic_inst2).success);
-    EXPECT_TRUE(rs.issue_instruction(dynamic_inst3).success);
-    
-    // 调度前两条指令（假设有2个ALU单元）
-    auto dispatch1 = rs.dispatch_instruction();
-    EXPECT_TRUE(dispatch1.success) << "第一条指令应该成功调度";
-    
-    auto dispatch2 = rs.dispatch_instruction();
-    EXPECT_TRUE(dispatch2.success) << "第二条指令应该成功调度";
-    
-    // 第三条指令应该因为执行单元忙碌而调度失败
-    auto dispatch3 = rs.dispatch_instruction();
-    EXPECT_FALSE(dispatch3.success) << "执行单元忙碌时第三条指令不应该调度";
-    
+    constexpr size_t instruction_count = OOOPipelineConfig::ALU_UNITS + 1;
+    std::vector<DynamicInstPtr> instructions;
+    instructions.reserve(instruction_count);
+    for (size_t i = 0; i < instruction_count; ++i) {
+        const auto inst = createInstruction(InstructionType::R_TYPE,
+                                            Opcode::OP,
+                                            static_cast<uint8_t>(i + 1),
+                                            static_cast<uint8_t>(i + 2),
+                                            static_cast<uint8_t>(i + 3));
+        instructions.push_back(createDynamicInst(inst,
+                                                 static_cast<PhysRegNum>(32 + i * 3),
+                                                 static_cast<PhysRegNum>(33 + i * 3),
+                                                 static_cast<PhysRegNum>(34 + i * 3),
+                                                 true,
+                                                 true,
+                                                 static_cast<uint32_t>(0x1000 + i * 4),
+                                                 static_cast<ROBEntry>(i + 1)));
+        EXPECT_TRUE(rs.issue_instruction(instructions.back()).success);
+    }
+
+    ReservationStation::DispatchResult first_dispatch;
+    for (size_t i = 0; i < OOOPipelineConfig::ALU_UNITS; ++i) {
+        auto dispatch = rs.dispatch_instruction();
+        EXPECT_TRUE(dispatch.success) << "有空闲 ALU 时应成功调度";
+        if (i == 0) {
+            first_dispatch = dispatch;
+        }
+    }
+
+    auto blocked_dispatch = rs.dispatch_instruction();
+    EXPECT_FALSE(blocked_dispatch.success) << "ALU 全忙时下一条指令不应该调度";
+
     // 释放一个执行单元
-    rs.release_execution_unit(dispatch1.unit_type, dispatch1.unit_id);
+    rs.release_execution_unit(first_dispatch.unit_type, first_dispatch.unit_id);
     
-    // 现在第三条指令应该可以调度了
-    dispatch3 = rs.dispatch_instruction();
-    EXPECT_TRUE(dispatch3.success) << "释放执行单元后应该可以调度";
+    auto resumed_dispatch = rs.dispatch_instruction();
+    EXPECT_TRUE(resumed_dispatch.success) << "释放执行单元后应该可以调度";
 }
 
 TEST_F(ReservationStationTest, FlushYoungerThanKeepsOlderEntries) {

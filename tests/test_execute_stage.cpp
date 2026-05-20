@@ -51,7 +51,8 @@ TEST_F(ExecuteStageTest, EmptyReservationStationRecordsFrontendStarvedThroughCon
     ExecuteStage::Context context(state);
     execute_stage_->execute(context);
 
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DISPATCH_SLOTS), 2u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DISPATCH_SLOTS),
+              OOOPipelineConfig::DISPATCH_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::DISPATCH_UTILIZED_SLOTS), 0u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_EXECUTE_NO_READY), 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED), 1u);

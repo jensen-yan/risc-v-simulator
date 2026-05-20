@@ -26,12 +26,12 @@ using ReservationStationEntry = DynamicInst;
 class ReservationStation {
 private:
     // 配置参数
-    static const int MAX_RS_ENTRIES = 48;        // 保留站最大容量
-    static const int MAX_ALU_UNITS = 2;          // ALU执行单元数量
-    static const int MAX_FP_UNITS = 2;           // FP执行单元数量
-    static const int MAX_BRANCH_UNITS = 1;       // 分支执行单元数量
-    static const int MAX_LOAD_UNITS = 2;         // 加载执行单元数量
-    static const int MAX_STORE_UNITS = 2;        // 存储执行单元数量
+    static const int MAX_RS_ENTRIES = static_cast<int>(OOOPipelineConfig::RS_ENTRIES);
+    static const int MAX_ALU_UNITS = static_cast<int>(OOOPipelineConfig::ALU_UNITS);
+    static const int MAX_FP_UNITS = static_cast<int>(OOOPipelineConfig::FP_UNITS);
+    static const int MAX_BRANCH_UNITS = static_cast<int>(OOOPipelineConfig::BRANCH_UNITS);
+    static const int MAX_LOAD_UNITS = static_cast<int>(OOOPipelineConfig::LOAD_UNITS);
+    static const int MAX_STORE_UNITS = static_cast<int>(OOOPipelineConfig::STORE_UNITS);
     
     // 保留站表项
     std::vector<DynamicInstPtr> rs_entries;

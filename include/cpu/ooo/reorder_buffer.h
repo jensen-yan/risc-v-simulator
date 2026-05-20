@@ -37,7 +37,7 @@ public:
     };
 
     // 配置参数
-    static const int MAX_ROB_ENTRIES = 96;       // ROB最大容量
+    static const int MAX_ROB_ENTRIES = static_cast<int>(OOOPipelineConfig::ROB_ENTRIES);
 
 private:
     // ROB表项存储（使用循环队列）

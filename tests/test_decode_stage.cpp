@@ -72,7 +72,8 @@ TEST_F(DecodeStageContextTest, DecodesFetchedInstructionsThroughNarrowContext) {
     EXPECT_EQ(second->get_fetch_cycle(), 8u);
     EXPECT_EQ(second->get_decode_cycle(), 42u);
 
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DECODE_SLOTS), 2u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DECODE_SLOTS),
+              OOOPipelineConfig::DECODE_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::DECODED_INSTRUCTIONS), 2u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::DECODE_UTILIZED_SLOTS), 2u);
 }
@@ -92,7 +93,8 @@ TEST_F(DecodeStageContextTest, KeepsFetchBufferWhenRobIsFull) {
 
     EXPECT_EQ(state.fetch_buffer.size(), 1u);
     EXPECT_EQ(state.global_instruction_id, 0u);
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DECODE_SLOTS), 2u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DECODE_SLOTS),
+              OOOPipelineConfig::DECODE_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::DECODE_UTILIZED_SLOTS), 0u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_DECODE_ROB_FULL), 1u);
 }

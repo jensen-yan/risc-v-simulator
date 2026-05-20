@@ -245,11 +245,17 @@ TEST_F(OutOfOrderCPUTest, ResetStatsClearsCountersButPreservesArchitecturalState
     }
 }
 
-TEST_F(OutOfOrderCPUTest, FetchStageFetchesTwoSequentialInstructionsPerCycle) {
-    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
-    writeInstruction(0x4, createITypeInstruction(2, 0, 0x0, 2, 0x13));
-    writeInstruction(0x8, createITypeInstruction(3, 0, 0x0, 3, 0x13));
-    writeInstruction(0xC, createECallInstruction());
+TEST_F(OutOfOrderCPUTest, FetchStageUsesConfiguredSequentialWidth) {
+    for (size_t i = 0; i < OOOPipelineConfig::FETCH_WIDTH; ++i) {
+        writeInstruction(static_cast<uint32_t>(i * 4),
+                         createITypeInstruction(static_cast<int16_t>(i + 1),
+                                                0,
+                                                0x0,
+                                                static_cast<uint8_t>(i + 1),
+                                                0x13));
+    }
+    writeInstruction(static_cast<uint32_t>(OOOPipelineConfig::FETCH_WIDTH * 4),
+                     createECallInstruction());
 
     auto& state = const_cast<CPUState&>(cpu->getCPUState());
     state.l1i_cache.reset();
@@ -258,8 +264,10 @@ TEST_F(OutOfOrderCPUTest, FetchStageFetchesTwoSequentialInstructionsPerCycle) {
     cpu->setPC(0x0);
     cpu->step();
 
-    EXPECT_EQ(state.fetch_buffer.size(), 2u) << "第一拍应取两条顺序指令";
-    EXPECT_EQ(cpu->getPC(), 0x8u) << "两条32位顺序指令后，下一取指PC应前进8字节";
+    EXPECT_EQ(state.fetch_buffer.size(), OOOPipelineConfig::FETCH_WIDTH)
+        << "第一拍应取满当前取指宽度的顺序指令";
+    EXPECT_EQ(cpu->getPC(), static_cast<uint64_t>(OOOPipelineConfig::FETCH_WIDTH * 4))
+        << "顺序取指后，下一取指PC应按当前取指宽度前进";
 
     auto findStat = [&](const std::string& name) -> uint64_t {
         for (const auto& entry : cpu->getStats()) {
@@ -270,17 +278,22 @@ TEST_F(OutOfOrderCPUTest, FetchStageFetchesTwoSequentialInstructionsPerCycle) {
         return 0;
     };
 
-    EXPECT_EQ(findStat("cpu.fetch.fetched"), 2u);
-    EXPECT_EQ(findStat("cpu.fetch.utilized_slots"), 2u);
-    EXPECT_EQ(findStat("cpu.fetch.slots"), 2u);
+    EXPECT_EQ(findStat("cpu.fetch.fetched"), OOOPipelineConfig::FETCH_WIDTH);
+    EXPECT_EQ(findStat("cpu.fetch.utilized_slots"), OOOPipelineConfig::FETCH_WIDTH);
+    EXPECT_EQ(findStat("cpu.fetch.slots"), OOOPipelineConfig::FETCH_WIDTH);
 }
 
-TEST_F(OutOfOrderCPUTest, DecodeStageDecodesTwoInstructionsPerCycleWhenResourcesAllow) {
-    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
-    writeInstruction(0x4, createITypeInstruction(2, 0, 0x0, 2, 0x13));
-    writeInstruction(0x8, createITypeInstruction(3, 0, 0x0, 3, 0x13));
-    writeInstruction(0xC, createITypeInstruction(4, 0, 0x0, 4, 0x13));
-    writeInstruction(0x10, createECallInstruction());
+TEST_F(OutOfOrderCPUTest, DecodeStageUsesConfiguredWidthWhenResourcesAllow) {
+    for (size_t i = 0; i < OOOPipelineConfig::DECODE_WIDTH; ++i) {
+        writeInstruction(static_cast<uint32_t>(i * 4),
+                         createITypeInstruction(static_cast<int16_t>(i + 1),
+                                                0,
+                                                0x0,
+                                                static_cast<uint8_t>(i + 1),
+                                                0x13));
+    }
+    writeInstruction(static_cast<uint32_t>(OOOPipelineConfig::DECODE_WIDTH * 4),
+                     createECallInstruction());
 
     auto& state = const_cast<CPUState&>(cpu->getCPUState());
     state.l1i_cache.reset();
@@ -292,8 +305,9 @@ TEST_F(OutOfOrderCPUTest, DecodeStageDecodesTwoInstructionsPerCycleWhenResources
 
     ASSERT_NE(state.reorder_buffer, nullptr);
     EXPECT_EQ(state.reorder_buffer->get_free_entry_count(),
-              static_cast<size_t>(ReorderBuffer::MAX_ROB_ENTRIES - 2))
-        << "第二拍应完成两条指令译码并分配到ROB";
+              static_cast<size_t>(ReorderBuffer::MAX_ROB_ENTRIES -
+                                  OOOPipelineConfig::DECODE_WIDTH))
+        << "第二拍应按当前译码宽度完成译码并分配到ROB";
 
     auto findStat = [&](const std::string& name) -> uint64_t {
         for (const auto& entry : cpu->getStats()) {
@@ -304,17 +318,22 @@ TEST_F(OutOfOrderCPUTest, DecodeStageDecodesTwoInstructionsPerCycleWhenResources
         return 0;
     };
 
-    EXPECT_EQ(findStat("cpu.decode.decoded"), 2u);
-    EXPECT_EQ(findStat("cpu.decode.utilized_slots"), 2u);
-    EXPECT_EQ(findStat("cpu.decode.slots"), 4u);
+    EXPECT_EQ(findStat("cpu.decode.decoded"), OOOPipelineConfig::DECODE_WIDTH);
+    EXPECT_EQ(findStat("cpu.decode.utilized_slots"), OOOPipelineConfig::DECODE_WIDTH);
+    EXPECT_EQ(findStat("cpu.decode.slots"), OOOPipelineConfig::DECODE_WIDTH * 2);
 }
 
-TEST_F(OutOfOrderCPUTest, IssueStageIssuesTwoInstructionsPerCycleWhenResourcesAllow) {
-    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
-    writeInstruction(0x4, createITypeInstruction(2, 0, 0x0, 2, 0x13));
-    writeInstruction(0x8, createITypeInstruction(3, 0, 0x0, 3, 0x13));
-    writeInstruction(0xC, createITypeInstruction(4, 0, 0x0, 4, 0x13));
-    writeInstruction(0x10, createECallInstruction());
+TEST_F(OutOfOrderCPUTest, IssueStageUsesConfiguredWidthWhenResourcesAllow) {
+    for (size_t i = 0; i < OOOPipelineConfig::ISSUE_WIDTH; ++i) {
+        writeInstruction(static_cast<uint32_t>(i * 4),
+                         createITypeInstruction(static_cast<int16_t>(i + 1),
+                                                0,
+                                                0x0,
+                                                static_cast<uint8_t>(i + 1),
+                                                0x13));
+    }
+    writeInstruction(static_cast<uint32_t>(OOOPipelineConfig::ISSUE_WIDTH * 4),
+                     createECallInstruction());
 
     auto& state = const_cast<CPUState&>(cpu->getCPUState());
     state.l1i_cache.reset();
@@ -326,8 +345,9 @@ TEST_F(OutOfOrderCPUTest, IssueStageIssuesTwoInstructionsPerCycleWhenResourcesAl
     cpu->step();
 
     ASSERT_NE(state.reservation_station, nullptr);
-    EXPECT_EQ(state.reservation_station->get_occupied_entry_count(), 2u)
-        << "第三拍应将两条最老指令送入保留站";
+    EXPECT_EQ(state.reservation_station->get_occupied_entry_count(),
+              OOOPipelineConfig::ISSUE_WIDTH)
+        << "第三拍应按当前发射宽度将最老指令送入保留站";
 
     auto findStat = [&](const std::string& name) -> uint64_t {
         for (const auto& entry : cpu->getStats()) {
@@ -338,9 +358,9 @@ TEST_F(OutOfOrderCPUTest, IssueStageIssuesTwoInstructionsPerCycleWhenResourcesAl
         return 0;
     };
 
-    EXPECT_EQ(findStat("cpu.issue.issued"), 2u);
-    EXPECT_EQ(findStat("cpu.issue.utilized_slots"), 2u);
-    EXPECT_EQ(findStat("cpu.issue.slots"), 6u);
+    EXPECT_EQ(findStat("cpu.issue.issued"), OOOPipelineConfig::ISSUE_WIDTH);
+    EXPECT_EQ(findStat("cpu.issue.utilized_slots"), OOOPipelineConfig::ISSUE_WIDTH);
+    EXPECT_EQ(findStat("cpu.issue.slots"), OOOPipelineConfig::ISSUE_WIDTH * 3);
 }
 
 TEST_F(OutOfOrderCPUTest, SameCycleIssueRenameTracksYoungerRawDependency) {
@@ -496,12 +516,17 @@ TEST_F(OutOfOrderCPUTest, SerializingSystemInstructionBlocksYoungerIssue) {
     EXPECT_TRUE(verified_younger_blocked) << "需要验证 younger 指令在 issue 阶段被阻塞";
 }
 
-TEST_F(OutOfOrderCPUTest, ExecuteStageDispatchesTwoInstructionsPerCycleWhenUnitsAllow) {
-    writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
-    writeInstruction(0x4, createITypeInstruction(2, 0, 0x0, 2, 0x13));
-    writeInstruction(0x8, createITypeInstruction(3, 0, 0x0, 3, 0x13));
-    writeInstruction(0xC, createITypeInstruction(4, 0, 0x0, 4, 0x13));
-    writeInstruction(0x10, createECallInstruction());
+TEST_F(OutOfOrderCPUTest, ExecuteStageUsesConfiguredDispatchWidthWhenUnitsAllow) {
+    for (size_t i = 0; i < OOOPipelineConfig::DISPATCH_WIDTH; ++i) {
+        writeInstruction(static_cast<uint32_t>(i * 4),
+                         createITypeInstruction(static_cast<int16_t>(i + 1),
+                                                0,
+                                                0x0,
+                                                static_cast<uint8_t>(i + 1),
+                                                0x13));
+    }
+    writeInstruction(static_cast<uint32_t>(OOOPipelineConfig::DISPATCH_WIDTH * 4),
+                     createECallInstruction());
 
     auto& state = const_cast<CPUState&>(cpu->getCPUState());
     state.l1i_cache.reset();
@@ -519,7 +544,8 @@ TEST_F(OutOfOrderCPUTest, ExecuteStageDispatchesTwoInstructionsPerCycleWhenUnits
             ++busy_alu;
         }
     }
-    EXPECT_EQ(busy_alu, 2u) << "第四拍应把两条 ready ALU 指令同时送入执行单元";
+    EXPECT_EQ(busy_alu, OOOPipelineConfig::DISPATCH_WIDTH)
+        << "第四拍应按当前 dispatch 宽度把 ready ALU 指令送入执行单元";
 
     auto findStat = [&](const std::string& name) -> uint64_t {
         for (const auto& entry : cpu->getStats()) {
@@ -530,9 +556,9 @@ TEST_F(OutOfOrderCPUTest, ExecuteStageDispatchesTwoInstructionsPerCycleWhenUnits
         return 0;
     };
 
-    EXPECT_EQ(findStat("cpu.execute.dispatched"), 2u);
-    EXPECT_EQ(findStat("cpu.execute.dispatch_utilized_slots"), 2u);
-    EXPECT_EQ(findStat("cpu.execute.dispatch_slots"), 8u);
+    EXPECT_EQ(findStat("cpu.execute.dispatched"), OOOPipelineConfig::DISPATCH_WIDTH);
+    EXPECT_EQ(findStat("cpu.execute.dispatch_utilized_slots"), OOOPipelineConfig::DISPATCH_WIDTH);
+    EXPECT_EQ(findStat("cpu.execute.dispatch_slots"), OOOPipelineConfig::DISPATCH_WIDTH * 4);
 }
 
 TEST_F(OutOfOrderCPUTest, MExtensionMulInstruction) {

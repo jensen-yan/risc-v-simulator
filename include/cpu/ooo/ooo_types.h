@@ -70,12 +70,21 @@ struct OOOStatistics {
 };
 
 struct OOOPipelineConfig {
-    static constexpr size_t FETCH_WIDTH = 2;
-    static constexpr size_t DECODE_WIDTH = 2;
-    static constexpr size_t ISSUE_WIDTH = 2;
-    static constexpr size_t DISPATCH_WIDTH = 2;
-    static constexpr size_t COMMIT_WIDTH = 2;
-    static constexpr size_t FETCH_BUFFER_SIZE = 24;
+    static constexpr size_t FETCH_WIDTH = 4;
+    static constexpr size_t DECODE_WIDTH = 4;
+    static constexpr size_t ISSUE_WIDTH = 4;
+    static constexpr size_t DISPATCH_WIDTH = 4;
+    static constexpr size_t COMMIT_WIDTH = 4;
+    static constexpr size_t FETCH_BUFFER_SIZE = 48;
+    static constexpr size_t ROB_ENTRIES = 192;
+    static constexpr size_t RS_ENTRIES = 96;
+    static constexpr size_t PHYSICAL_REGS = 256;
+    static constexpr size_t ALU_UNITS = 4;
+    static constexpr size_t FP_UNITS = 4;
+    static constexpr size_t BRANCH_UNITS = 2;
+    static constexpr size_t LOAD_UNITS = 4;
+    static constexpr size_t STORE_UNITS = 4;
+    static constexpr size_t MEMORY_INFLIGHT_ENTRIES = 16;
 };
 
 

@@ -182,6 +182,33 @@ TEST(BlockingCacheTest, PendingMissLineMergesIntoExistingFillWithoutCountingAsHi
     EXPECT_TRUE(same_line_after_fill.hit);
 }
 
+TEST(BlockingCacheTest, PendingFillLineIsNotSelectedAsReplacementVictim) {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 64;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 2;
+
+    auto memory = std::make_shared<Memory>(1024);
+    BlockingCache cache(cfg);
+
+    const auto miss = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(miss.blocked);
+    EXPECT_FALSE(miss.hit);
+
+    const auto same_set_miss = cache.access(memory, 0x40, 4, CacheAccessType::Read);
+    EXPECT_TRUE(same_set_miss.blocked);
+    EXPECT_TRUE(same_set_miss.blocked_by_outstanding_limit);
+
+    drainMiss(cache);
+
+    const auto original_line = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(original_line.blocked);
+    EXPECT_TRUE(original_line.hit);
+}
+
 TEST(BlockingCacheTest, CommitStoreUpdatesCachedDataForLaterLoad) {
     auto memory = std::make_shared<Memory>(4096);
     memory->writeWord(0x120, 0x11111111);

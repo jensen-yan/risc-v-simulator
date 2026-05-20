@@ -78,8 +78,8 @@ public:
     void reset();
     void resetStats();
 
-    bool hasMissInFlight() const { return !outstanding_misses_.empty(); }
-    size_t outstandingMissCount() const { return outstanding_misses_.size(); }
+    bool hasMissInFlight() const { return !mshr_entries_.empty(); }
+    size_t outstandingMissCount() const { return mshr_entries_.size(); }
     int missServiceRemainingCycles() const;
     const BlockingCacheConfig& getConfig() const { return config_; }
     const BlockingCacheStats& getStats() const { return stats_; }
@@ -89,6 +89,7 @@ private:
         bool valid = false;
         bool dirty = false;
         bool prefetched = false;
+        bool fill_pending = false;
         uint64_t tag = 0;
         uint64_t lru_stamp = 0;
         std::vector<uint8_t> data;
@@ -102,12 +103,12 @@ private:
     uint64_t lru_clock_ = 0;
     BlockingCacheStats stats_{};
 
-    struct OutstandingMiss {
+    struct MshrEntry {
         int remaining_cycles = 0;
         std::vector<uint64_t> line_addresses;
     };
 
-    std::vector<OutstandingMiss> outstanding_misses_;
+    std::vector<MshrEntry> mshr_entries_;
 
     bool isBypassAccess(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size) const;
     CacheAccessResult ensureResident(std::shared_ptr<Memory> memory,
@@ -126,11 +127,14 @@ private:
     bool isLinePendingFill(uint64_t line_address) const;
     int pendingFillRemainingCycles(const std::vector<uint64_t>& line_addresses) const;
     bool wouldReadyHit(uint64_t address, uint8_t size) const;
-    CacheLine& allocateLine(uint64_t line_address, bool& dirty_eviction);
-    CacheLine& installLine(const std::shared_ptr<Memory>& memory,
+    bool hasAllocatableLine(uint64_t line_address) const;
+    CacheLine* allocateLine(uint64_t line_address, bool& dirty_eviction);
+    CacheLine* installLine(const std::shared_ptr<Memory>& memory,
                            uint64_t line_address,
                            bool& dirty_eviction,
-                           bool mark_prefetched);
+                           bool mark_prefetched,
+                           bool fill_pending);
+    void markFillComplete(uint64_t line_address);
     void maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory, uint64_t demand_line_address);
     size_t countUnusedPrefetchedLinesInSet(size_t set_index) const;
     void touchLine(CacheLine& line);

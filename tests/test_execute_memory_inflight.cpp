@@ -63,6 +63,7 @@ TEST(ExecuteMemoryInflightTest, TryMoveReleasesReservationStationAndExecutionUni
     EXPECT_EQ(state.memory_access_inflight[0].unit_type, ExecutionUnitType::LOAD);
     EXPECT_EQ(state.memory_access_inflight[0].state.instruction, inst);
     EXPECT_EQ(state.memory_access_inflight[0].state.remaining_cycles, 3);
+    EXPECT_EQ(state.memory_access_inflight[0].wait_latency_cycles, 3u);
     EXPECT_EQ(inst->get_rs_entry(), std::numeric_limits<RSEntry>::max());
     EXPECT_EQ(state.reservation_station->get_occupied_entry_count(), 0u);
     EXPECT_TRUE(state.reservation_station->is_execution_unit_available(ExecutionUnitType::LOAD));
@@ -113,6 +114,7 @@ TEST(ExecuteMemoryInflightTest, AdvanceCompletesLoadAndClearsEntry) {
     entry.state.instruction = inst;
     entry.state.remaining_cycles = 1;
     entry.state.result = 0xCAFE;
+    entry.wait_latency_cycles = 7;
 
     int completed = 0;
     ExecuteMemoryInflight::advance(
@@ -126,6 +128,9 @@ TEST(ExecuteMemoryInflightTest, AdvanceCompletesLoadAndClearsEntry) {
     EXPECT_EQ(completed, 1);
     EXPECT_FALSE(entry.valid);
     EXPECT_EQ(entry.state.instruction, nullptr);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_COUNT), 1u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_TOTAL), 7u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_MAX), 7u);
 }
 
 TEST(ExecuteMemoryInflightTest, AdvanceCompletesStoreWithZeroResult) {

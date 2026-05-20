@@ -176,22 +176,24 @@ void BlockingCache::invalidateRange(uint64_t address, uint64_t size) {
 }
 
 void BlockingCache::tick() {
-    if (outstanding_miss_cycles_.empty()) {
+    if (outstanding_misses_.empty()) {
         return;
     }
 
-    for (auto& remaining_cycles : outstanding_miss_cycles_) {
-        if (remaining_cycles > 0) {
-            --remaining_cycles;
+    for (auto& miss : outstanding_misses_) {
+        if (miss.remaining_cycles > 0) {
+            --miss.remaining_cycles;
         }
     }
-    outstanding_miss_cycles_.erase(
-        std::remove(outstanding_miss_cycles_.begin(), outstanding_miss_cycles_.end(), 0),
-        outstanding_miss_cycles_.end());
+    outstanding_misses_.erase(
+        std::remove_if(outstanding_misses_.begin(),
+                       outstanding_misses_.end(),
+                       [](const OutstandingMiss& miss) { return miss.remaining_cycles == 0; }),
+        outstanding_misses_.end());
 }
 
 void BlockingCache::flushInFlight() {
-    outstanding_miss_cycles_.clear();
+    outstanding_misses_.clear();
 }
 
 void BlockingCache::resetStats() {
@@ -248,13 +250,25 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
         return result;
     }
 
-    if (model_timing &&
-        outstanding_miss_cycles_.size() >= config_.max_outstanding_misses) {
-        result.blocked = true;
+    const auto line_addresses = enumerateLineAddresses(address, size);
+    const bool all_lines_hit = wouldReadyHit(address, size);
+    const int pending_fill_cycles = model_timing ? pendingFillRemainingCycles(line_addresses) : 0;
+    if (pending_fill_cycles > 0) {
+        result.hit = false;
+        result.latency_cycles = pending_fill_cycles;
+        result.merged_pending_fill = true;
         return result;
     }
 
-    const auto line_addresses = enumerateLineAddresses(address, size);
+    if (model_timing &&
+        !all_lines_hit &&
+        outstanding_misses_.size() >= config_.max_outstanding_misses) {
+        result.blocked = true;
+        result.blocked_by_outstanding_limit = true;
+        result.blocked_hit = false;
+        return result;
+    }
+
     bool overall_hit = true;
     bool dirty_eviction = false;
 
@@ -280,16 +294,22 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
 
     if (model_timing && !overall_hit) {
         maybeIssueNextLinePrefetch(memory, line_addresses.back());
-        outstanding_miss_cycles_.push_back(result.latency_cycles);
+        outstanding_misses_.push_back(OutstandingMiss{result.latency_cycles, line_addresses});
     }
     return result;
 }
 
 int BlockingCache::missServiceRemainingCycles() const {
-    if (outstanding_miss_cycles_.empty()) {
+    if (outstanding_misses_.empty()) {
         return 0;
     }
-    return *std::min_element(outstanding_miss_cycles_.begin(), outstanding_miss_cycles_.end());
+    const auto miss_it = std::min_element(
+        outstanding_misses_.begin(),
+        outstanding_misses_.end(),
+        [](const OutstandingMiss& lhs, const OutstandingMiss& rhs) {
+            return lhs.remaining_cycles < rhs.remaining_cycles;
+        });
+    return miss_it->remaining_cycles;
 }
 
 std::vector<uint64_t> BlockingCache::enumerateLineAddresses(uint64_t address, uint8_t size) const {
@@ -335,6 +355,61 @@ BlockingCache::CacheLine* BlockingCache::findLine(uint64_t line_address) {
         }
     }
     return nullptr;
+}
+
+const BlockingCache::CacheLine* BlockingCache::findLine(uint64_t line_address) const {
+    const size_t set_index = lineToSetIndex(line_address);
+    const uint64_t tag = lineToTag(line_address);
+    const auto& set = sets_[set_index];
+    for (const auto& line : set) {
+        if (line.valid && line.tag == tag) {
+            return &line;
+        }
+    }
+    return nullptr;
+}
+
+bool BlockingCache::isLinePendingFill(uint64_t line_address) const {
+    for (const auto& miss : outstanding_misses_) {
+        if (std::find(miss.line_addresses.begin(), miss.line_addresses.end(), line_address) !=
+            miss.line_addresses.end()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int BlockingCache::pendingFillRemainingCycles(const std::vector<uint64_t>& line_addresses) const {
+    int remaining_cycles = 0;
+    for (const uint64_t line_address : line_addresses) {
+        for (const auto& miss : outstanding_misses_) {
+            if (std::find(miss.line_addresses.begin(), miss.line_addresses.end(), line_address) !=
+                miss.line_addresses.end()) {
+                remaining_cycles = std::max(remaining_cycles, miss.remaining_cycles);
+            }
+        }
+    }
+    return remaining_cycles;
+}
+
+bool BlockingCache::wouldReadyHit(uint64_t address, uint8_t size) const {
+    if (size == 0) {
+        return false;
+    }
+
+    const uint64_t size_minus_one = static_cast<uint64_t>(size) - 1;
+    if (address > std::numeric_limits<uint64_t>::max() - size_minus_one) {
+        return false;
+    }
+
+    const uint64_t start_line = address / config_.line_size_bytes;
+    const uint64_t end_line = (address + size_minus_one) / config_.line_size_bytes;
+    for (uint64_t line = start_line; line <= end_line; ++line) {
+        if (findLine(line) == nullptr || isLinePendingFill(line)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 BlockingCache::CacheLine& BlockingCache::allocateLine(uint64_t line_address, bool& dirty_eviction) {

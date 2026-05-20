@@ -91,6 +91,12 @@ ExecuteLoadAccess::Result ExecuteLoadAccess::perform(ExecutionUnit& unit, CPUSta
             if (cache_result.blocked) {
                 unit.dcache.waiting = true;
                 unit.remaining_cycles = 1;
+                if (cache_result.blocked_by_outstanding_limit) {
+                    state.perf_counters.increment(PerfCounterId::CACHE_L1D_BLOCKED_BY_OUTSTANDING_LIMIT);
+                }
+                if (cache_result.blocked_hit) {
+                    state.perf_counters.increment(PerfCounterId::CACHE_L1D_HIT_BLOCKED_BY_OUTSTANDING_LIMIT);
+                }
                 state.perf_counters.increment(PerfCounterId::CACHE_L1D_STALL_CYCLES_LOAD);
                 return Result::WaitingForCache;
             }

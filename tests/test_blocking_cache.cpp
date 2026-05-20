@@ -123,6 +123,65 @@ TEST(BlockingCacheTest, AccessAllowsMultipleOutstandingMissesUpToConfiguredLimit
     EXPECT_FALSE(retry.hit);
 }
 
+TEST(BlockingCacheTest, HitAccessCanProceedWhileMissIsInFlight) {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 128;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 1;
+
+    auto memory = std::make_shared<Memory>(1024);
+    BlockingCache cache(cfg);
+
+    const auto installed = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(installed.blocked);
+    EXPECT_FALSE(installed.hit);
+    drainMiss(cache);
+
+    const auto miss = cache.access(memory, 0x40, 4, CacheAccessType::Read);
+    EXPECT_FALSE(miss.blocked);
+    EXPECT_FALSE(miss.hit);
+
+    const auto blocked_hit = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(blocked_hit.blocked);
+    EXPECT_TRUE(blocked_hit.hit);
+
+    const auto blocked_miss = cache.access(memory, 0x80, 4, CacheAccessType::Read);
+    EXPECT_TRUE(blocked_miss.blocked);
+    EXPECT_FALSE(blocked_miss.blocked_hit);
+}
+
+TEST(BlockingCacheTest, PendingMissLineMergesIntoExistingFillWithoutCountingAsHit) {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 128;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 2;
+
+    auto memory = std::make_shared<Memory>(1024);
+    BlockingCache cache(cfg);
+
+    const auto miss = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(miss.blocked);
+    EXPECT_FALSE(miss.hit);
+
+    const auto same_line_while_pending = cache.access(memory, 0x4, 4, CacheAccessType::Read);
+    EXPECT_FALSE(same_line_while_pending.blocked);
+    EXPECT_FALSE(same_line_while_pending.hit);
+    EXPECT_TRUE(same_line_while_pending.merged_pending_fill);
+    EXPECT_EQ(same_line_while_pending.latency_cycles, miss.latency_cycles);
+
+    drainMiss(cache);
+
+    const auto same_line_after_fill = cache.access(memory, 0x4, 4, CacheAccessType::Read);
+    EXPECT_FALSE(same_line_after_fill.blocked);
+    EXPECT_TRUE(same_line_after_fill.hit);
+}
+
 TEST(BlockingCacheTest, CommitStoreUpdatesCachedDataForLaterLoad) {
     auto memory = std::make_shared<Memory>(4096);
     memory->writeWord(0x120, 0x11111111);

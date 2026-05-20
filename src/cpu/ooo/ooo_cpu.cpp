@@ -133,6 +133,42 @@ void sampleStoreBufferOccupancy(CPUState& state) {
     }
 }
 
+void sampleDCacheOutstandingOccupancy(CPUState& state) {
+    if (!state.l1d_cache) {
+        return;
+    }
+
+    const uint64_t occupancy = static_cast<uint64_t>(state.l1d_cache->outstandingMissCount());
+    state.perf_counters.increment(PerfCounterId::CACHE_L1D_OUTSTANDING_OCCUPANCY_SAMPLES);
+    state.perf_counters.increment(PerfCounterId::CACHE_L1D_OUTSTANDING_OCCUPANCY_TOTAL, occupancy);
+
+    const uint64_t high_watermark =
+        state.perf_counters.value(PerfCounterId::CACHE_L1D_OUTSTANDING_OCCUPANCY_HIGH_WATERMARK);
+    if (occupancy > high_watermark) {
+        state.perf_counters.increment(PerfCounterId::CACHE_L1D_OUTSTANDING_OCCUPANCY_HIGH_WATERMARK,
+                                      occupancy - high_watermark);
+    }
+}
+
+void sampleMemoryInflightOccupancy(CPUState& state) {
+    uint64_t occupancy = 0;
+    for (const auto& entry : state.memory_access_inflight) {
+        if (entry.valid) {
+            ++occupancy;
+        }
+    }
+
+    state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_OCCUPANCY_SAMPLES);
+    state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_OCCUPANCY_TOTAL, occupancy);
+
+    const uint64_t high_watermark =
+        state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_OCCUPANCY_HIGH_WATERMARK);
+    if (occupancy > high_watermark) {
+        state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_OCCUPANCY_HIGH_WATERMARK,
+                                      occupancy - high_watermark);
+    }
+}
+
 } // namespace
 
 void setOutOfOrderL1DNextLinePrefetchEnabled(bool enabled) {
@@ -225,6 +261,8 @@ void OutOfOrderCPU::step() {
         cpu_state_.perf_counters.increment(PerfCounterId::CYCLES);
         sampleRobOccupancy(cpu_state_);
         sampleStoreBufferOccupancy(cpu_state_);
+        sampleDCacheOutstandingOccupancy(cpu_state_);
+        sampleMemoryInflightOccupancy(cpu_state_);
     } catch (const MemoryException& e) {
         handle_exception(e.what(), cpu_state_.pc);
     } catch (const SimulatorException& e) {
@@ -528,6 +566,43 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
     os << std::left << std::setw(40) << "cpu.store_buffer.occupancy_avg"
        << std::right << std::setw(16) << std::fixed << std::setprecision(6) << store_buffer_avg
        << " # Average occupied store buffer entries per cycle\n";
+
+    const uint64_t l1d_outstanding_samples =
+        cpu_state_.perf_counters.value(PerfCounterId::CACHE_L1D_OUTSTANDING_OCCUPANCY_SAMPLES);
+    const uint64_t l1d_outstanding_total =
+        cpu_state_.perf_counters.value(PerfCounterId::CACHE_L1D_OUTSTANDING_OCCUPANCY_TOTAL);
+    const double l1d_outstanding_avg =
+        l1d_outstanding_samples == 0
+            ? 0.0
+            : static_cast<double>(l1d_outstanding_total) / static_cast<double>(l1d_outstanding_samples);
+    os << std::left << std::setw(40) << "cpu.cache.l1d.outstanding_occupancy_avg"
+       << std::right << std::setw(16) << std::fixed << std::setprecision(6) << l1d_outstanding_avg
+       << " # Average L1D outstanding miss entries per sample\n";
+
+    const uint64_t memory_inflight_samples =
+        cpu_state_.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_OCCUPANCY_SAMPLES);
+    const uint64_t memory_inflight_total =
+        cpu_state_.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_OCCUPANCY_TOTAL);
+    const double memory_inflight_avg =
+        memory_inflight_samples == 0
+            ? 0.0
+            : static_cast<double>(memory_inflight_total) / static_cast<double>(memory_inflight_samples);
+    os << std::left << std::setw(40) << "cpu.memory.inflight_occupancy_avg"
+       << std::right << std::setw(16) << std::fixed << std::setprecision(6) << memory_inflight_avg
+       << " # Average memory inflight queue entries per sample\n";
+
+    const uint64_t inflight_load_latency_count =
+        cpu_state_.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_COUNT);
+    const uint64_t inflight_load_latency_total =
+        cpu_state_.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_TOTAL);
+    const double inflight_load_latency_avg =
+        inflight_load_latency_count == 0
+            ? 0.0
+            : static_cast<double>(inflight_load_latency_total) /
+                  static_cast<double>(inflight_load_latency_count);
+    os << std::left << std::setw(40) << "cpu.memory.inflight_load_miss_latency_avg"
+       << std::right << std::setw(16) << std::fixed << std::setprecision(6) << inflight_load_latency_avg
+       << " # Average wait cycles for load misses completed through the memory inflight queue\n";
 
     // ===== Topdown-lite (以Execute每周期最多dispatch 1条为slot口径) =====
     const uint64_t execute_frontend_starved =

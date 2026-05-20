@@ -80,6 +80,7 @@ struct MemoryAccessInFlight {
     bool valid = false;
     ExecutionUnitType unit_type = ExecutionUnitType::LOAD;
     ExecutionUnit state;
+    uint64_t wait_latency_cycles = 0;
 };
 
 struct ICacheFetchState {
@@ -157,6 +158,7 @@ inline void resetMemoryAccessInFlightState(MemoryAccessInFlight& entry) {
     entry.valid = false;
     entry.unit_type = ExecutionUnitType::LOAD;
     resetExecutionUnitState(entry.state);
+    entry.wait_latency_cycles = 0;
 }
 
 template<typename UnitContainer>

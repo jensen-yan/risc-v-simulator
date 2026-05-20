@@ -26,6 +26,9 @@ bool ExecuteMemoryInflight::tryMove(ExecutionUnit& unit,
         entry.valid = true;
         entry.unit_type = unit_type;
         entry.state = unit;
+        entry.wait_latency_cycles = unit.remaining_cycles > 0
+                                        ? static_cast<uint64_t>(unit.remaining_cycles)
+                                        : 0;
         const RSEntry rs_entry = unit.instruction->get_rs_entry();
         state.reservation_station->release_entry(rs_entry);
         unit.instruction->set_rs_entry(std::numeric_limits<RSEntry>::max());
@@ -68,6 +71,15 @@ void ExecuteMemoryInflight::advance(CPUState& state, const CompletionCallback& c
                  "inst=%" PRId64 " LOAD inflight done, result=0x%" PRIx64 " -> CDB",
                  inflight.instruction->get_instruction_id(),
                  inflight.result);
+            state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_COUNT);
+            state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_TOTAL,
+                                          entry.wait_latency_cycles);
+            const uint64_t max_latency =
+                state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_MAX);
+            if (entry.wait_latency_cycles > max_latency) {
+                state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_MAX,
+                                              entry.wait_latency_cycles - max_latency);
+            }
             ExecuteMemoryOrder::recordLoadReplayBucket(inflight.instruction, state);
             complete(inflight, ExecutionUnitType::LOAD);
         } else {

@@ -95,7 +95,9 @@ TEST(OutOfOrderCacheTest, DCacheLoadMissThenHit) {
     const auto stats = cpu->getStats();
     EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.read_accesses"), 2u);
     EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.misses"), 1u);
-    EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.hits"), 1u);
+    EXPECT_GE(statValueByName(stats, "cpu.cache.l1d.hits") +
+                  statValueByName(stats, "cpu.cache.l1d.pending_fill_merges"),
+              1u);
 }
 
 TEST(OutOfOrderCacheTest, StorePenaltyCountedInExecuteStage) {

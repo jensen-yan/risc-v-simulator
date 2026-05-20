@@ -35,6 +35,9 @@ struct CacheAccessResult {
     bool hit = false;
     int latency_cycles = 0;
     bool blocked = false;
+    bool blocked_hit = false;
+    bool blocked_by_outstanding_limit = false;
+    bool merged_pending_fill = false;
     bool dirty_eviction = false;
 };
 
@@ -75,7 +78,8 @@ public:
     void reset();
     void resetStats();
 
-    bool hasMissInFlight() const { return !outstanding_miss_cycles_.empty(); }
+    bool hasMissInFlight() const { return !outstanding_misses_.empty(); }
+    size_t outstandingMissCount() const { return outstanding_misses_.size(); }
     int missServiceRemainingCycles() const;
     const BlockingCacheConfig& getConfig() const { return config_; }
     const BlockingCacheStats& getStats() const { return stats_; }
@@ -98,7 +102,12 @@ private:
     uint64_t lru_clock_ = 0;
     BlockingCacheStats stats_{};
 
-    std::vector<int> outstanding_miss_cycles_;
+    struct OutstandingMiss {
+        int remaining_cycles = 0;
+        std::vector<uint64_t> line_addresses;
+    };
+
+    std::vector<OutstandingMiss> outstanding_misses_;
 
     bool isBypassAccess(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size) const;
     CacheAccessResult ensureResident(std::shared_ptr<Memory> memory,
@@ -113,6 +122,10 @@ private:
     uint64_t lineToBaseAddress(uint64_t line_address) const;
 
     CacheLine* findLine(uint64_t line_address);
+    const CacheLine* findLine(uint64_t line_address) const;
+    bool isLinePendingFill(uint64_t line_address) const;
+    int pendingFillRemainingCycles(const std::vector<uint64_t>& line_addresses) const;
+    bool wouldReadyHit(uint64_t address, uint8_t size) const;
     CacheLine& allocateLine(uint64_t line_address, bool& dirty_eviction);
     CacheLine& installLine(const std::shared_ptr<Memory>& memory,
                            uint64_t line_address,

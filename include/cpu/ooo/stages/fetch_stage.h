@@ -49,7 +49,7 @@ public:
 
         Address translateInstructionAddress(Address virtual_address, size_t size) const;
         std::shared_ptr<Memory> memory() const { return state_.memory; }
-        BlockingCache* l1iCache() const { return state_.l1i_cache.get(); }
+        NonBlockingCache* l1iCache() const { return state_.l1i_cache.get(); }
         Decoder& decoder() { return state_.decoder; }
         BranchPredictor* branchPredictor() const { return state_.branch_predictor.get(); }
 

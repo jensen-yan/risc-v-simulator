@@ -15,7 +15,7 @@ enum class CacheWritePolicy : uint8_t {
     WriteBackWriteAllocate
 };
 
-struct BlockingCacheConfig {
+struct NonBlockingCacheConfig {
     size_t size_bytes = 32 * 1024;
     size_t line_size_bytes = 64;
     size_t associativity = 4;
@@ -42,7 +42,7 @@ struct CacheAccessResult {
     bool dirty_eviction = false;
 };
 
-struct BlockingCacheStats {
+struct NonBlockingCacheStats {
     uint64_t prefetch_requests = 0;
     uint64_t prefetch_issued = 0;
     uint64_t prefetch_useful_hits = 0;
@@ -51,9 +51,9 @@ struct BlockingCacheStats {
     uint64_t prefetch_dropped_set_throttle = 0;
 };
 
-class BlockingCache {
+class NonBlockingCache {
 public:
-    explicit BlockingCache(const BlockingCacheConfig& config);
+    explicit NonBlockingCache(const NonBlockingCacheConfig& config);
 
     // 时序访问：用于仅需要命中/未命中延迟的路径（例如Store execute阶段）。
     CacheAccessResult access(std::shared_ptr<Memory> memory,
@@ -82,8 +82,8 @@ public:
     bool hasMissInFlight() const { return !mshr_entries_.empty(); }
     size_t outstandingMissCount() const { return demandMshrCount(); }
     int missServiceRemainingCycles() const;
-    const BlockingCacheConfig& getConfig() const { return config_; }
-    const BlockingCacheStats& getStats() const { return stats_; }
+    const NonBlockingCacheConfig& getConfig() const { return config_; }
+    const NonBlockingCacheStats& getStats() const { return stats_; }
 
 private:
     struct CacheLine {
@@ -98,11 +98,11 @@ private:
 
     using CacheSet = std::vector<CacheLine>;
 
-    BlockingCacheConfig config_;
+    NonBlockingCacheConfig config_;
     size_t set_count_ = 0;
     std::vector<CacheSet> sets_;
     uint64_t lru_clock_ = 0;
-    BlockingCacheStats stats_{};
+    NonBlockingCacheStats stats_{};
 
     struct DeferredWriteback {
         bool valid = false;

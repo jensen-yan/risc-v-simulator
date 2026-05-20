@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "cpu/ooo/cache/blocking_cache.h"
+#include "cpu/ooo/cache/non_blocking_cache.h"
 #include "cpu/ooo/execute_dcache_access.h"
 #include "core/memory.h"
 
@@ -38,14 +38,14 @@ TEST(ExecuteDCacheAccessTest, NoCacheCompletesImmediately) {
 TEST(ExecuteDCacheAccessTest, CacheMissMarksRequestSentAndCountsLatency) {
     CPUState state;
     state.memory = std::make_shared<Memory>(4096);
-    BlockingCacheConfig config;
+    NonBlockingCacheConfig config;
     config.size_bytes = 64;
     config.line_size_bytes = 16;
     config.associativity = 1;
     config.hit_latency = 1;
     config.miss_penalty = 4;
     config.max_outstanding_misses = 1;
-    state.l1d_cache = std::make_unique<BlockingCache>(config);
+    state.l1d_cache = std::make_unique<NonBlockingCache>(config);
     ExecutionUnit unit;
     unit.load_address = 0x100;
     unit.load_size = 4;
@@ -64,14 +64,14 @@ TEST(ExecuteDCacheAccessTest, CacheMissMarksRequestSentAndCountsLatency) {
 TEST(ExecuteDCacheAccessTest, CacheBlockedKeepsRequestUnsentAndCountsOneStall) {
     CPUState state;
     state.memory = std::make_shared<Memory>(4096);
-    BlockingCacheConfig config;
+    NonBlockingCacheConfig config;
     config.size_bytes = 64;
     config.line_size_bytes = 16;
     config.associativity = 1;
     config.hit_latency = 1;
     config.miss_penalty = 4;
     config.max_outstanding_misses = 1;
-    state.l1d_cache = std::make_unique<BlockingCache>(config);
+    state.l1d_cache = std::make_unique<NonBlockingCache>(config);
     static_cast<void>(state.l1d_cache->access(state.memory, 0x100, 4, CacheAccessType::Read));
     ExecutionUnit unit;
     unit.load_address = 0x200;
@@ -93,14 +93,14 @@ TEST(ExecuteDCacheAccessTest, CacheBlockedKeepsRequestUnsentAndCountsOneStall) {
 TEST(ExecuteDCacheAccessTest, PendingFillMergeSendsRequestAndCountsLatency) {
     CPUState state;
     state.memory = std::make_shared<Memory>(4096);
-    BlockingCacheConfig config;
+    NonBlockingCacheConfig config;
     config.size_bytes = 64;
     config.line_size_bytes = 16;
     config.associativity = 1;
     config.hit_latency = 1;
     config.miss_penalty = 4;
     config.max_outstanding_misses = 2;
-    state.l1d_cache = std::make_unique<BlockingCache>(config);
+    state.l1d_cache = std::make_unique<NonBlockingCache>(config);
     static_cast<void>(state.l1d_cache->access(state.memory, 0x100, 4, CacheAccessType::Read));
     ExecutionUnit unit;
     unit.load_address = 0x104;
@@ -122,14 +122,14 @@ TEST(ExecuteDCacheAccessTest, PendingFillMergeSendsRequestAndCountsLatency) {
 TEST(ExecuteDCacheAccessTest, AllowsHitWhileMissIsInFlight) {
     CPUState state;
     state.memory = std::make_shared<Memory>(4096);
-    BlockingCacheConfig config;
+    NonBlockingCacheConfig config;
     config.size_bytes = 64;
     config.line_size_bytes = 16;
     config.associativity = 1;
     config.hit_latency = 1;
     config.miss_penalty = 4;
     config.max_outstanding_misses = 1;
-    state.l1d_cache = std::make_unique<BlockingCache>(config);
+    state.l1d_cache = std::make_unique<NonBlockingCache>(config);
     static_cast<void>(state.l1d_cache->access(state.memory, 0x100, 4, CacheAccessType::Read));
     while (state.l1d_cache->hasMissInFlight()) {
         state.l1d_cache->tick();

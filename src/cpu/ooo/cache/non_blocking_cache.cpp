@@ -1,4 +1,4 @@
-#include "cpu/ooo/cache/blocking_cache.h"
+#include "cpu/ooo/cache/non_blocking_cache.h"
 
 #include "core/memory.h"
 
@@ -23,7 +23,7 @@ bool rangesOverlap(uint64_t lhs_addr, uint64_t lhs_size, uint64_t rhs_addr, uint
 
 } // namespace
 
-BlockingCache::BlockingCache(const BlockingCacheConfig& config) : config_(config) {
+NonBlockingCache::NonBlockingCache(const NonBlockingCacheConfig& config) : config_(config) {
     if (config_.line_size_bytes == 0 || config_.associativity == 0 || config_.size_bytes == 0) {
         throw std::invalid_argument("cache config cannot contain zero values");
     }
@@ -49,14 +49,14 @@ BlockingCache::BlockingCache(const BlockingCacheConfig& config) : config_(config
     }
 }
 
-CacheAccessResult BlockingCache::access(std::shared_ptr<Memory> memory,
+CacheAccessResult NonBlockingCache::access(std::shared_ptr<Memory> memory,
                                         uint64_t address,
                                         uint8_t size,
                                         CacheAccessType access_type) {
     return ensureResident(std::move(memory), address, size, access_type, /*model_timing=*/true);
 }
 
-CacheAccessResult BlockingCache::load(std::shared_ptr<Memory> memory,
+CacheAccessResult NonBlockingCache::load(std::shared_ptr<Memory> memory,
                                       uint64_t address,
                                       uint8_t size,
                                       uint64_t& value) {
@@ -84,7 +84,7 @@ CacheAccessResult BlockingCache::load(std::shared_ptr<Memory> memory,
     return result;
 }
 
-CacheAccessResult BlockingCache::fetchInstruction(std::shared_ptr<Memory> memory,
+CacheAccessResult NonBlockingCache::fetchInstruction(std::shared_ptr<Memory> memory,
                                                   uint64_t address,
                                                   Instruction& instruction) {
     if ((address & 0x1ULL) != 0) {
@@ -134,7 +134,7 @@ CacheAccessResult BlockingCache::fetchInstruction(std::shared_ptr<Memory> memory
     return merged;
 }
 
-void BlockingCache::commitStore(std::shared_ptr<Memory> memory, uint64_t address, uint8_t size, uint64_t value) {
+void NonBlockingCache::commitStore(std::shared_ptr<Memory> memory, uint64_t address, uint8_t size, uint64_t value) {
     if (size == 0) {
         return;
     }
@@ -158,7 +158,7 @@ void BlockingCache::commitStore(std::shared_ptr<Memory> memory, uint64_t address
     writeMemoryValue(memory, address, size, value);
 }
 
-void BlockingCache::invalidateRange(uint64_t address, uint64_t size) {
+void NonBlockingCache::invalidateRange(uint64_t address, uint64_t size) {
     if (size == 0) {
         return;
     }
@@ -180,7 +180,7 @@ void BlockingCache::invalidateRange(uint64_t address, uint64_t size) {
     }
 }
 
-void BlockingCache::tick() {
+void NonBlockingCache::tick() {
     if (mshr_entries_.empty()) {
         return;
     }
@@ -200,18 +200,18 @@ void BlockingCache::tick() {
         mshr_entries_.end());
 }
 
-void BlockingCache::flushInFlight() {
+void NonBlockingCache::flushInFlight() {
     for (const auto& entry : mshr_entries_) {
         completeMshrFill(entry);
     }
     mshr_entries_.clear();
 }
 
-void BlockingCache::resetStats() {
-    stats_ = BlockingCacheStats{};
+void NonBlockingCache::resetStats() {
+    stats_ = NonBlockingCacheStats{};
 }
 
-void BlockingCache::reset() {
+void NonBlockingCache::reset() {
     flushInFlight();
     lru_clock_ = 0;
     resetStats();
@@ -228,7 +228,7 @@ void BlockingCache::reset() {
     }
 }
 
-bool BlockingCache::isBypassAccess(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size) const {
+bool NonBlockingCache::isBypassAccess(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size) const {
     if (!memory || size == 0) {
         return true;
     }
@@ -241,7 +241,7 @@ bool BlockingCache::isBypassAccess(const std::shared_ptr<Memory>& memory, uint64
     return false;
 }
 
-CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
+CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memory,
                                                 uint64_t address,
                                                 uint8_t size,
                                                 CacheAccessType access_type,
@@ -377,7 +377,7 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
     return result;
 }
 
-int BlockingCache::missServiceRemainingCycles() const {
+int NonBlockingCache::missServiceRemainingCycles() const {
     if (mshr_entries_.empty()) {
         return 0;
     }
@@ -390,7 +390,7 @@ int BlockingCache::missServiceRemainingCycles() const {
     return miss_it->remaining_cycles;
 }
 
-std::vector<uint64_t> BlockingCache::enumerateLineAddresses(uint64_t address, uint8_t size) const {
+std::vector<uint64_t> NonBlockingCache::enumerateLineAddresses(uint64_t address, uint8_t size) const {
     if (size == 0) {
         throw SimulatorException("cache access size must be non-zero");
     }
@@ -411,19 +411,19 @@ std::vector<uint64_t> BlockingCache::enumerateLineAddresses(uint64_t address, ui
     return line_addresses;
 }
 
-size_t BlockingCache::lineToSetIndex(uint64_t line_address) const {
+size_t NonBlockingCache::lineToSetIndex(uint64_t line_address) const {
     return static_cast<size_t>(line_address & (set_count_ - 1));
 }
 
-uint64_t BlockingCache::lineToTag(uint64_t line_address) const {
+uint64_t NonBlockingCache::lineToTag(uint64_t line_address) const {
     return line_address / set_count_;
 }
 
-uint64_t BlockingCache::lineToBaseAddress(uint64_t line_address) const {
+uint64_t NonBlockingCache::lineToBaseAddress(uint64_t line_address) const {
     return line_address * config_.line_size_bytes;
 }
 
-BlockingCache::CacheLine* BlockingCache::findLine(uint64_t line_address) {
+NonBlockingCache::CacheLine* NonBlockingCache::findLine(uint64_t line_address) {
     const size_t set_index = lineToSetIndex(line_address);
     const uint64_t tag = lineToTag(line_address);
     auto& set = sets_[set_index];
@@ -435,7 +435,7 @@ BlockingCache::CacheLine* BlockingCache::findLine(uint64_t line_address) {
     return nullptr;
 }
 
-const BlockingCache::CacheLine* BlockingCache::findLine(uint64_t line_address) const {
+const NonBlockingCache::CacheLine* NonBlockingCache::findLine(uint64_t line_address) const {
     const size_t set_index = lineToSetIndex(line_address);
     const uint64_t tag = lineToTag(line_address);
     const auto& set = sets_[set_index];
@@ -447,7 +447,7 @@ const BlockingCache::CacheLine* BlockingCache::findLine(uint64_t line_address) c
     return nullptr;
 }
 
-BlockingCache::MshrEntry* BlockingCache::findMshrEntry(uint64_t line_address) {
+NonBlockingCache::MshrEntry* NonBlockingCache::findMshrEntry(uint64_t line_address) {
     auto it = std::find_if(
         mshr_entries_.begin(),
         mshr_entries_.end(),
@@ -455,7 +455,7 @@ BlockingCache::MshrEntry* BlockingCache::findMshrEntry(uint64_t line_address) {
     return it == mshr_entries_.end() ? nullptr : &*it;
 }
 
-const BlockingCache::MshrEntry* BlockingCache::findMshrEntry(uint64_t line_address) const {
+const NonBlockingCache::MshrEntry* NonBlockingCache::findMshrEntry(uint64_t line_address) const {
     auto it = std::find_if(
         mshr_entries_.begin(),
         mshr_entries_.end(),
@@ -463,26 +463,26 @@ const BlockingCache::MshrEntry* BlockingCache::findMshrEntry(uint64_t line_addre
     return it == mshr_entries_.end() ? nullptr : &*it;
 }
 
-bool BlockingCache::isLinePendingFill(uint64_t line_address) const {
+bool NonBlockingCache::isLinePendingFill(uint64_t line_address) const {
     const CacheLine* line = findLine(line_address);
     return line != nullptr && line->fill_pending;
 }
 
-size_t BlockingCache::demandMshrCount() const {
+size_t NonBlockingCache::demandMshrCount() const {
     return static_cast<size_t>(std::count_if(
         mshr_entries_.begin(),
         mshr_entries_.end(),
         [](const MshrEntry& entry) { return entry.has_demand_waiter; }));
 }
 
-size_t BlockingCache::prefetchMshrCount() const {
+size_t NonBlockingCache::prefetchMshrCount() const {
     return static_cast<size_t>(std::count_if(
         mshr_entries_.begin(),
         mshr_entries_.end(),
         [](const MshrEntry& entry) { return !entry.has_demand_waiter; }));
 }
 
-int BlockingCache::pendingFillRemainingCycles(const std::vector<uint64_t>& line_addresses) const {
+int NonBlockingCache::pendingFillRemainingCycles(const std::vector<uint64_t>& line_addresses) const {
     int remaining_cycles = 0;
     for (const uint64_t line_address : line_addresses) {
         if (const MshrEntry* entry = findMshrEntry(line_address)) {
@@ -492,7 +492,7 @@ int BlockingCache::pendingFillRemainingCycles(const std::vector<uint64_t>& line_
     return remaining_cycles;
 }
 
-bool BlockingCache::wouldReadyHit(uint64_t address, uint8_t size) const {
+bool NonBlockingCache::wouldReadyHit(uint64_t address, uint8_t size) const {
     if (size == 0) {
         return false;
     }
@@ -512,7 +512,7 @@ bool BlockingCache::wouldReadyHit(uint64_t address, uint8_t size) const {
     return true;
 }
 
-bool BlockingCache::hasAllocatableLine(uint64_t line_address) const {
+bool NonBlockingCache::hasAllocatableLine(uint64_t line_address) const {
     const size_t set_index = lineToSetIndex(line_address);
     const auto& set = sets_[set_index];
     return std::any_of(set.begin(), set.end(), [](const CacheLine& line) {
@@ -520,7 +520,7 @@ bool BlockingCache::hasAllocatableLine(uint64_t line_address) const {
     });
 }
 
-bool BlockingCache::hasCleanAllocatableLine(uint64_t line_address) const {
+bool NonBlockingCache::hasCleanAllocatableLine(uint64_t line_address) const {
     const size_t set_index = lineToSetIndex(line_address);
     const auto& set = sets_[set_index];
     return std::any_of(set.begin(), set.end(), [](const CacheLine& line) {
@@ -528,7 +528,7 @@ bool BlockingCache::hasCleanAllocatableLine(uint64_t line_address) const {
     });
 }
 
-BlockingCache::CacheLine* BlockingCache::allocateLine(uint64_t line_address, bool& dirty_eviction) {
+NonBlockingCache::CacheLine* NonBlockingCache::allocateLine(uint64_t line_address, bool& dirty_eviction) {
     const size_t set_index = lineToSetIndex(line_address);
     auto& set = sets_[set_index];
 
@@ -556,7 +556,7 @@ BlockingCache::CacheLine* BlockingCache::allocateLine(uint64_t line_address, boo
     return &*victim_it;
 }
 
-BlockingCache::CacheLine* BlockingCache::allocateCleanLine(uint64_t line_address) {
+NonBlockingCache::CacheLine* NonBlockingCache::allocateCleanLine(uint64_t line_address) {
     const size_t set_index = lineToSetIndex(line_address);
     auto& set = sets_[set_index];
 
@@ -582,7 +582,7 @@ BlockingCache::CacheLine* BlockingCache::allocateCleanLine(uint64_t line_address
     return &*victim_it;
 }
 
-BlockingCache::CacheLine* BlockingCache::installLine(const std::shared_ptr<Memory>& memory,
+NonBlockingCache::CacheLine* NonBlockingCache::installLine(const std::shared_ptr<Memory>& memory,
                                                      uint64_t line_address,
                                                      bool& dirty_eviction,
                                                      bool mark_prefetched,
@@ -620,7 +620,7 @@ BlockingCache::CacheLine* BlockingCache::installLine(const std::shared_ptr<Memor
     return allocated;
 }
 
-bool BlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
+bool NonBlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
                                   uint64_t line_address,
                                   bool& dirty_eviction) {
     if (findMshrEntry(line_address) != nullptr) {
@@ -647,7 +647,7 @@ bool BlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
     return true;
 }
 
-bool BlockingCache::startPrefetchFill(const std::shared_ptr<Memory>& memory, uint64_t line_address) {
+bool NonBlockingCache::startPrefetchFill(const std::shared_ptr<Memory>& memory, uint64_t line_address) {
     if (findMshrEntry(line_address) != nullptr || prefetchMshrCount() >= config_.max_outstanding_prefetches) {
         return false;
     }
@@ -666,7 +666,7 @@ bool BlockingCache::startPrefetchFill(const std::shared_ptr<Memory>& memory, uin
     return true;
 }
 
-void BlockingCache::completeMshrFill(const MshrEntry& entry) {
+void NonBlockingCache::completeMshrFill(const MshrEntry& entry) {
     if (entry.victim_writeback.valid && entry.memory) {
         writebackDataToMemory(entry.memory, entry.victim_writeback.line_address, entry.victim_writeback.data);
     }
@@ -707,7 +707,7 @@ void BlockingCache::completeMshrFill(const MshrEntry& entry) {
     touchLine(*line);
 }
 
-void BlockingCache::completePendingFills(const std::vector<uint64_t>& line_addresses) {
+void NonBlockingCache::completePendingFills(const std::vector<uint64_t>& line_addresses) {
     for (const uint64_t line_address : line_addresses) {
         auto it = std::find_if(
             mshr_entries_.begin(),
@@ -722,7 +722,7 @@ void BlockingCache::completePendingFills(const std::vector<uint64_t>& line_addre
     }
 }
 
-void BlockingCache::cancelPendingFill(uint64_t line_address) {
+void NonBlockingCache::cancelPendingFill(uint64_t line_address) {
     auto it = mshr_entries_.begin();
     while (it != mshr_entries_.end()) {
         if (it->line_address != line_address) {
@@ -737,7 +737,7 @@ void BlockingCache::cancelPendingFill(uint64_t line_address) {
     }
 }
 
-bool BlockingCache::cancelOnePendingPrefetchInSet(size_t set_index) {
+bool NonBlockingCache::cancelOnePendingPrefetchInSet(size_t set_index) {
     auto it = std::find_if(
         mshr_entries_.begin(),
         mshr_entries_.end(),
@@ -762,7 +762,7 @@ bool BlockingCache::cancelOnePendingPrefetchInSet(size_t set_index) {
     return true;
 }
 
-void BlockingCache::maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory,
+void NonBlockingCache::maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory,
                                                uint64_t demand_line_address) {
     if (!config_.enable_next_line_prefetch || !memory) {
         return;
@@ -795,7 +795,7 @@ void BlockingCache::maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& me
     stats_.prefetch_issued++;
 }
 
-size_t BlockingCache::countUnusedPrefetchedLinesInSet(size_t set_index) const {
+size_t NonBlockingCache::countUnusedPrefetchedLinesInSet(size_t set_index) const {
     size_t count = 0;
     const auto& set = sets_.at(set_index);
     for (const auto& line : set) {
@@ -806,11 +806,11 @@ size_t BlockingCache::countUnusedPrefetchedLinesInSet(size_t set_index) const {
     return count;
 }
 
-void BlockingCache::touchLine(CacheLine& line) {
+void NonBlockingCache::touchLine(CacheLine& line) {
     line.lru_stamp = ++lru_clock_;
 }
 
-uint64_t BlockingCache::readMemoryValue(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size) {
+uint64_t NonBlockingCache::readMemoryValue(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size) {
     switch (size) {
         case 1:
             return memory->readByte(address);
@@ -825,7 +825,7 @@ uint64_t BlockingCache::readMemoryValue(const std::shared_ptr<Memory>& memory, u
     }
 }
 
-void BlockingCache::writeMemoryValue(const std::shared_ptr<Memory>& memory,
+void NonBlockingCache::writeMemoryValue(const std::shared_ptr<Memory>& memory,
                                      uint64_t address,
                                      uint8_t size,
                                      uint64_t value) {
@@ -847,7 +847,7 @@ void BlockingCache::writeMemoryValue(const std::shared_ptr<Memory>& memory,
     }
 }
 
-std::vector<uint8_t> BlockingCache::readLineDataFromMemory(const std::shared_ptr<Memory>& memory,
+std::vector<uint8_t> NonBlockingCache::readLineDataFromMemory(const std::shared_ptr<Memory>& memory,
                                                            uint64_t line_address) const {
     std::vector<uint8_t> data(config_.line_size_bytes, 0);
     const uint64_t line_base = lineToBaseAddress(line_address);
@@ -859,11 +859,11 @@ std::vector<uint8_t> BlockingCache::readLineDataFromMemory(const std::shared_ptr
     return data;
 }
 
-void BlockingCache::fillLineFromMemory(const std::shared_ptr<Memory>& memory, uint64_t line_address, CacheLine& line) {
+void NonBlockingCache::fillLineFromMemory(const std::shared_ptr<Memory>& memory, uint64_t line_address, CacheLine& line) {
     line.data = readLineDataFromMemory(memory, line_address);
 }
 
-void BlockingCache::writebackDataToMemory(const std::shared_ptr<Memory>& memory,
+void NonBlockingCache::writebackDataToMemory(const std::shared_ptr<Memory>& memory,
                                           uint64_t line_address,
                                           const std::vector<uint8_t>& data) {
     const uint64_t line_base = lineToBaseAddress(line_address);
@@ -877,13 +877,13 @@ void BlockingCache::writebackDataToMemory(const std::shared_ptr<Memory>& memory,
     }
 }
 
-void BlockingCache::writebackLineToMemory(const std::shared_ptr<Memory>& memory,
+void NonBlockingCache::writebackLineToMemory(const std::shared_ptr<Memory>& memory,
                                           uint64_t line_address,
                                           const CacheLine& line) {
     writebackDataToMemory(memory, line_address, line.data);
 }
 
-uint8_t BlockingCache::readCacheOrPendingByte(uint64_t address) const {
+uint8_t NonBlockingCache::readCacheOrPendingByte(uint64_t address) const {
     const uint64_t line_address = address / config_.line_size_bytes;
     const size_t offset = static_cast<size_t>(address % config_.line_size_bytes);
 
@@ -902,7 +902,7 @@ uint8_t BlockingCache::readCacheOrPendingByte(uint64_t address) const {
     throw SimulatorException("cache read byte miss after ensureResident");
 }
 
-uint8_t BlockingCache::readCachedByte(uint64_t address) const {
+uint8_t NonBlockingCache::readCachedByte(uint64_t address) const {
     const uint64_t line_address = address / config_.line_size_bytes;
     const size_t set_index = lineToSetIndex(line_address);
     const uint64_t tag = lineToTag(line_address);
@@ -917,7 +917,7 @@ uint8_t BlockingCache::readCachedByte(uint64_t address) const {
     throw SimulatorException("cache read byte miss after ensureResident");
 }
 
-void BlockingCache::writeCachedByte(uint64_t address, uint8_t value, bool mark_dirty) {
+void NonBlockingCache::writeCachedByte(uint64_t address, uint8_t value, bool mark_dirty) {
     const uint64_t line_address = address / config_.line_size_bytes;
     const size_t set_index = lineToSetIndex(line_address);
     const uint64_t tag = lineToTag(line_address);

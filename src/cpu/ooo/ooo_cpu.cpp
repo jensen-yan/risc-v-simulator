@@ -32,8 +32,8 @@ void clearQueue(std::queue<T>& q) {
     }
 }
 
-BlockingCacheConfig createDefaultL1CacheConfig() {
-    BlockingCacheConfig cfg;
+NonBlockingCacheConfig createDefaultL1CacheConfig() {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 32 * 1024;
     cfg.line_size_bytes = 64;
     cfg.associativity = 4;
@@ -56,8 +56,8 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     auto dcache_cfg = createDefaultL1CacheConfig();
     dcache_cfg.max_outstanding_misses = 2;
     dcache_cfg.enable_next_line_prefetch = g_enable_l1d_next_line_prefetch;
-    state.l1i_cache = std::make_unique<BlockingCache>(icache_cfg);
-    state.l1d_cache = std::make_unique<BlockingCache>(dcache_cfg);
+    state.l1i_cache = std::make_unique<NonBlockingCache>(icache_cfg);
+    state.l1d_cache = std::make_unique<NonBlockingCache>(dcache_cfg);
 }
 
 void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memory) {

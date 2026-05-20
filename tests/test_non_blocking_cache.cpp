@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "core/memory.h"
-#include "cpu/ooo/cache/blocking_cache.h"
+#include "cpu/ooo/cache/non_blocking_cache.h"
 
 #include <limits>
 #include <memory>
@@ -10,14 +10,14 @@ namespace riscv {
 
 namespace {
 
-void drainMiss(BlockingCache& cache) {
+void drainMiss(NonBlockingCache& cache) {
     while (cache.hasMissInFlight()) {
         cache.tick();
     }
 }
 
-BlockingCacheConfig makeDefaultConfig() {
-    BlockingCacheConfig cfg;
+NonBlockingCacheConfig makeDefaultConfig() {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 32 * 1024;
     cfg.line_size_bytes = 64;
     cfg.associativity = 4;
@@ -28,11 +28,11 @@ BlockingCacheConfig makeDefaultConfig() {
 
 } // namespace
 
-TEST(BlockingCacheTest, ColdMissThenHit) {
+TEST(NonBlockingCacheTest, ColdMissThenHit) {
     auto memory = std::make_shared<Memory>(4096);
     memory->writeWord(0x100, 0xDEADBEEF);
 
-    BlockingCache cache(makeDefaultConfig());
+    NonBlockingCache cache(makeDefaultConfig());
 
     const auto first = cache.access(memory, 0x100, 4, CacheAccessType::Read);
     EXPECT_FALSE(first.blocked);
@@ -47,8 +47,8 @@ TEST(BlockingCacheTest, ColdMissThenHit) {
     EXPECT_EQ(second.latency_cycles, 1);
 }
 
-TEST(BlockingCacheTest, DirtyEvictionAfterCommittedStore) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, DirtyEvictionAfterCommittedStore) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 64;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -56,7 +56,7 @@ TEST(BlockingCacheTest, DirtyEvictionAfterCommittedStore) {
     cfg.miss_penalty = 20;
 
     auto memory = std::make_shared<Memory>(1024);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     cache.commitStore(memory, 0x0, 4, 0xAABBCCDD);
 
@@ -66,8 +66,8 @@ TEST(BlockingCacheTest, DirtyEvictionAfterCommittedStore) {
     EXPECT_TRUE(replace.dirty_eviction);
 }
 
-TEST(BlockingCacheTest, AccessIsBlockedWhileMissInFlight) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, AccessIsBlockedWhileMissInFlight) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 128;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -75,7 +75,7 @@ TEST(BlockingCacheTest, AccessIsBlockedWhileMissInFlight) {
     cfg.miss_penalty = 20;
 
     auto memory = std::make_shared<Memory>(1024);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto miss = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(miss.blocked);
@@ -92,8 +92,8 @@ TEST(BlockingCacheTest, AccessIsBlockedWhileMissInFlight) {
     EXPECT_FALSE(next.hit);
 }
 
-TEST(BlockingCacheTest, AccessAllowsMultipleOutstandingMissesUpToConfiguredLimit) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, AccessAllowsMultipleOutstandingMissesUpToConfiguredLimit) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 256;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -102,7 +102,7 @@ TEST(BlockingCacheTest, AccessAllowsMultipleOutstandingMissesUpToConfiguredLimit
     cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(1024);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(first.blocked);
@@ -123,8 +123,8 @@ TEST(BlockingCacheTest, AccessAllowsMultipleOutstandingMissesUpToConfiguredLimit
     EXPECT_FALSE(retry.hit);
 }
 
-TEST(BlockingCacheTest, HitAccessCanProceedWhileMissIsInFlight) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, HitAccessCanProceedWhileMissIsInFlight) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 128;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -133,7 +133,7 @@ TEST(BlockingCacheTest, HitAccessCanProceedWhileMissIsInFlight) {
     cfg.max_outstanding_misses = 1;
 
     auto memory = std::make_shared<Memory>(1024);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto installed = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(installed.blocked);
@@ -153,8 +153,8 @@ TEST(BlockingCacheTest, HitAccessCanProceedWhileMissIsInFlight) {
     EXPECT_FALSE(blocked_miss.blocked_hit);
 }
 
-TEST(BlockingCacheTest, PendingMissLineMergesIntoExistingFillWithoutCountingAsHit) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, PendingMissLineMergesIntoExistingFillWithoutCountingAsHit) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 128;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -163,7 +163,7 @@ TEST(BlockingCacheTest, PendingMissLineMergesIntoExistingFillWithoutCountingAsHi
     cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(1024);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto miss = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(miss.blocked);
@@ -182,8 +182,8 @@ TEST(BlockingCacheTest, PendingMissLineMergesIntoExistingFillWithoutCountingAsHi
     EXPECT_TRUE(same_line_after_fill.hit);
 }
 
-TEST(BlockingCacheTest, PendingFillLineIsNotSelectedAsReplacementVictim) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, PendingFillLineIsNotSelectedAsReplacementVictim) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 64;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -192,7 +192,7 @@ TEST(BlockingCacheTest, PendingFillLineIsNotSelectedAsReplacementVictim) {
     cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(1024);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto miss = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(miss.blocked);
@@ -209,8 +209,8 @@ TEST(BlockingCacheTest, PendingFillLineIsNotSelectedAsReplacementVictim) {
     EXPECT_TRUE(original_line.hit);
 }
 
-TEST(BlockingCacheTest, PendingFillReadsUseMshrPayloadUntilLineBecomesReady) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, PendingFillReadsUseMshrPayloadUntilLineBecomesReady) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 128;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -220,7 +220,7 @@ TEST(BlockingCacheTest, PendingFillReadsUseMshrPayloadUntilLineBecomesReady) {
 
     auto memory = std::make_shared<Memory>(1024);
     memory->writeWord(0x0, 0x11111111);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     uint64_t value = 0;
     const auto miss = cache.load(memory, 0x0, 4, value);
@@ -243,8 +243,8 @@ TEST(BlockingCacheTest, PendingFillReadsUseMshrPayloadUntilLineBecomesReady) {
     EXPECT_EQ(value, 0x11111111u);
 }
 
-TEST(BlockingCacheTest, CommitStoreToPendingLineIsNotOverwrittenByFillCompletion) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, CommitStoreToPendingLineIsNotOverwrittenByFillCompletion) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 128;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -254,7 +254,7 @@ TEST(BlockingCacheTest, CommitStoreToPendingLineIsNotOverwrittenByFillCompletion
 
     auto memory = std::make_shared<Memory>(1024);
     memory->writeWord(0x0, 0x11111111);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto miss = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(miss.blocked);
@@ -271,8 +271,8 @@ TEST(BlockingCacheTest, CommitStoreToPendingLineIsNotOverwrittenByFillCompletion
     EXPECT_EQ(value, 0xAABBCCDDu);
 }
 
-TEST(BlockingCacheTest, DirtyVictimWritebackIsDeferredUntilMshrFillCompletes) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, DirtyVictimWritebackIsDeferredUntilMshrFillCompletes) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 64;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -281,7 +281,7 @@ TEST(BlockingCacheTest, DirtyVictimWritebackIsDeferredUntilMshrFillCompletes) {
     cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(1024);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     cache.commitStore(memory, 0x0, 4, 0xAABBCCDD);
     memory->writeWord(0x0, 0x11111111);
@@ -298,8 +298,8 @@ TEST(BlockingCacheTest, DirtyVictimWritebackIsDeferredUntilMshrFillCompletes) {
     EXPECT_EQ(memory->readWord(0x0), 0xAABBCCDDu);
 }
 
-TEST(BlockingCacheTest, CancelPendingFillWritesBackDeferredDirtyVictim) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, CancelPendingFillWritesBackDeferredDirtyVictim) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 64;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -308,7 +308,7 @@ TEST(BlockingCacheTest, CancelPendingFillWritesBackDeferredDirtyVictim) {
     cfg.max_outstanding_misses = 2;
 
     auto memory = std::make_shared<Memory>(1024);
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     cache.commitStore(memory, 0x0, 4, 0xAABBCCDD);
     memory->writeWord(0x0, 0x11111111);
@@ -324,11 +324,11 @@ TEST(BlockingCacheTest, CancelPendingFillWritesBackDeferredDirtyVictim) {
     EXPECT_EQ(memory->readWord(0x0), 0xAABBCCDDu);
 }
 
-TEST(BlockingCacheTest, CommitStoreUpdatesCachedDataForLaterLoad) {
+TEST(NonBlockingCacheTest, CommitStoreUpdatesCachedDataForLaterLoad) {
     auto memory = std::make_shared<Memory>(4096);
     memory->writeWord(0x120, 0x11111111);
 
-    BlockingCache cache(makeDefaultConfig());
+    NonBlockingCache cache(makeDefaultConfig());
 
     uint64_t load_value = 0;
     const auto first_load = cache.load(memory, 0x120, 4, load_value);
@@ -346,12 +346,12 @@ TEST(BlockingCacheTest, CommitStoreUpdatesCachedDataForLaterLoad) {
     EXPECT_EQ(memory->readWord(0x120), 0x22222222u);
 }
 
-TEST(BlockingCacheTest, InvalidateRangeRefreshesExternalMemoryWrite) {
+TEST(NonBlockingCacheTest, InvalidateRangeRefreshesExternalMemoryWrite) {
     auto memory = std::make_shared<Memory>(4096);
     constexpr uint64_t kAddr = 0x180;
     memory->write64(kAddr, 0x40);
 
-    BlockingCache cache(makeDefaultConfig());
+    NonBlockingCache cache(makeDefaultConfig());
 
     uint64_t load_value = 0;
     const auto first_load = cache.load(memory, kAddr, 8, load_value);
@@ -377,8 +377,8 @@ TEST(BlockingCacheTest, InvalidateRangeRefreshesExternalMemoryWrite) {
     EXPECT_EQ(load_value, 0x30u);
 }
 
-TEST(BlockingCacheTest, FetchInstructionCrossLineReportsSecondHalfMiss) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, FetchInstructionCrossLineReportsSecondHalfMiss) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 8;
     cfg.line_size_bytes = 2;
     cfg.associativity = 1;
@@ -389,7 +389,7 @@ TEST(BlockingCacheTest, FetchInstructionCrossLineReportsSecondHalfMiss) {
     memory->writeHalfWord(0x2, 0x0013); // addi x0, x0, 0 (低16位)
     memory->writeHalfWord(0x4, 0x0000); // 高16位
 
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
     Instruction instruction = 0;
 
     const auto first = cache.fetchInstruction(memory, 0x2, instruction);
@@ -403,8 +403,8 @@ TEST(BlockingCacheTest, FetchInstructionCrossLineReportsSecondHalfMiss) {
     EXPECT_EQ(instruction, 0x00000013u);
 }
 
-TEST(BlockingCacheTest, FetchInstructionSameLineMissCanRecoverSecondHalf) {
-    BlockingCacheConfig cfg;
+TEST(NonBlockingCacheTest, FetchInstructionSameLineMissCanRecoverSecondHalf) {
+    NonBlockingCacheConfig cfg;
     cfg.size_bytes = 32;
     cfg.line_size_bytes = 8;
     cfg.associativity = 1;
@@ -415,7 +415,7 @@ TEST(BlockingCacheTest, FetchInstructionSameLineMissCanRecoverSecondHalf) {
     memory->writeHalfWord(0x2, 0x0013); // addi x0, x0, 0 (低16位)
     memory->writeHalfWord(0x4, 0xABCD); // 高16位，和低16位同属一个cache line
 
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
     Instruction instruction = 0;
 
     const auto first = cache.fetchInstruction(memory, 0x2, instruction);
@@ -426,17 +426,17 @@ TEST(BlockingCacheTest, FetchInstructionSameLineMissCanRecoverSecondHalf) {
     EXPECT_EQ(instruction, 0xABCD0013u);
 }
 
-TEST(BlockingCacheTest, AccessWrappingAddressSpaceThrowsSimulatorException) {
+TEST(NonBlockingCacheTest, AccessWrappingAddressSpaceThrowsSimulatorException) {
     auto memory = std::make_shared<Memory>(4096);
-    BlockingCache cache(makeDefaultConfig());
+    NonBlockingCache cache(makeDefaultConfig());
 
     EXPECT_THROW(
         static_cast<void>(cache.access(memory, std::numeric_limits<uint64_t>::max(), 8, CacheAccessType::Write)),
         SimulatorException);
 }
 
-TEST(BlockingCacheTest, NextLinePrefetchTurnsFollowingLineIntoUsefulHit) {
-    BlockingCacheConfig cfg = makeDefaultConfig();
+TEST(NonBlockingCacheTest, NextLinePrefetchTurnsFollowingLineIntoUsefulHit) {
+    NonBlockingCacheConfig cfg = makeDefaultConfig();
     cfg.size_bytes = 128;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -447,7 +447,7 @@ TEST(BlockingCacheTest, NextLinePrefetchTurnsFollowingLineIntoUsefulHit) {
     memory->writeWord(0x0, 0x11111111);
     memory->writeWord(0x40, 0x22222222);
 
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(first.blocked);
@@ -466,8 +466,8 @@ TEST(BlockingCacheTest, NextLinePrefetchTurnsFollowingLineIntoUsefulHit) {
     EXPECT_EQ(stats.prefetch_dropped_already_resident, 0u);
 }
 
-TEST(BlockingCacheTest, NextLinePrefetchIsTimedAndDemandCanMergeIntoIt) {
-    BlockingCacheConfig cfg = makeDefaultConfig();
+TEST(NonBlockingCacheTest, NextLinePrefetchIsTimedAndDemandCanMergeIntoIt) {
+    NonBlockingCacheConfig cfg = makeDefaultConfig();
     cfg.size_bytes = 128;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -479,7 +479,7 @@ TEST(BlockingCacheTest, NextLinePrefetchIsTimedAndDemandCanMergeIntoIt) {
     memory->writeWord(0x0, 0x11111111);
     memory->writeWord(0x40, 0x22222222);
 
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(first.blocked);
@@ -501,8 +501,8 @@ TEST(BlockingCacheTest, NextLinePrefetchIsTimedAndDemandCanMergeIntoIt) {
     EXPECT_EQ(stats.prefetch_useful_hits, 1u);
 }
 
-TEST(BlockingCacheTest, PendingPrefetchDoesNotOccupyCacheWayUntilFillCompletes) {
-    BlockingCacheConfig cfg = makeDefaultConfig();
+TEST(NonBlockingCacheTest, PendingPrefetchDoesNotOccupyCacheWayUntilFillCompletes) {
+    NonBlockingCacheConfig cfg = makeDefaultConfig();
     cfg.size_bytes = 128;
     cfg.line_size_bytes = 64;
     cfg.associativity = 2;
@@ -515,7 +515,7 @@ TEST(BlockingCacheTest, PendingPrefetchDoesNotOccupyCacheWayUntilFillCompletes) 
     memory->writeWord(0x40, 0x22222222);
     memory->writeWord(0x80, 0x33333333);
 
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(first.blocked);
@@ -534,8 +534,8 @@ TEST(BlockingCacheTest, PendingPrefetchDoesNotOccupyCacheWayUntilFillCompletes) 
     EXPECT_EQ(stats.prefetch_unused_evictions, 0u);
 }
 
-TEST(BlockingCacheTest, NextLinePrefetchDropsRequestWhenTargetAlreadyResident) {
-    BlockingCacheConfig cfg = makeDefaultConfig();
+TEST(NonBlockingCacheTest, NextLinePrefetchDropsRequestWhenTargetAlreadyResident) {
+    NonBlockingCacheConfig cfg = makeDefaultConfig();
     cfg.size_bytes = 256;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -546,7 +546,7 @@ TEST(BlockingCacheTest, NextLinePrefetchDropsRequestWhenTargetAlreadyResident) {
     memory->writeWord(0x40, 0x22222222);
     memory->writeWord(0x80, 0x33333333);
 
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto warm = cache.access(memory, 0x80, 4, CacheAccessType::Read);
     EXPECT_FALSE(warm.blocked);
@@ -568,8 +568,8 @@ TEST(BlockingCacheTest, NextLinePrefetchDropsRequestWhenTargetAlreadyResident) {
     EXPECT_EQ(stats.prefetch_dropped_already_resident, 1u);
 }
 
-TEST(BlockingCacheTest, NextLinePrefetchTracksUnusedEviction) {
-    BlockingCacheConfig cfg = makeDefaultConfig();
+TEST(NonBlockingCacheTest, NextLinePrefetchTracksUnusedEviction) {
+    NonBlockingCacheConfig cfg = makeDefaultConfig();
     cfg.size_bytes = 128;
     cfg.line_size_bytes = 64;
     cfg.associativity = 1;
@@ -581,7 +581,7 @@ TEST(BlockingCacheTest, NextLinePrefetchTracksUnusedEviction) {
     memory->writeWord(0x40, 0x22222222);
     memory->writeWord(0xC0, 0x44444444);
 
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(first.blocked);
@@ -601,8 +601,8 @@ TEST(BlockingCacheTest, NextLinePrefetchTracksUnusedEviction) {
     EXPECT_EQ(stats.prefetch_dropped_already_resident, 0u);
 }
 
-TEST(BlockingCacheTest, NextLinePrefetchIsThrottledWhenSetAlreadyHasUnusedPrefetch) {
-    BlockingCacheConfig cfg = makeDefaultConfig();
+TEST(NonBlockingCacheTest, NextLinePrefetchIsThrottledWhenSetAlreadyHasUnusedPrefetch) {
+    NonBlockingCacheConfig cfg = makeDefaultConfig();
     cfg.size_bytes = 64 * 3;
     cfg.line_size_bytes = 64;
     cfg.associativity = 3;
@@ -613,7 +613,7 @@ TEST(BlockingCacheTest, NextLinePrefetchIsThrottledWhenSetAlreadyHasUnusedPrefet
     memory->writeWord(0x0, 0x11111111);
     memory->writeWord(0x80, 0x33333333);
 
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(first.blocked);
@@ -632,8 +632,8 @@ TEST(BlockingCacheTest, NextLinePrefetchIsThrottledWhenSetAlreadyHasUnusedPrefet
     EXPECT_EQ(stats.prefetch_unused_evictions, 0u);
 }
 
-TEST(BlockingCacheTest, UsefulPrefetchHitClearsSetThrottleState) {
-    BlockingCacheConfig cfg = makeDefaultConfig();
+TEST(NonBlockingCacheTest, UsefulPrefetchHitClearsSetThrottleState) {
+    NonBlockingCacheConfig cfg = makeDefaultConfig();
     cfg.size_bytes = 64 * 3;
     cfg.line_size_bytes = 64;
     cfg.associativity = 3;
@@ -646,7 +646,7 @@ TEST(BlockingCacheTest, UsefulPrefetchHitClearsSetThrottleState) {
     memory->writeWord(0x80, 0x33333333);
     memory->writeWord(0xC0, 0x44444444);
 
-    BlockingCache cache(cfg);
+    NonBlockingCache cache(cfg);
 
     const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
     EXPECT_FALSE(first.blocked);

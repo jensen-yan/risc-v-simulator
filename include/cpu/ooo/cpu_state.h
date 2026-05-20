@@ -11,7 +11,7 @@
 #include "cpu/ooo/ooo_types.h"
 #include "cpu/ooo/dynamic_inst.h"
 #include "cpu/ooo/branch_predictor.h"
-#include "cpu/ooo/cache/blocking_cache.h"
+#include "cpu/ooo/cache/non_blocking_cache.h"
 #include "system/address_translation.h"
 #include "system/privilege_state.h"
 #include "system/syscall_handler.h"
@@ -276,8 +276,8 @@ struct CPUState {
     std::unique_ptr<BranchPredictor> branch_predictor;
 
     // L1 cache（时序+功能模型）
-    std::unique_ptr<BlockingCache> l1i_cache;
-    std::unique_ptr<BlockingCache> l1d_cache;
+    std::unique_ptr<NonBlockingCache> l1i_cache;
+    std::unique_ptr<NonBlockingCache> l1d_cache;
     ICacheFetchState icache;
     
     // 执行单元

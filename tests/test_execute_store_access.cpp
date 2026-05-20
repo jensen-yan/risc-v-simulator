@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "cpu/ooo/cache/blocking_cache.h"
+#include "cpu/ooo/cache/non_blocking_cache.h"
 #include "cpu/ooo/execute_store_access.h"
 #include "core/memory.h"
 
@@ -76,14 +76,14 @@ TEST(ExecuteStoreAccessTest, ReplaysYoungerHostCommStoreUntilRobHead) {
 
 TEST(ExecuteStoreAccessTest, MovesIssuedCacheMissToInflightQueue) {
     auto state = makeStoreState();
-    BlockingCacheConfig config;
+    NonBlockingCacheConfig config;
     config.size_bytes = 64;
     config.line_size_bytes = 16;
     config.associativity = 1;
     config.hit_latency = 1;
     config.miss_penalty = 4;
     config.max_outstanding_misses = 1;
-    state.l1d_cache = std::make_unique<BlockingCache>(config);
+    state.l1d_cache = std::make_unique<NonBlockingCache>(config);
     auto store = issueStore(state);
     ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::STORE), 0);
     auto unit = makeStoreUnit(store);
@@ -101,14 +101,14 @@ TEST(ExecuteStoreAccessTest, MovesIssuedCacheMissToInflightQueue) {
 
 TEST(ExecuteStoreAccessTest, ReplaysWhenDCacheOutstandingLimitBlocksNewRequest) {
     auto state = makeStoreState();
-    BlockingCacheConfig config;
+    NonBlockingCacheConfig config;
     config.size_bytes = 64;
     config.line_size_bytes = 16;
     config.associativity = 1;
     config.hit_latency = 1;
     config.miss_penalty = 4;
     config.max_outstanding_misses = 1;
-    state.l1d_cache = std::make_unique<BlockingCache>(config);
+    state.l1d_cache = std::make_unique<NonBlockingCache>(config);
     static_cast<void>(state.l1d_cache->access(state.memory, 0x100, 4, CacheAccessType::Read));
     auto store = issueStore(state);
     ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::STORE), 0);

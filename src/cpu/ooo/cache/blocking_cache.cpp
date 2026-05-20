@@ -266,9 +266,41 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
     const bool all_lines_hit = wouldReadyHit(address, size);
     const int pending_fill_cycles = model_timing ? pendingFillRemainingCycles(line_addresses) : 0;
     if (pending_fill_cycles > 0) {
+        bool dirty_eviction = false;
+        for (const uint64_t line_address : line_addresses) {
+            MshrEntry* entry = findMshrEntry(line_address);
+            if (entry == nullptr || entry->has_demand_waiter) {
+                continue;
+            }
+            entry->has_demand_waiter = true;
+            entry->mark_prefetched_on_fill = false;
+            if (CacheLine* line = findLine(line_address)) {
+                line->prefetched = false;
+            } else {
+                DeferredWriteback victim_writeback;
+                bool line_dirty_eviction = false;
+                CacheLine* reserved = installLine(
+                    memory,
+                    line_address,
+                    line_dirty_eviction,
+                    /*mark_prefetched=*/false,
+                    /*fill_pending=*/true,
+                    &victim_writeback);
+                if (reserved == nullptr) {
+                    result.blocked = true;
+                    result.blocked_by_outstanding_limit = true;
+                    return result;
+                }
+                touchLine(*reserved);
+                entry->victim_writeback = std::move(victim_writeback);
+                dirty_eviction = dirty_eviction || line_dirty_eviction;
+            }
+            stats_.prefetch_useful_hits++;
+        }
         result.hit = false;
         result.latency_cycles = pending_fill_cycles;
         result.merged_pending_fill = true;
+        result.dirty_eviction = dirty_eviction;
         return result;
     }
 
@@ -282,6 +314,9 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
 
             ++new_miss_lines;
             if (model_timing && !hasAllocatableLine(line_address)) {
+                (void)cancelOnePendingPrefetchInSet(lineToSetIndex(line_address));
+            }
+            if (model_timing && !hasAllocatableLine(line_address)) {
                 result.blocked = true;
                 result.blocked_by_outstanding_limit = true;
                 return result;
@@ -289,7 +324,7 @@ CacheAccessResult BlockingCache::ensureResident(std::shared_ptr<Memory> memory,
         }
 
         if (model_timing) {
-            if (mshr_entries_.size() + new_miss_lines > config_.max_outstanding_misses) {
+            if (demandMshrCount() + new_miss_lines > config_.max_outstanding_misses) {
                 result.blocked = true;
                 result.blocked_by_outstanding_limit = true;
                 result.blocked_hit = false;
@@ -433,6 +468,20 @@ bool BlockingCache::isLinePendingFill(uint64_t line_address) const {
     return line != nullptr && line->fill_pending;
 }
 
+size_t BlockingCache::demandMshrCount() const {
+    return static_cast<size_t>(std::count_if(
+        mshr_entries_.begin(),
+        mshr_entries_.end(),
+        [](const MshrEntry& entry) { return entry.has_demand_waiter; }));
+}
+
+size_t BlockingCache::prefetchMshrCount() const {
+    return static_cast<size_t>(std::count_if(
+        mshr_entries_.begin(),
+        mshr_entries_.end(),
+        [](const MshrEntry& entry) { return !entry.has_demand_waiter; }));
+}
+
 int BlockingCache::pendingFillRemainingCycles(const std::vector<uint64_t>& line_addresses) const {
     int remaining_cycles = 0;
     for (const uint64_t line_address : line_addresses) {
@@ -471,6 +520,14 @@ bool BlockingCache::hasAllocatableLine(uint64_t line_address) const {
     });
 }
 
+bool BlockingCache::hasCleanAllocatableLine(uint64_t line_address) const {
+    const size_t set_index = lineToSetIndex(line_address);
+    const auto& set = sets_[set_index];
+    return std::any_of(set.begin(), set.end(), [](const CacheLine& line) {
+        return !line.valid || (!line.fill_pending && !line.dirty);
+    });
+}
+
 BlockingCache::CacheLine* BlockingCache::allocateLine(uint64_t line_address, bool& dirty_eviction) {
     const size_t set_index = lineToSetIndex(line_address);
     auto& set = sets_[set_index];
@@ -495,6 +552,32 @@ BlockingCache::CacheLine* BlockingCache::allocateLine(uint64_t line_address, boo
 
     if (victim_it->valid && victim_it->dirty) {
         dirty_eviction = true;
+    }
+    return &*victim_it;
+}
+
+BlockingCache::CacheLine* BlockingCache::allocateCleanLine(uint64_t line_address) {
+    const size_t set_index = lineToSetIndex(line_address);
+    auto& set = sets_[set_index];
+
+    for (auto& line : set) {
+        if (!line.valid) {
+            return &line;
+        }
+    }
+
+    auto victim_it = std::min_element(
+        set.begin(), set.end(), [](const CacheLine& lhs, const CacheLine& rhs) {
+            const bool lhs_eligible = !lhs.fill_pending && !lhs.dirty;
+            const bool rhs_eligible = !rhs.fill_pending && !rhs.dirty;
+            if (lhs_eligible != rhs_eligible) {
+                return lhs_eligible;
+            }
+            return lhs.lru_stamp < rhs.lru_stamp;
+        });
+
+    if (victim_it == set.end() || victim_it->fill_pending || victim_it->dirty) {
+        return nullptr;
     }
     return &*victim_it;
 }
@@ -555,9 +638,30 @@ bool BlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
     MshrEntry entry{};
     entry.line_address = line_address;
     entry.remaining_cycles = config_.hit_latency + config_.miss_penalty;
+    entry.has_demand_waiter = true;
+    entry.mark_prefetched_on_fill = false;
     entry.memory = memory;
     entry.fill_data = readLineDataFromMemory(memory, line_address);
     entry.victim_writeback = std::move(victim_writeback);
+    mshr_entries_.push_back(std::move(entry));
+    return true;
+}
+
+bool BlockingCache::startPrefetchFill(const std::shared_ptr<Memory>& memory, uint64_t line_address) {
+    if (findMshrEntry(line_address) != nullptr || prefetchMshrCount() >= config_.max_outstanding_prefetches) {
+        return false;
+    }
+    if (!hasCleanAllocatableLine(line_address)) {
+        return false;
+    }
+
+    MshrEntry entry{};
+    entry.line_address = line_address;
+    entry.remaining_cycles = config_.hit_latency + config_.miss_penalty;
+    entry.has_demand_waiter = false;
+    entry.mark_prefetched_on_fill = true;
+    entry.memory = memory;
+    entry.fill_data = readLineDataFromMemory(memory, line_address);
     mshr_entries_.push_back(std::move(entry));
     return true;
 }
@@ -569,11 +673,36 @@ void BlockingCache::completeMshrFill(const MshrEntry& entry) {
 
     CacheLine* line = findLine(entry.line_address);
     if (line == nullptr) {
-        return;
+        if (entry.has_demand_waiter) {
+            bool dirty_eviction = false;
+            line = allocateLine(entry.line_address, dirty_eviction);
+            if (line == nullptr) {
+                return;
+            }
+            if (line->valid && line->prefetched) {
+                stats_.prefetch_unused_evictions++;
+            }
+            if (line->valid && line->dirty && entry.memory) {
+                const uint64_t victim_line_addr = line->tag * set_count_ + lineToSetIndex(entry.line_address);
+                writebackLineToMemory(entry.memory, victim_line_addr, *line);
+            }
+        } else {
+            line = allocateCleanLine(entry.line_address);
+            if (line == nullptr) {
+                return;
+            }
+            if (line->valid && line->prefetched) {
+                stats_.prefetch_unused_evictions++;
+            }
+        }
+
+        line->valid = true;
+        line->tag = lineToTag(entry.line_address);
     }
 
     line->data = entry.fill_data;
     line->dirty = false;
+    line->prefetched = entry.mark_prefetched_on_fill;
     line->fill_pending = false;
     touchLine(*line);
 }
@@ -608,6 +737,31 @@ void BlockingCache::cancelPendingFill(uint64_t line_address) {
     }
 }
 
+bool BlockingCache::cancelOnePendingPrefetchInSet(size_t set_index) {
+    auto it = std::find_if(
+        mshr_entries_.begin(),
+        mshr_entries_.end(),
+        [this, set_index](const MshrEntry& entry) {
+            return !entry.has_demand_waiter && lineToSetIndex(entry.line_address) == set_index;
+        });
+    if (it == mshr_entries_.end()) {
+        return false;
+    }
+
+    if (CacheLine* line = findLine(it->line_address)) {
+        line->valid = false;
+        line->dirty = false;
+        line->prefetched = false;
+        line->fill_pending = false;
+        line->tag = 0;
+        line->lru_stamp = 0;
+        std::fill(line->data.begin(), line->data.end(), 0);
+    }
+    stats_.prefetch_unused_evictions++;
+    mshr_entries_.erase(it);
+    return true;
+}
+
 void BlockingCache::maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory,
                                                uint64_t demand_line_address) {
     if (!config_.enable_next_line_prefetch || !memory) {
@@ -633,14 +787,11 @@ void BlockingCache::maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& me
         return;
     }
 
-    bool dirty_eviction = false;
-    CacheLine* prefetched_line =
-        installLine(memory, next_line_address, dirty_eviction, /*mark_prefetched=*/true, /*fill_pending=*/false);
-    if (prefetched_line == nullptr) {
+    if (demandMshrCount() >= config_.max_outstanding_misses ||
+        !startPrefetchFill(memory, next_line_address)) {
         stats_.prefetch_dropped_set_throttle++;
         return;
     }
-    touchLine(*prefetched_line);
     stats_.prefetch_issued++;
 }
 

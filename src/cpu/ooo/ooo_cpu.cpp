@@ -491,17 +491,17 @@ ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
         stats.push_back({"cpu.cache.l1d.prefetch_requests", prefetch_stats.prefetch_requests,
                          "Next-line prefetch requests triggered by demand L1D misses"});
         stats.push_back({"cpu.cache.l1d.prefetch_issued", prefetch_stats.prefetch_issued,
-                         "Next-line prefetch lines installed into L1D"});
+                         "Next-line prefetch requests accepted into the L1D MSHR path"});
         stats.push_back({"cpu.cache.l1d.prefetch_useful_hits", prefetch_stats.prefetch_useful_hits,
                          "Demand accesses that hit a prefetched L1D line"});
         stats.push_back({"cpu.cache.l1d.prefetch_unused_evictions", prefetch_stats.prefetch_unused_evictions,
-                         "Prefetched L1D lines evicted before any demand access used them"});
+                         "Prefetched L1D lines or pending fills dropped before demand used them"});
         stats.push_back({"cpu.cache.l1d.prefetch_dropped_already_resident",
                          prefetch_stats.prefetch_dropped_already_resident,
                          "Prefetch requests dropped because the target line was already resident"});
         stats.push_back({"cpu.cache.l1d.prefetch_dropped_set_throttle",
                          prefetch_stats.prefetch_dropped_set_throttle,
-                         "Prefetch requests dropped because the target set still holds unused prefetched lines"});
+                         "Prefetch requests dropped by set, MSHR, or victim eligibility throttles"});
     }
 
     return stats;
@@ -525,19 +525,19 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
            << " # Next-line prefetch requests triggered by demand L1D misses\n";
         os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_issued"
            << std::right << std::setw(16) << prefetch_stats.prefetch_issued
-           << " # Next-line prefetch lines installed into L1D\n";
+           << " # Next-line prefetch requests accepted into the L1D MSHR path\n";
         os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_useful_hits"
            << std::right << std::setw(16) << prefetch_stats.prefetch_useful_hits
            << " # Demand accesses that hit a prefetched L1D line\n";
         os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_unused_evictions"
            << std::right << std::setw(16) << prefetch_stats.prefetch_unused_evictions
-           << " # Prefetched L1D lines evicted before any demand access used them\n";
+           << " # Prefetched L1D lines or pending fills dropped before demand used them\n";
         os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_dropped_already_resident"
            << std::right << std::setw(16) << prefetch_stats.prefetch_dropped_already_resident
            << " # Prefetch requests dropped because the target line was already resident\n";
         os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_dropped_set_throttle"
            << std::right << std::setw(16) << prefetch_stats.prefetch_dropped_set_throttle
-           << " # Prefetch requests dropped because the target set still holds unused prefetched lines\n";
+           << " # Prefetch requests dropped by set, MSHR, or victim eligibility throttles\n";
     }
 
     const uint64_t cycles = cpu_state_.perf_counters.value(PerfCounterId::CYCLES);

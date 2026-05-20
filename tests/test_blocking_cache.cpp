@@ -466,6 +466,74 @@ TEST(BlockingCacheTest, NextLinePrefetchTurnsFollowingLineIntoUsefulHit) {
     EXPECT_EQ(stats.prefetch_dropped_already_resident, 0u);
 }
 
+TEST(BlockingCacheTest, NextLinePrefetchIsTimedAndDemandCanMergeIntoIt) {
+    BlockingCacheConfig cfg = makeDefaultConfig();
+    cfg.size_bytes = 128;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.enable_next_line_prefetch = true;
+    cfg.max_outstanding_misses = 2;
+    cfg.max_outstanding_prefetches = 1;
+
+    auto memory = std::make_shared<Memory>(256);
+    memory->writeWord(0x0, 0x11111111);
+    memory->writeWord(0x40, 0x22222222);
+
+    BlockingCache cache(cfg);
+
+    const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+    EXPECT_EQ(cache.outstandingMissCount(), 1u);
+    EXPECT_TRUE(cache.hasMissInFlight());
+
+    const auto prefetched_pending = cache.access(memory, 0x40, 4, CacheAccessType::Read);
+    EXPECT_FALSE(prefetched_pending.blocked);
+    EXPECT_FALSE(prefetched_pending.hit);
+    EXPECT_TRUE(prefetched_pending.merged_pending_fill);
+    EXPECT_EQ(cache.outstandingMissCount(), 2u);
+
+    drainMiss(cache);
+
+    const auto& stats = cache.getStats();
+    EXPECT_EQ(stats.prefetch_requests, 1u);
+    EXPECT_EQ(stats.prefetch_issued, 1u);
+    EXPECT_EQ(stats.prefetch_useful_hits, 1u);
+}
+
+TEST(BlockingCacheTest, PendingPrefetchDoesNotOccupyCacheWayUntilFillCompletes) {
+    BlockingCacheConfig cfg = makeDefaultConfig();
+    cfg.size_bytes = 128;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 2;
+    cfg.enable_next_line_prefetch = true;
+    cfg.max_outstanding_misses = 2;
+    cfg.max_outstanding_prefetches = 1;
+
+    auto memory = std::make_shared<Memory>(512);
+    memory->writeWord(0x0, 0x11111111);
+    memory->writeWord(0x40, 0x22222222);
+    memory->writeWord(0x80, 0x33333333);
+
+    BlockingCache cache(cfg);
+
+    const auto first = cache.access(memory, 0x0, 4, CacheAccessType::Read);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+    EXPECT_EQ(cache.getStats().prefetch_issued, 1u);
+
+    // 0x40 是尚未完成的next-line prefetch；它只占MSHR，不应提前占掉同set的另一个cache way。
+    const auto demand_same_set = cache.access(memory, 0x80, 4, CacheAccessType::Read);
+    EXPECT_FALSE(demand_same_set.blocked);
+    EXPECT_FALSE(demand_same_set.hit);
+    EXPECT_FALSE(demand_same_set.merged_pending_fill);
+    EXPECT_EQ(cache.outstandingMissCount(), 2u);
+
+    const auto& stats = cache.getStats();
+    EXPECT_EQ(stats.prefetch_issued, 1u);
+    EXPECT_EQ(stats.prefetch_unused_evictions, 0u);
+}
+
 TEST(BlockingCacheTest, NextLinePrefetchDropsRequestWhenTargetAlreadyResident) {
     BlockingCacheConfig cfg = makeDefaultConfig();
     cfg.size_bytes = 256;

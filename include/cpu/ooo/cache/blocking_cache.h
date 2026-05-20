@@ -22,6 +22,7 @@ struct BlockingCacheConfig {
     int hit_latency = 1;
     int miss_penalty = 20;
     size_t max_outstanding_misses = 1;
+    size_t max_outstanding_prefetches = 1;
     CacheWritePolicy write_policy = CacheWritePolicy::WriteBackWriteAllocate;
     bool enable_next_line_prefetch = false;
 };
@@ -79,7 +80,7 @@ public:
     void resetStats();
 
     bool hasMissInFlight() const { return !mshr_entries_.empty(); }
-    size_t outstandingMissCount() const { return mshr_entries_.size(); }
+    size_t outstandingMissCount() const { return demandMshrCount(); }
     int missServiceRemainingCycles() const;
     const BlockingCacheConfig& getConfig() const { return config_; }
     const BlockingCacheStats& getStats() const { return stats_; }
@@ -112,6 +113,8 @@ private:
     struct MshrEntry {
         uint64_t line_address = 0;
         int remaining_cycles = 0;
+        bool has_demand_waiter = false;
+        bool mark_prefetched_on_fill = false;
         std::shared_ptr<Memory> memory;
         std::vector<uint8_t> fill_data;
         DeferredWriteback victim_writeback;
@@ -136,10 +139,14 @@ private:
     MshrEntry* findMshrEntry(uint64_t line_address);
     const MshrEntry* findMshrEntry(uint64_t line_address) const;
     bool isLinePendingFill(uint64_t line_address) const;
+    size_t demandMshrCount() const;
+    size_t prefetchMshrCount() const;
     int pendingFillRemainingCycles(const std::vector<uint64_t>& line_addresses) const;
     bool wouldReadyHit(uint64_t address, uint8_t size) const;
     bool hasAllocatableLine(uint64_t line_address) const;
+    bool hasCleanAllocatableLine(uint64_t line_address) const;
     CacheLine* allocateLine(uint64_t line_address, bool& dirty_eviction);
+    CacheLine* allocateCleanLine(uint64_t line_address);
     CacheLine* installLine(const std::shared_ptr<Memory>& memory,
                            uint64_t line_address,
                            bool& dirty_eviction,
@@ -149,9 +156,11 @@ private:
     bool startLineFill(const std::shared_ptr<Memory>& memory,
                        uint64_t line_address,
                        bool& dirty_eviction);
+    bool startPrefetchFill(const std::shared_ptr<Memory>& memory, uint64_t line_address);
     void completeMshrFill(const MshrEntry& entry);
     void completePendingFills(const std::vector<uint64_t>& line_addresses);
     void cancelPendingFill(uint64_t line_address);
+    bool cancelOnePendingPrefetchInSet(size_t set_index);
     void maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory, uint64_t demand_line_address);
     size_t countUnusedPrefetchedLinesInSet(size_t set_index) const;
     void touchLine(CacheLine& line);

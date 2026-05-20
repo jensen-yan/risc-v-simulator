@@ -53,6 +53,7 @@ void ExecuteStage::execute(Context& context) {
         });
 
     context.incrementCounter(PerfCounterId::DISPATCH_SLOTS, OOOPipelineConfig::DISPATCH_WIDTH);
+    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_TOTAL, OOOPipelineConfig::DISPATCH_WIDTH);
     const auto addr_unknown_store_snapshot =
         ExecuteMemoryOrder::captureAddrUnknownStoreSnapshot(state);
 
@@ -62,29 +63,35 @@ void ExecuteStage::execute(Context& context) {
             return !ExecuteMemoryOrder::markBlockedAddrUnknownPairIfNeeded(
                 state, instruction, addr_unknown_store_snapshot);
         });
+    bool empty_cycle_blocked_by_inflight_memory = false;
     if (dispatch_results.empty()) {
         LOGT(EXECUTE, "no ready instruction in reservation station");
         context.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
 
         if (context.hasInflightMemoryAccess()) {
             context.incrementCounter(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
-            return;
+            empty_cycle_blocked_by_inflight_memory = true;
         }
 
-        const size_t rs_occupied = context.reservationStationOccupiedCount();
-        if (rs_occupied == 0) {
-            context.incrementCounter(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
-        } else {
-            const size_t rs_ready = context.reservationStationReadyCount();
-            if (rs_ready == 0) {
-                context.incrementCounter(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
+        if (!empty_cycle_blocked_by_inflight_memory) {
+            const size_t rs_occupied = context.reservationStationOccupiedCount();
+            if (rs_occupied == 0) {
+                context.incrementCounter(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
             } else {
-                context.incrementCounter(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
+                const size_t rs_ready = context.reservationStationReadyCount();
+                if (rs_ready == 0) {
+                    context.incrementCounter(PerfCounterId::STALL_EXECUTE_DEPENDENCY_BLOCKED);
+                } else {
+                    context.incrementCounter(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED);
+                }
             }
         }
     }
 
     size_t dispatched_this_cycle = 0;
+    size_t no_unit_slots = 0;
+    size_t amo_wait_slots = 0;
+    size_t resource_blocked_slots = 0;
     for (size_t slot = 0; slot < dispatch_results.size(); ++slot) {
         auto dispatch_result = dispatch_results[slot];
         LOGT(EXECUTE, "dispatch slot=%zu inst=%" PRId64 " from rs[%d] to execution unit",
@@ -96,6 +103,7 @@ void ExecuteStage::execute(Context& context) {
             dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
             context.releaseExecutionUnit(dispatch_result.unit_type, dispatch_result.unit_id);
             context.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
+            amo_wait_slots++;
             LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay dispatch",
                  dispatch_result.instruction->get_instruction_id());
             continue;
@@ -108,6 +116,7 @@ void ExecuteStage::execute(Context& context) {
             context.releaseExecutionUnit(dispatch_result.unit_type, dispatch_result.unit_id);
             LOGT(EXECUTE, "no available execution unit");
             context.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_UNIT);
+            no_unit_slots++;
             continue;
         }
 
@@ -124,6 +133,7 @@ void ExecuteStage::execute(Context& context) {
                 dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
                 context.releaseExecutionUnit(
                     ExecutionUnitType::LOAD, dispatch_result.unit_id);
+                resource_blocked_slots++;
                 continue;
             }
             const auto older_unknown_store_pc = ExecuteMemoryOrder::findFirstOlderAddrUnknownStorePc(
@@ -179,6 +189,35 @@ void ExecuteStage::execute(Context& context) {
     }
 
     context.incrementCounter(PerfCounterId::DISPATCH_UTILIZED_SLOTS, dispatched_this_cycle);
+    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_EXECUTED, dispatched_this_cycle);
+    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_NO_UNIT, no_unit_slots);
+    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_AMO_WAIT, amo_wait_slots);
+    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_RESOURCE_BLOCKED, resource_blocked_slots);
+
+    const size_t classified_slots =
+        dispatched_this_cycle + no_unit_slots + amo_wait_slots + resource_blocked_slots;
+    if (classified_slots < OOOPipelineConfig::DISPATCH_WIDTH) {
+        const size_t empty_slots = OOOPipelineConfig::DISPATCH_WIDTH - classified_slots;
+        if (empty_cycle_blocked_by_inflight_memory) {
+            context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_RESOURCE_BLOCKED, empty_slots);
+        } else {
+            const size_t rs_occupied = context.reservationStationOccupiedCount();
+            if (rs_occupied == 0) {
+                context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_FRONTEND_EMPTY, empty_slots);
+            } else {
+                const size_t rs_ready = context.reservationStationReadyCount();
+                if (rs_ready == 0) {
+                    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_DEP_BLOCKED, empty_slots);
+                } else {
+                    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_RESOURCE_BLOCKED, empty_slots);
+                }
+            }
+        }
+    } else if (classified_slots > OOOPipelineConfig::DISPATCH_WIDTH) {
+        context.incrementCounter(
+            PerfCounterId::TOPDOWN_SLOTS_OTHER,
+            classified_slots - OOOPipelineConfig::DISPATCH_WIDTH);
+    }
 }
 
 void ExecuteStage::update_execution_units(CPUState& state) {

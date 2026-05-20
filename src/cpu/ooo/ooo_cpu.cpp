@@ -54,7 +54,7 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     state.branch_predictor = std::make_unique<BranchPredictor>();
     auto icache_cfg = createDefaultL1CacheConfig();
     auto dcache_cfg = createDefaultL1CacheConfig();
-    dcache_cfg.max_outstanding_misses = 2;
+    dcache_cfg.max_outstanding_misses = 8;
     dcache_cfg.enable_next_line_prefetch = g_enable_l1d_next_line_prefetch;
     state.l1i_cache = std::make_unique<NonBlockingCache>(icache_cfg);
     state.l1d_cache = std::make_unique<NonBlockingCache>(dcache_cfg);
@@ -604,7 +604,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
        << std::right << std::setw(16) << std::fixed << std::setprecision(6) << inflight_load_latency_avg
        << " # Average wait cycles for load misses completed through the memory inflight queue\n";
 
-    // ===== Topdown-lite (以Execute每周期最多dispatch 1条为slot口径) =====
+    // ===== Topdown-lite legacy cycles =====
     const uint64_t execute_frontend_starved =
         cpu_state_.perf_counters.value(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED);
     const uint64_t execute_dependency_blocked =
@@ -621,7 +621,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
     const uint64_t frontend_bound_cycles = execute_frontend_starved;
     const uint64_t backend_bound_cycles =
         execute_dependency_blocked + execute_resource_blocked + execute_no_unit + execute_amo_wait;
-    const uint64_t executing_cycles = dispatched;  // ExecuteStage每周期最多dispatch 1条
+    const uint64_t executing_cycles = dispatched;
 
     const uint64_t accounted =
         frontend_bound_cycles + backend_bound_cycles + executing_cycles;
@@ -642,15 +642,15 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
         return cycles == 0 ? 0.0 : (static_cast<double>(part) * 100.0 / static_cast<double>(cycles));
     };
 
-    printUintStat("cpu.topdown.cycles.total", cycles, "Topdown-lite total cycles (slot=1 per cycle)");
+    printUintStat("cpu.topdown.cycles.total", cycles, "Legacy topdown-lite total cycles");
     printUintStat("cpu.topdown.cycles.executing", executing_cycles,
-                 "Cycles where Execute successfully dispatched an instruction to an execution unit");
+                 "Legacy non-exclusive executing proxy (dispatched instructions; may exceed cycles on wide cores)");
     printUintStat("cpu.topdown.cycles.frontend_bound", frontend_bound_cycles,
-                 "Cycles where Execute had no work because RS is empty (frontend starved)");
+                 "Legacy cycles where Execute had no work because RS is empty");
     printUintStat("cpu.topdown.cycles.backend_bound", backend_bound_cycles,
-                 "Cycles where Execute had work but could not make progress (dependency/resource/no_unit/amo_wait)");
+                 "Legacy non-exclusive backend stall events");
     printUintStat("cpu.topdown.cycles.other", other_cycles,
-                 "Remaining cycles not accounted by executing/frontend/backend categories");
+                 "Legacy remaining cycles not accounted by executing/frontend/backend categories");
 
     printDoubleStat("cpu.topdown.cycles.executing_pct", pct(executing_cycles),
                    "Executing cycles / total cycles (%)");
@@ -660,6 +660,63 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                    "Backend-bound cycles / total cycles (%)");
     printDoubleStat("cpu.topdown.cycles.other_pct", pct(other_cycles),
                    "Other cycles / total cycles (%)");
+
+    // ===== Slot-based topdown-lite for wide Execute dispatch =====
+    const uint64_t topdown_slots_total =
+        cpu_state_.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_TOTAL);
+    const uint64_t topdown_slots_executed =
+        cpu_state_.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_EXECUTED);
+    const uint64_t topdown_slots_frontend_empty =
+        cpu_state_.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_FRONTEND_EMPTY);
+    const uint64_t topdown_slots_dep_blocked =
+        cpu_state_.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_DEP_BLOCKED);
+    const uint64_t topdown_slots_resource_blocked =
+        cpu_state_.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_RESOURCE_BLOCKED);
+    const uint64_t topdown_slots_no_unit =
+        cpu_state_.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_NO_UNIT);
+    const uint64_t topdown_slots_amo_wait =
+        cpu_state_.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_AMO_WAIT);
+    const uint64_t topdown_slots_other =
+        cpu_state_.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_OTHER);
+
+    const auto slotPct = [&](uint64_t part) -> double {
+        return topdown_slots_total == 0
+                   ? 0.0
+                   : (static_cast<double>(part) * 100.0 /
+                      static_cast<double>(topdown_slots_total));
+    };
+
+    printUintStat("cpu.topdown.slots.total", topdown_slots_total,
+                  "Execute dispatch slots available (cycles * dispatch width)");
+    printUintStat("cpu.topdown.slots.executed", topdown_slots_executed,
+                  "Execute slots that dispatched an instruction");
+    printUintStat("cpu.topdown.slots.frontend_empty", topdown_slots_frontend_empty,
+                  "Execute slots empty because the reservation station had no work");
+    printUintStat("cpu.topdown.slots.dep_blocked", topdown_slots_dep_blocked,
+                  "Execute slots empty because reservation-station entries waited for operands");
+    printUintStat("cpu.topdown.slots.resource_blocked", topdown_slots_resource_blocked,
+                  "Execute slots empty because ready work could not acquire a dispatch resource");
+    printUintStat("cpu.topdown.slots.no_unit", topdown_slots_no_unit,
+                  "Execute slots selected work but found no execution unit");
+    printUintStat("cpu.topdown.slots.amo_wait", topdown_slots_amo_wait,
+                  "Execute slots selected AMO work delayed by older store-like operations");
+    printUintStat("cpu.topdown.slots.other", topdown_slots_other,
+                  "Execute slots not classified by the slot topdown-lite categories");
+
+    printDoubleStat("cpu.topdown.slots.executed_pct", slotPct(topdown_slots_executed),
+                    "Executed slots / total execute dispatch slots (%)");
+    printDoubleStat("cpu.topdown.slots.frontend_empty_pct", slotPct(topdown_slots_frontend_empty),
+                    "Frontend-empty slots / total execute dispatch slots (%)");
+    printDoubleStat("cpu.topdown.slots.dep_blocked_pct", slotPct(topdown_slots_dep_blocked),
+                    "Dependency-blocked slots / total execute dispatch slots (%)");
+    printDoubleStat("cpu.topdown.slots.resource_blocked_pct", slotPct(topdown_slots_resource_blocked),
+                    "Resource-blocked slots / total execute dispatch slots (%)");
+    printDoubleStat("cpu.topdown.slots.no_unit_pct", slotPct(topdown_slots_no_unit),
+                    "No-unit slots / total execute dispatch slots (%)");
+    printDoubleStat("cpu.topdown.slots.amo_wait_pct", slotPct(topdown_slots_amo_wait),
+                    "AMO-wait slots / total execute dispatch slots (%)");
+    printDoubleStat("cpu.topdown.slots.other_pct", slotPct(topdown_slots_other),
+                    "Other slots / total execute dispatch slots (%)");
 
     // 指令域：用ROB flushed_entries衡量BadSpec的“工作量”（不是周期）。
     const uint64_t flushed_entries = cpu_state_.perf_counters.value(PerfCounterId::ROB_FLUSHED_ENTRIES);

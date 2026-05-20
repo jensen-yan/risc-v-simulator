@@ -159,6 +159,7 @@ private:
     bool startPrefetchFill(const std::shared_ptr<Memory>& memory, uint64_t line_address);
     void completeMshrFill(const MshrEntry& entry);
     void completePendingFills(const std::vector<uint64_t>& line_addresses);
+    void completePendingFillsInSet(size_t set_index);
     void cancelPendingFill(uint64_t line_address);
     bool cancelOnePendingPrefetchInSet(size_t set_index);
     void maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory, uint64_t demand_line_address);

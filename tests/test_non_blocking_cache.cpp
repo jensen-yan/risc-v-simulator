@@ -66,6 +66,41 @@ TEST(NonBlockingCacheTest, DirtyEvictionAfterCommittedStore) {
     EXPECT_TRUE(replace.dirty_eviction);
 }
 
+TEST(NonBlockingCacheTest, CommitStoreCanReserveLineWhenSetIsFullOfPendingFills) {
+    NonBlockingCacheConfig cfg;
+    cfg.size_bytes = 128;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 2;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 2;
+
+    auto memory = std::make_shared<Memory>(512);
+    memory->writeWord(0x0, 0x11111111);
+    memory->writeWord(0x40, 0x22222222);
+    memory->writeWord(0x80, 0x33333333);
+
+    NonBlockingCache cache(cfg);
+    uint64_t value = 0;
+
+    const auto first = cache.load(memory, 0x0, 4, value);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+
+    const auto second = cache.load(memory, 0x40, 4, value);
+    EXPECT_FALSE(second.blocked);
+    EXPECT_FALSE(second.hit);
+    EXPECT_EQ(cache.outstandingMissCount(), 2u);
+
+    EXPECT_NO_THROW(cache.commitStore(memory, 0x80, 4, 0xAABBCCDD));
+    EXPECT_EQ(memory->readWord(0x80), 0xAABBCCDDu);
+
+    const auto load = cache.load(memory, 0x80, 4, value);
+    EXPECT_FALSE(load.blocked);
+    EXPECT_TRUE(load.hit);
+    EXPECT_EQ(value, 0xAABBCCDDu);
+}
+
 TEST(NonBlockingCacheTest, AccessIsBlockedWhileMissInFlight) {
     NonBlockingCacheConfig cfg;
     cfg.size_bytes = 128;

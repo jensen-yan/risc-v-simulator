@@ -144,10 +144,21 @@ void NonBlockingCache::commitStore(std::shared_ptr<Memory> memory, uint64_t addr
         return;
     }
 
-    completePendingFills(enumerateLineAddresses(address, size));
+    const auto line_addresses = enumerateLineAddresses(address, size);
+    completePendingFills(line_addresses);
 
     // 提交阶段写入不应引入流水线阻塞，因此采用非时序驻留检查。
-    (void)ensureResident(memory, address, size, CacheAccessType::Write, /*model_timing=*/false);
+    CacheAccessResult resident =
+        ensureResident(memory, address, size, CacheAccessType::Write, /*model_timing=*/false);
+    if (resident.blocked) {
+        for (const uint64_t line_address : line_addresses) {
+            completePendingFillsInSet(lineToSetIndex(line_address));
+        }
+        resident = ensureResident(memory, address, size, CacheAccessType::Write, /*model_timing=*/false);
+        if (resident.blocked) {
+            throw SimulatorException("cache commit store could not reserve line");
+        }
+    }
 
     for (uint8_t i = 0; i < size; ++i) {
         const uint8_t byte_value = static_cast<uint8_t>((value >> (8U * i)) & 0xFFU);
@@ -719,6 +730,19 @@ void NonBlockingCache::completePendingFills(const std::vector<uint64_t>& line_ad
 
         completeMshrFill(*it);
         mshr_entries_.erase(it);
+    }
+}
+
+void NonBlockingCache::completePendingFillsInSet(size_t set_index) {
+    auto it = mshr_entries_.begin();
+    while (it != mshr_entries_.end()) {
+        if (lineToSetIndex(it->line_address) != set_index) {
+            ++it;
+            continue;
+        }
+
+        completeMshrFill(*it);
+        it = mshr_entries_.erase(it);
     }
 }
 

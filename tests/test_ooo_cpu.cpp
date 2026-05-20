@@ -559,6 +559,8 @@ TEST_F(OutOfOrderCPUTest, ExecuteStageUsesConfiguredDispatchWidthWhenUnitsAllow)
     EXPECT_EQ(findStat("cpu.execute.dispatched"), OOOPipelineConfig::DISPATCH_WIDTH);
     EXPECT_EQ(findStat("cpu.execute.dispatch_utilized_slots"), OOOPipelineConfig::DISPATCH_WIDTH);
     EXPECT_EQ(findStat("cpu.execute.dispatch_slots"), OOOPipelineConfig::DISPATCH_WIDTH * 4);
+    EXPECT_EQ(findStat("cpu.topdown.slots.executed"), OOOPipelineConfig::DISPATCH_WIDTH);
+    EXPECT_EQ(findStat("cpu.topdown.slots.total"), OOOPipelineConfig::DISPATCH_WIDTH * 4);
 }
 
 TEST_F(OutOfOrderCPUTest, MExtensionMulInstruction) {

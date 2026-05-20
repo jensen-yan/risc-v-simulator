@@ -271,6 +271,59 @@ TEST(BlockingCacheTest, CommitStoreToPendingLineIsNotOverwrittenByFillCompletion
     EXPECT_EQ(value, 0xAABBCCDDu);
 }
 
+TEST(BlockingCacheTest, DirtyVictimWritebackIsDeferredUntilMshrFillCompletes) {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 64;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 2;
+
+    auto memory = std::make_shared<Memory>(1024);
+    BlockingCache cache(cfg);
+
+    cache.commitStore(memory, 0x0, 4, 0xAABBCCDD);
+    memory->writeWord(0x0, 0x11111111);
+
+    const auto miss = cache.access(memory, 0x40, 4, CacheAccessType::Read);
+    EXPECT_FALSE(miss.blocked);
+    EXPECT_FALSE(miss.hit);
+    EXPECT_TRUE(miss.dirty_eviction);
+    EXPECT_TRUE(cache.hasMissInFlight());
+    EXPECT_EQ(memory->readWord(0x0), 0x11111111u);
+
+    drainMiss(cache);
+
+    EXPECT_EQ(memory->readWord(0x0), 0xAABBCCDDu);
+}
+
+TEST(BlockingCacheTest, CancelPendingFillWritesBackDeferredDirtyVictim) {
+    BlockingCacheConfig cfg;
+    cfg.size_bytes = 64;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 1;
+    cfg.hit_latency = 1;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 2;
+
+    auto memory = std::make_shared<Memory>(1024);
+    BlockingCache cache(cfg);
+
+    cache.commitStore(memory, 0x0, 4, 0xAABBCCDD);
+    memory->writeWord(0x0, 0x11111111);
+
+    const auto miss = cache.access(memory, 0x40, 4, CacheAccessType::Read);
+    EXPECT_FALSE(miss.blocked);
+    EXPECT_TRUE(miss.dirty_eviction);
+    EXPECT_EQ(memory->readWord(0x0), 0x11111111u);
+
+    cache.invalidateRange(0x40, 4);
+
+    EXPECT_FALSE(cache.hasMissInFlight());
+    EXPECT_EQ(memory->readWord(0x0), 0xAABBCCDDu);
+}
+
 TEST(BlockingCacheTest, CommitStoreUpdatesCachedDataForLaterLoad) {
     auto memory = std::make_shared<Memory>(4096);
     memory->writeWord(0x120, 0x11111111);

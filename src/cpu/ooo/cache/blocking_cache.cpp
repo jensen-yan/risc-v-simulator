@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace riscv {
 
@@ -502,7 +503,8 @@ BlockingCache::CacheLine* BlockingCache::installLine(const std::shared_ptr<Memor
                                                      uint64_t line_address,
                                                      bool& dirty_eviction,
                                                      bool mark_prefetched,
-                                                     bool fill_pending) {
+                                                     bool fill_pending,
+                                                     DeferredWriteback* deferred_writeback) {
     CacheLine* allocated = allocateLine(line_address, dirty_eviction);
     if (!allocated) {
         return nullptr;
@@ -513,7 +515,13 @@ BlockingCache::CacheLine* BlockingCache::installLine(const std::shared_ptr<Memor
     }
     if (allocated->valid && allocated->dirty) {
         const uint64_t victim_line_addr = allocated->tag * set_count_ + lineToSetIndex(line_address);
-        writebackLineToMemory(memory, victim_line_addr, *allocated);
+        if (deferred_writeback != nullptr) {
+            deferred_writeback->valid = true;
+            deferred_writeback->line_address = victim_line_addr;
+            deferred_writeback->data = allocated->data;
+        } else {
+            writebackLineToMemory(memory, victim_line_addr, *allocated);
+        }
     }
 
     allocated->valid = true;
@@ -536,8 +544,9 @@ bool BlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
         return true;
     }
 
-    CacheLine* reserved =
-        installLine(memory, line_address, dirty_eviction, /*mark_prefetched=*/false, /*fill_pending=*/true);
+    DeferredWriteback victim_writeback;
+    CacheLine* reserved = installLine(
+        memory, line_address, dirty_eviction, /*mark_prefetched=*/false, /*fill_pending=*/true, &victim_writeback);
     if (reserved == nullptr) {
         return false;
     }
@@ -546,12 +555,18 @@ bool BlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
     MshrEntry entry{};
     entry.line_address = line_address;
     entry.remaining_cycles = config_.hit_latency + config_.miss_penalty;
+    entry.memory = memory;
     entry.fill_data = readLineDataFromMemory(memory, line_address);
+    entry.victim_writeback = std::move(victim_writeback);
     mshr_entries_.push_back(std::move(entry));
     return true;
 }
 
 void BlockingCache::completeMshrFill(const MshrEntry& entry) {
+    if (entry.victim_writeback.valid && entry.memory) {
+        writebackDataToMemory(entry.memory, entry.victim_writeback.line_address, entry.victim_writeback.data);
+    }
+
     CacheLine* line = findLine(entry.line_address);
     if (line == nullptr) {
         return;
@@ -579,11 +594,18 @@ void BlockingCache::completePendingFills(const std::vector<uint64_t>& line_addre
 }
 
 void BlockingCache::cancelPendingFill(uint64_t line_address) {
-    mshr_entries_.erase(
-        std::remove_if(mshr_entries_.begin(),
-                       mshr_entries_.end(),
-                       [line_address](const MshrEntry& entry) { return entry.line_address == line_address; }),
-        mshr_entries_.end());
+    auto it = mshr_entries_.begin();
+    while (it != mshr_entries_.end()) {
+        if (it->line_address != line_address) {
+            ++it;
+            continue;
+        }
+
+        if (it->victim_writeback.valid && it->memory) {
+            writebackDataToMemory(it->memory, it->victim_writeback.line_address, it->victim_writeback.data);
+        }
+        it = mshr_entries_.erase(it);
+    }
 }
 
 void BlockingCache::maybeIssueNextLinePrefetch(const std::shared_ptr<Memory>& memory,
@@ -690,17 +712,24 @@ void BlockingCache::fillLineFromMemory(const std::shared_ptr<Memory>& memory, ui
     line.data = readLineDataFromMemory(memory, line_address);
 }
 
+void BlockingCache::writebackDataToMemory(const std::shared_ptr<Memory>& memory,
+                                          uint64_t line_address,
+                                          const std::vector<uint8_t>& data) {
+    const uint64_t line_base = lineToBaseAddress(line_address);
+    const uint64_t memory_size = memory->getSize();
+    const size_t write_size = std::min(config_.line_size_bytes, data.size());
+    for (size_t i = 0; i < write_size; ++i) {
+        const uint64_t addr = line_base + i;
+        if (addr < memory_size) {
+            memory->writeByte(addr, data[i]);
+        }
+    }
+}
+
 void BlockingCache::writebackLineToMemory(const std::shared_ptr<Memory>& memory,
                                           uint64_t line_address,
                                           const CacheLine& line) {
-    const uint64_t line_base = lineToBaseAddress(line_address);
-    const uint64_t memory_size = memory->getSize();
-    for (size_t i = 0; i < config_.line_size_bytes; ++i) {
-        const uint64_t addr = line_base + i;
-        if (addr < memory_size) {
-            memory->writeByte(addr, line.data[i]);
-        }
-    }
+    writebackDataToMemory(memory, line_address, line.data);
 }
 
 uint8_t BlockingCache::readCacheOrPendingByte(uint64_t address) const {

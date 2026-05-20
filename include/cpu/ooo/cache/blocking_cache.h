@@ -103,10 +103,18 @@ private:
     uint64_t lru_clock_ = 0;
     BlockingCacheStats stats_{};
 
+    struct DeferredWriteback {
+        bool valid = false;
+        uint64_t line_address = 0;
+        std::vector<uint8_t> data;
+    };
+
     struct MshrEntry {
         uint64_t line_address = 0;
         int remaining_cycles = 0;
+        std::shared_ptr<Memory> memory;
         std::vector<uint8_t> fill_data;
+        DeferredWriteback victim_writeback;
     };
 
     std::vector<MshrEntry> mshr_entries_;
@@ -136,7 +144,8 @@ private:
                            uint64_t line_address,
                            bool& dirty_eviction,
                            bool mark_prefetched,
-                           bool fill_pending);
+                           bool fill_pending,
+                           DeferredWriteback* deferred_writeback = nullptr);
     bool startLineFill(const std::shared_ptr<Memory>& memory,
                        uint64_t line_address,
                        bool& dirty_eviction);
@@ -151,6 +160,9 @@ private:
     static void writeMemoryValue(const std::shared_ptr<Memory>& memory, uint64_t address, uint8_t size, uint64_t value);
     std::vector<uint8_t> readLineDataFromMemory(const std::shared_ptr<Memory>& memory, uint64_t line_address) const;
     void fillLineFromMemory(const std::shared_ptr<Memory>& memory, uint64_t line_address, CacheLine& line);
+    void writebackDataToMemory(const std::shared_ptr<Memory>& memory,
+                               uint64_t line_address,
+                               const std::vector<uint8_t>& data);
     void writebackLineToMemory(const std::shared_ptr<Memory>& memory, uint64_t line_address, const CacheLine& line);
     uint8_t readCacheOrPendingByte(uint64_t address) const;
     uint8_t readCachedByte(uint64_t address) const;

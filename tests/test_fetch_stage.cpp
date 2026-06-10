@@ -72,6 +72,29 @@ TEST_F(FetchStageContextTest, FetchesSequentialInstructionsThroughNarrowContext)
               OOOPipelineConfig::FETCH_WIDTH);
 }
 
+TEST_F(FetchStageContextTest, RedirectStallBlocksFetchUntilPenaltyExpires) {
+    memory->writeWord(0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
+    state.startRedirectStall();
+
+    FetchStage::Context context(state);
+    for (size_t i = 0; i < OOOPipelineConfig::RECOVERY_REDIRECT_LATENCY; ++i) {
+        fetch_stage.execute(context);
+        EXPECT_TRUE(state.fetch_buffer.empty());
+        EXPECT_EQ(state.pc, 0u);
+        EXPECT_EQ(state.remainingRedirectStallCycles(),
+                  OOOPipelineConfig::RECOVERY_REDIRECT_LATENCY - i - 1);
+    }
+
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_FETCH_REDIRECT_PENDING),
+              OOOPipelineConfig::RECOVERY_REDIRECT_LATENCY);
+
+    fetch_stage.execute(context);
+
+    ASSERT_FALSE(state.fetch_buffer.empty());
+    EXPECT_EQ(state.fetch_buffer.front().pc, 0u);
+    EXPECT_EQ(state.pc, 4u);
+}
+
 TEST_F(FetchStageContextTest, HaltsWhenZeroInstructionAndPipelineDrained) {
     FetchStage::Context context(state);
     fetch_stage.execute(context);

@@ -36,6 +36,12 @@ public:
         bool reorderBufferEmpty() const { return state_.reorder_buffer->is_empty(); }
         bool anyExecutionUnitBusy() const;
 
+        bool hasRedirectStall() const { return state_.hasRedirectStall(); }
+        bool advanceRedirectStallCycle() { return state_.advanceRedirectStallCycle(); }
+        uint64_t remainingRedirectStallCycles() const {
+            return state_.remainingRedirectStallCycles();
+        }
+
         bool hasIcacheMissWait() const { return state_.icache.hasMissWait(); }
         bool advanceIcacheMissWaitCycle() { return state_.icache.advanceMissWaitCycle(); }
         int remainingIcacheWaitCycles() const { return state_.icache.remainingWaitCycles(); }

@@ -110,6 +110,14 @@ void FetchStage::execute(Context& context) {
         return;
     }
 
+    if (context.hasRedirectStall()) {
+        context.advanceRedirectStallCycle();
+        context.recordPipelineStall(PerfCounterId::STALL_FETCH_REDIRECT_PENDING);
+        LOGT(FETCH, "redirect waiting, remaining=%" PRIu64,
+             context.remainingRedirectStallCycles());
+        return;
+    }
+
     // I$ miss等待：倒计时到0的这个周期允许继续取指，避免多等一个周期。
     if (context.hasIcacheMissWait()) {
         const bool still_waiting = context.advanceIcacheMissWaitCycle();

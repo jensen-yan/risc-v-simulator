@@ -69,6 +69,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     state.pipeline_stalls = 0;
     state.perf_counters.reset();
     state.icache.reset();
+    state.redirect_stall_cycles = 0;
     state.reservation_valid = false;
     state.reservation_addr = 0;
     state.global_instruction_id = 0;

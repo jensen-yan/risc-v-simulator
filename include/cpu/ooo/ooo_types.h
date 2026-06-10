@@ -77,6 +77,7 @@ struct OOOPipelineConfig {
     static constexpr size_t WRITEBACK_WIDTH = 2;
     static constexpr size_t COMMIT_WIDTH = 4;
     static constexpr size_t STORE_COMMIT_WIDTH = 1;
+    static constexpr size_t RECOVERY_REDIRECT_LATENCY = 2;
     static constexpr size_t FETCH_BUFFER_SIZE = 48;
     static constexpr size_t ROB_ENTRIES = 192;
     static constexpr size_t RS_ENTRIES = 96;

@@ -72,6 +72,7 @@ PERF_COUNTER_DEF(PREDICTOR_CONTROL_INCORRECT, "cpu.predictor.control.incorrect",
 
 PERF_COUNTER_DEF(PIPELINE_STALLS, "cpu.stall.total", "Total recorded stall events")
 PERF_COUNTER_DEF(STALL_FETCH_BUFFER_FULL, "cpu.stall.fetch_buffer_full", "Fetch stalled because fetch buffer is full")
+PERF_COUNTER_DEF(STALL_FETCH_REDIRECT_PENDING, "cpu.stall.fetch_redirect_pending", "Fetch stalled while waiting for a redirect target to become available")
 PERF_COUNTER_DEF(STALL_DECODE_ROB_FULL, "cpu.stall.decode_rob_full", "Decode stalled because ROB is full")
 PERF_COUNTER_DEF(STALL_ISSUE_NO_DISPATCHABLE, "cpu.stall.issue_no_dispatchable", "Issue stalled because no allocatable ROB entry is ready")
 PERF_COUNTER_DEF(STALL_ISSUE_FP_HEAD_BLOCKED, "cpu.stall.issue_fp_head_blocked", "Issue blocked by in-order FP serialization rule")

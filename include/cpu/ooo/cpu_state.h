@@ -279,6 +279,7 @@ struct CPUState {
     std::unique_ptr<NonBlockingCache> l1i_cache;
     std::unique_ptr<NonBlockingCache> l1d_cache;
     ICacheFetchState icache;
+    uint64_t redirect_stall_cycles;
     
     // 执行单元
     std::array<ExecutionUnit, OOOPipelineConfig::ALU_UNITS> alu_units;
@@ -323,6 +324,7 @@ struct CPUState {
         last_halt_pc(0),
         last_halt_message(),
         cpu_interface(nullptr),
+        redirect_stall_cycles(0),
         branch_mispredicts(0), pipeline_stalls(0),
         reservation_valid(false), reservation_addr(0),
         global_instruction_id(0) {
@@ -350,6 +352,28 @@ struct CPUState {
     void recordBranchMispredict() {
         ++branch_mispredicts;
         perf_counters.increment(PerfCounterId::BRANCH_MISPREDICTS);
+    }
+
+    void startRedirectStall(uint64_t cycles = OOOPipelineConfig::RECOVERY_REDIRECT_LATENCY) {
+        if (cycles > redirect_stall_cycles) {
+            redirect_stall_cycles = cycles;
+        }
+    }
+
+    bool hasRedirectStall() const {
+        return redirect_stall_cycles > 0;
+    }
+
+    bool advanceRedirectStallCycle() {
+        if (redirect_stall_cycles == 0) {
+            return false;
+        }
+        --redirect_stall_cycles;
+        return redirect_stall_cycles > 0;
+    }
+
+    uint64_t remainingRedirectStallCycles() const {
+        return redirect_stall_cycles;
     }
 
     uint8_t getLoadAddrUnknownPredictorCounter(uint64_t pc) const {

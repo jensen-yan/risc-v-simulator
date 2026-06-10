@@ -29,6 +29,26 @@ uint64_t currentRobOccupancy(const CPUState& state) {
         ReorderBuffer::MAX_ROB_ENTRIES - state.reorder_buffer->get_free_entry_count());
 }
 
+bool shouldDelayRedirectFetch(OooRecovery::Reason reason, bool has_explicit_pc) {
+    if (has_explicit_pc) {
+        return true;
+    }
+
+    switch (reason) {
+        case OooRecovery::Reason::BranchMispredict:
+        case OooRecovery::Reason::UnconditionalRedirect:
+        case OooRecovery::Reason::Trap:
+        case OooRecovery::Reason::Mret:
+        case OooRecovery::Reason::FenceI:
+        case OooRecovery::Reason::MemoryOrderViolation:
+            return true;
+        case OooRecovery::Reason::Exception:
+        case OooRecovery::Reason::Other:
+        default:
+            return false;
+    }
+}
+
 } // namespace
 
 const char* OooRecovery::reasonName(Reason reason) {
@@ -107,6 +127,9 @@ OooRecovery::Result OooRecovery::recoverFullPipeline(CPUState& state,
     Result result;
     if (request.has_restart_pc) {
         state.pc = request.restart_pc;
+    }
+    if (shouldDelayRedirectFetch(request.reason, request.has_restart_pc)) {
+        state.startRedirectStall();
     }
 
     result.flushed_rob_entries = currentRobOccupancy(state);
@@ -285,6 +308,7 @@ OooRecovery::Result OooRecovery::recoverYoungerThan(CPUState& state,
     Result result;
     if (request.has_redirect_pc) {
         state.pc = request.redirect_pc;
+        state.startRedirectStall();
     }
 
     result.fetch_buffer_dropped = clearQueue(state.fetch_buffer);

@@ -69,6 +69,8 @@ TEST_F(OooRecoveryTest, FullPipelineRecoveryClearsSpeculativeStructuresAndRecord
     const auto result = OooRecovery::recoverFullPipeline(state, request);
 
     EXPECT_EQ(state.pc, 0x200u);
+    EXPECT_EQ(state.remainingRedirectStallCycles(),
+              OOOPipelineConfig::RECOVERY_REDIRECT_LATENCY);
     EXPECT_EQ(result.flushed_rob_entries, 2u);
     EXPECT_EQ(result.fetch_buffer_dropped, 2u);
     EXPECT_EQ(result.flushed_cdb_entries, 1u);
@@ -100,6 +102,7 @@ TEST_F(OooRecoveryTest, FullPipelineRecoveryCanPreserveReservationAndExecutionUn
     request.reset_execution_units = false;
     OooRecovery::recoverFullPipeline(state, request);
 
+    EXPECT_EQ(state.remainingRedirectStallCycles(), 0u);
     EXPECT_TRUE(state.reservation_valid);
     EXPECT_EQ(state.reservation_addr, 0x2000u);
     EXPECT_TRUE(state.alu_units[0].busy);
@@ -143,6 +146,8 @@ TEST_F(OooRecoveryTest, YoungerThanRecoveryFlushesOnlyYoungerWork) {
     const auto result = OooRecovery::recoverYoungerThan(state, request);
 
     EXPECT_EQ(state.pc, 0x200u);
+    EXPECT_EQ(state.remainingRedirectStallCycles(),
+              OOOPipelineConfig::RECOVERY_REDIRECT_LATENCY);
     EXPECT_EQ(result.flushed_rob_entries, 1u);
     EXPECT_EQ(result.fetch_buffer_dropped, 1u);
     EXPECT_EQ(result.flushed_cdb_entries, 1u);

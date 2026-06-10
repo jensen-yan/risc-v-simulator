@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RISC-V 模拟器 LSU 乱序访存宏观设计导学</title>
+    <!-- Google Fonts 引入现代极简字体 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #080b11;
+            --card-bg: rgba(17, 24, 39, 0.7);
+            --card-border: rgba(56, 189, 248, 0.12);
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --neon-cyan: #38bdf8;
+            --neon-purple: #c084fc;
+            --neon-rose: #f43f5e;
+            --neon-emerald: #10b981;
+            --neon-amber: #f59e0b;
+            --glass-blur: blur(16px);
+            --shadow-glow: 0 0 20px rgba(56, 189, 248, 0.2);
+            --shadow-glow-rose: 0 0 20px rgba(244, 63, 94, 0.25);
+            --font-sans: 'Outfit', 'Noto Sans SC', -apple-system, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 5% 5%, rgba(56, 189, 248, 0.08) 0%, transparent 45%),
+                radial-gradient(circle at 95% 95%, rgba(192, 132, 252, 0.08) 0%, transparent 45%);
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 24px min(5vw, 60px);
+            border-bottom: 1px solid var(--card-border);
+            background: rgba(8, 11, 17, 0.8);
+            backdrop-filter: var(--glass-blur);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-title h1 {
+            font-size: 22px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .header-title p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+
+        .badge-ref {
+            color: var(--neon-cyan);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            background: rgba(56, 189, 248, 0.06);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+
+        .badge-ref:hover {
+            box-shadow: var(--shadow-glow);
+            background: rgba(56, 189, 248, 0.15);
+        }
+
+        main {
+            padding: 30px min(5vw, 60px);
+            max-width: 1500px;
+            margin: 0 auto;
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr 450px;
+            gap: 30px;
+            flex-grow: 1;
+        }
+
+        @media (max-width: 1200px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* 核心卡片容器 */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: var(--glass-blur);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            margin-bottom: 24px;
+            position: relative;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 5px;
+            height: 100%;
+            background: var(--neon-cyan);
+            border-radius: 16px 0 0 16px;
+        }
+
+        .card.purple::before { background: var(--neon-purple); }
+        .card.rose::before { background: var(--neon-rose); }
+        .card.emerald::before { background: var(--neon-emerald); }
+
+        .card-header {
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-header p.subtitle {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* 宏观组件网格介绍 */
+        .concept-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 768px) {
+            .concept-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .concept-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .concept-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(56, 189, 248, 0.2);
+        }
+
+        .concept-item h3 {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--neon-cyan);
+            margin-bottom: 6px;
+        }
+
+        .concept-item.purple h3 { color: var(--neon-purple); }
+        .concept-item.rose h3 { color: var(--neon-rose); }
+
+        .concept-item p {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* 交互仿真大面板 */
+        .sim-container {
+            display: grid;
+            grid-template-rows: auto 480px auto;
+            gap: 20px;
+        }
+
+        .scene-selector {
+            display: flex;
+            gap: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 8px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .scene-btn {
+            flex: 1;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .scene-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .scene-btn.active {
+            background: rgba(56, 189, 248, 0.1);
+            border-color: rgba(56, 189, 248, 0.25);
+            color: var(--neon-cyan);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .scene-btn.active.purple {
+            background: rgba(192, 132, 252, 0.1);
+            border-color: rgba(192, 132, 252, 0.25);
+            color: var(--neon-purple);
+            box-shadow: 0 0 20px rgba(192, 132, 252, 0.15);
+        }
+
+        /* 原生图形化仿真画布 */
+        .sim-canvas {
+            background: #05070a;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 20px;
+            padding: 24px;
+        }
+
+        .node {
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(30, 41, 59, 0.3);
+            border-radius: 10px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            z-index: 2;
+            transition: all 0.3s ease;
+        }
+
+        .node h3 {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 4px;
+            margin-bottom: 6px;
+        }
+
+        .node-content {
+            font-size: 11px;
+            color: var(--text-secondary);
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        .node-content span.highlight-val {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        /* 激活与高亮呼吸状态 */
+        .node.active-cyan {
+            border-color: var(--neon-cyan);
+            background: rgba(56, 189, 248, 0.06);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.15);
+        }
+        .node.active-cyan h3 { color: var(--neon-cyan); }
+
+        .node.active-purple {
+            border-color: var(--neon-purple);
+            background: rgba(192, 132, 252, 0.06);
+            box-shadow: 0 0 15px rgba(192, 132, 252, 0.15);
+        }
+        .node.active-purple h3 { color: var(--neon-purple); }
+
+        .node.active-rose {
+            animation: flash-red 1s infinite alternate;
+        }
+        .node.active-rose h3 { color: var(--neon-rose); }
+
+        @keyframes flash-red {
+            from { border-color: rgba(244, 63, 94, 0.3); background: rgba(244, 63, 94, 0.02); }
+            to { border-color: var(--neon-rose); background: rgba(244, 63, 94, 0.1); box-shadow: var(--shadow-glow-rose); }
+        }
+
+        /* SVG 数据连线 */
+        .sim-canvas svg.wiring {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .wire {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.04);
+            stroke-width: 2;
+            transition: all 0.3s ease;
+        }
+
+        .wire.flow-cyan {
+            stroke: var(--neon-cyan);
+            stroke-dasharray: 6 4;
+            animation: flow-dash 15s linear infinite;
+        }
+
+        .wire.flow-purple {
+            stroke: var(--neon-purple);
+            stroke-dasharray: 6 4;
+            animation: flow-dash 15s linear infinite;
+        }
+
+        .wire.flow-rose {
+            stroke: var(--neon-rose);
+            stroke-dasharray: 6 4;
+            animation: flow-dash 15s linear infinite;
+        }
+
+        @keyframes flow-dash {
+            to { stroke-dashoffset: -400; }
+        }
+
+        /* 运行控制条 */
+        .sim-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 10px;
+            padding: 12px 20px;
+        }
+
+        .step-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .step-label span.curr {
+            color: var(--neon-cyan);
+            font-weight: 700;
+        }
+        .step-label.purple span.curr {
+            color: var(--neon-purple);
+        }
+
+        .ctrl-btns {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .btn-primary-cyan {
+            background: var(--neon-cyan);
+            border-color: var(--neon-cyan);
+            color: #040609;
+        }
+
+        .btn-primary-cyan:hover:not(:disabled) {
+            background: #7dd3fc;
+            box-shadow: var(--shadow-glow);
+        }
+
+        .btn-primary-purple {
+            background: var(--neon-purple);
+            border-color: var(--neon-purple);
+            color: #040609;
+        }
+
+        .btn-primary-purple:hover:not(:disabled) {
+            background: #d8b4fe;
+            box-shadow: 0 0 20px rgba(192, 132, 252, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        /* 硬件状态追踪表 */
+        .hardware-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 15px;
+        }
+
+        @media (max-width: 600px) {
+            .hardware-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .hw-panel {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 8px;
+            padding: 14px;
+        }
+
+        .hw-panel h4 {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            border-left: 2.5px solid var(--neon-cyan);
+            padding-left: 6px;
+        }
+
+        .hw-panel.purple h4 {
+            border-left-color: var(--neon-purple);
+        }
+
+        .hw-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+
+        .hw-table th {
+            text-align: left;
+            padding: 6px 8px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .hw-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .highlight-row { background: rgba(56, 189, 248, 0.05); }
+        .highlight-row-purple { background: rgba(192, 132, 252, 0.05); }
+
+        /* 右边栏：文字解析卡片 */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .desc-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: var(--glass-blur);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .desc-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 5px;
+            height: 100%;
+            background: var(--neon-cyan);
+            border-radius: 16px 0 0 16px;
+        }
+
+        .desc-card.purple::before {
+            background: var(--neon-purple);
+        }
+
+        .desc-header {
+            margin-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding-bottom: 12px;
+        }
+
+        .desc-step-num {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--neon-cyan);
+            font-weight: 700;
+        }
+
+        .desc-card.purple .desc-step-num {
+            color: var(--neon-purple);
+        }
+
+        .desc-header h3 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-top: 4px;
+        }
+
+        .desc-body {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            flex-grow: 1;
+        }
+
+        .desc-body p {
+            margin-bottom: 12px;
+        }
+
+        .desc-body strong {
+            color: var(--text-primary);
+        }
+
+        .analysis-box {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px dashed rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 15px;
+        }
+
+        .analysis-title {
+            font-weight: 700;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .analysis-title svg {
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title">
+            <h1>LSU 乱序访存处理器设计宏观导学</h1>
+            <p>抛开代码细节，从数据流向、推测执行与自学习规避层面深度掌握 LSU 设计哲学</p>
+        </div>
+        <a href="file:///Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/ARCHITECTURE.md" class="badge-ref" target="_blank">📄 物理架构文档</a>
+    </header>
+
+    <main>
+        <!-- 左侧：主要仿真控制与画面 -->
+        <div class="left-section">
+            <!-- 核心设计思想简述 -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>LSU 三大宏观设计支柱</h2>
+                </div>
+                <div class="concept-grid">
+                    <div class="concept-item">
+                        <h3>1. 写操作隔离 (Buffer)</h3>
+                        <p>Store 指令计算出的数据决不能直接写进内存或 Cache，必须先寄存在 <strong>Store Buffer</strong> 中，直到该 Store 顺序提交时才刷入内存。</p>
+                    </div>
+                    <div class="concept-item purple">
+                        <h3>2. 读操作抢跑 (Speculate)</h3>
+                        <p>Load 指令的内存访问延迟极高。为了隐藏延迟，LSU 允许 Load 指令在地址不冲突的前提下，越过前方的 Store 提前读取 Cache。</p>
+                    </div>
+                    <div class="concept-item rose">
+                        <h3>3. 违规自学习 (Learn)</h3>
+                        <p>盲目抢跑若撞上“物理地址重叠”，会导致读脏数据。LSU 在回滚的同时会用<strong>黑名单对</strong>记录下它们，使 Load 下次学会挂起等待。</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 可交互仿真区 -->
+            <div class="card purple" id="canvas-card" style="padding-bottom: 16px;">
+                <div class="card-header" style="margin-bottom: 15px;">
+                    <h2>Interactive Sandbox <span style="font-weight: 400; font-size: 14px; color: var(--text-secondary);">微架构交互式沙盒</span></h2>
+                    <span class="badge-ref" id="flow-lbl" style="border-radius: 4px; font-size: 11px;">Scene 1: SW -> LD</span>
+                </div>
+
+                <div class="sim-container">
+                    <!-- 场景切换 -->
+                    <div class="scene-selector">
+                        <button class="scene-btn active" id="btn-scene-0" onclick="changeScene(0)">场景 A：Store-to-Load 旁路转发</button>
+                        <button class="scene-btn" id="btn-scene-1" onclick="changeScene(1)">场景 B：内存序违规与自学习规避</button>
+                    </div>
+
+                    <!-- 仿真网格图 -->
+                    <div class="sim-canvas" id="canvas">
+                        <!-- SVG 拓扑接线 -->
+                        <svg class="wiring">
+                            <defs>
+                                <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="rgba(255,255,255,0.1)"/>
+                                </marker>
+                                <marker id="arrow-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8"/>
+                                </marker>
+                                <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#c084fc"/>
+                                </marker>
+                                <marker id="arrow-rose" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#f43f5e"/>
+                                </marker>
+                            </defs>
+
+                            <!-- RS to Load unit (0,0) -> (1,0) -->
+                            <path id="w-rs-lu" class="wire" d="M 280 80 H 380" marker-end="url(#arrow)" />
+                            <!-- RS to Store unit (0,0) -> (1,1) -->
+                            <path id="w-rs-su" class="wire" d="M 280 110 L 380 290" marker-end="url(#arrow)" />
+                            
+                            <!-- Load unit to Store Buffer (1,0) -> (2,1) -->
+                            <path id="w-lu-sb" class="wire" d="M 520 110 L 610 270" marker-end="url(#arrow)" />
+                            <!-- Store unit to Store Buffer (1,1) -> (2,1) -->
+                            <path id="w-su-sb" class="wire" d="M 520 310 H 610" marker-end="url(#arrow)" />
+                            
+                            <!-- Load unit to Cache (1,0) -> (2,0) -->
+                            <path id="w-lu-cache" class="wire" d="M 520 80 H 610" marker-end="url(#arrow)" />
+                            
+                            <!-- Store Buffer back to Load Unit (Forwarding) (2,1) -> (1,0) -->
+                            <path id="w-sb-lu" class="wire" d="M 610 320 L 470 140" marker-end="url(#arrow)" />
+                            
+                            <!-- Store unit to Memory Order Check (1,1) -> (3,1) -->
+                            <path id="w-su-moc" class="wire" d="M 520 325 H 850" marker-end="url(#arrow)" />
+                            <!-- Memory Order Check to Pipeline Recovery (3,1) -> (3,0) -->
+                            <path id="w-moc-rec" class="wire" d="M 940 270 V 160" marker-end="url(#arrow)" />
+                            
+                            <!-- Store Buffer to L1D Cache Commit (2,1) -> (2,0) -->
+                            <path id="w-sb-cache" class="wire" d="M 700 270 V 150" marker-end="url(#arrow)" />
+
+                            <!-- Load unit to Blacklist (1,0) -> (0,1) -->
+                            <path id="w-lu-bl" class="wire" d="M 410 140 L 220 270" marker-end="url(#arrow)" />
+                        </svg>
+
+                        <!-- 第一排硬件部件 -->
+                        <div class="node" id="n-rs">
+                            <h3>保留站 & ROB <span>RS / ROB</span></h3>
+                            <div class="node-content">
+                                <p>Load 状态: <span class="highlight-val" id="val-rs-ld">-</span></p>
+                                <p>Store 状态: <span class="highlight-val" id="val-rs-st">-</span></p>
+                            </div>
+                        </div>
+
+                        <div class="node" id="n-lu">
+                            <h3>Load 执行单元 <span>Load Unit</span></h3>
+                            <div class="node-content">
+                                <p>读物理地址: <span class="highlight-val" id="val-lu-addr">-</span></p>
+                                <p>内部状态: <span class="highlight-val" id="val-lu-status">-</span></p>
+                            </div>
+                        </div>
+
+                        <div class="node" id="n-cache">
+                            <h3>L1D Cache <span>一级缓存</span></h3>
+                            <div class="node-content">
+                                <p>状态: <span class="highlight-val" id="val-cache-status">Idle</span></p>
+                                <p>0x8000 处数据: <span class="highlight-val">0x0000</span></p>
+                            </div>
+                        </div>
+
+                        <div class="node" id="n-rec">
+                            <h3>流水线恢复器 <span>OooRecovery</span></h3>
+                            <div class="node-content">
+                                <p>回滚状态: <span class="highlight-val" id="val-rec-status">Normal</span></p>
+                                <p>重组原因: <span class="highlight-val" id="val-rec-reason">-</span></p>
+                            </div>
+                        </div>
+
+                        <!-- 第二排硬件部件 -->
+                        <div class="node" id="n-bl">
+                            <h3>黑名单预测器 <span>Blacklist Pairs</span></h3>
+                            <div class="node-content">
+                                <p>冲突对阻断器：</p>
+                                <p>内容: <span class="highlight-val" id="val-bl-pair">Empty</span></p>
+                            </div>
+                        </div>
+
+                        <div class="node" id="n-su">
+                            <h3>Store 执行单元 <span>Store Unit</span></h3>
+                            <div class="node-content">
+                                <p>写物理地址: <span class="highlight-val" id="val-su-addr">-</span></p>
+                                <p>物理写入值: <span class="highlight-val" id="val-su-val">-</span></p>
+                            </div>
+                        </div>
+
+                        <div class="node" id="n-sb">
+                            <h3>Store Buffer <span>写缓冲区</span></h3>
+                            <div class="node-content">
+                                <p>待刷内存队列：</p>
+                                <p>已缓存项数: <span class="highlight-val" id="val-sb-count">0</span></p>
+                            </div>
+                        </div>
+
+                        <div class="node" id="n-moc">
+                            <h3>内存序检查器 <span>Memory Order Check</span></h3>
+                            <div class="node-content">
+                                <p>RAW冲突监控：</p>
+                                <p>违规信号: <span class="highlight-val" id="val-moc-violation">FALSE</span></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 仿真控制 -->
+                    <div class="sim-controls">
+                        <div class="step-label" id="step-lbl">
+                            场景步骤：<span class="curr" id="curr-step-num">1</span> / <span id="total-step-num">4</span>
+                        </div>
+                        <div class="ctrl-btns">
+                            <button class="btn" id="btn-reset" onclick="resetScene()">重置</button>
+                            <button class="btn" id="btn-prev" onclick="prevStep()" disabled>上一步</button>
+                            <button class="btn btn-primary-cyan" id="btn-next" onclick="nextStep()">单步推进 &rarr;</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 下层硬件跟踪表格 -->
+            <div class="hardware-grid">
+                <div class="hw-panel" id="rob-panel">
+                    <h4>重排序缓冲区 (ROB) 状态</h4>
+                    <table class="hw-table" id="table-rob">
+                        <thead>
+                            <tr>
+                                <th>ROB条目</th>
+                                <th>指令流</th>
+                                <th>宏观状态</th>
+                                <th>地址计算</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-rob">
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="hw-panel purple" id="sb-panel">
+                    <h4>Store Buffer 寄存细节</h4>
+                    <table class="hw-table" id="table-sb">
+                        <thead>
+                            <tr>
+                                <th>缓冲索引</th>
+                                <th>目的物理地址</th>
+                                <th>寄存值</th>
+                                <th>是否就绪</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-sb">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：教学与原理拆解卡片 -->
+        <div class="sidebar">
+            <div class="desc-card" id="desc-card">
+                <div class="desc-header">
+                    <span class="desc-step-num" id="lbl-step-prefix">步骤 1</span>
+                    <h3 id="lbl-step-title">场景未就绪</h3>
+                </div>
+                <div class="desc-body" id="lbl-step-desc">
+                    请在左侧切换场景，并使用“单步推进”逐步浏览宏观运行图。
+                </div>
+                
+                <div class="analysis-box">
+                    <div class="analysis-title" id="val-analysis-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--neon-cyan)" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                        <span>设计得失解析</span>
+                    </div>
+                    <div id="val-analysis-text">
+                        加载步骤后展示设计折衷。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 定义场景数据 (完全剥离C++细节，专注于宏观数据流与大白话)
+        const scenes = [
+            // 场景 0: Store-to-Load 旁路转发
+            {
+                name: "Store-to-Load 旁路转发",
+                totalSteps: 4,
+                steps: [
+                    {
+                        title: "指令进入保留站，地址就绪",
+                        desc: "<p>双行指令 <code>sw x10, 0(s1)</code> (Store) 和 <code>ld x11, 0(s1)</code> (Load) 被译码分发。</p><p>此时，Store 指令的基地址寄存器 <code>s1</code> 已经算出，数据源 <code>x10 = 0xDEADBEEF</code> 也就绪了。</p><p>Load 指令由于排在 Store 后面，进入挂起等待发射状态。</p>",
+                        analysis: "这一步中，Store 已经具备了执行的一切条件。LSU 此时开始给 Store 规划向 Store Buffer 写入的准备动作。",
+                        activeNodes: ["n-rs"],
+                        activeWires: ["w-rs-su"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sw x10, 0(s1)", status: "已就绪", addr: "0x8000" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s1)", status: "等发射", addr: "未就绪" }
+                        ],
+                        sb: [],
+                        updates: {
+                            "val-rs-st": "Ready (就绪)", "val-rs-ld": "Waiting (挂起)",
+                            "val-lu-addr": "-", "val-lu-status": "-",
+                            "val-su-addr": "-", "val-su-val": "-",
+                            "val-sb-count": "0", "val-moc-violation": "FALSE",
+                            "val-rec-status": "Normal", "val-rec-reason": "-",
+                            "val-bl-pair": "Empty"
+                        }
+                    },
+                    {
+                        title: "Store 执行，数据暂存 Store Buffer",
+                        desc: "<p>Store 执行单元把物理地址 <code>0x8000</code> 算了出来，并带上要写入的数据 <code>0xDEADBEEF</code>。</p><p><strong>宏观思想核心</strong>：这个写入并没有发给 L1D Cache。而是暂存在 <strong>Store Buffer (SB)</strong> 里。此时外面的物理内存和 Cache 里这里仍然存的是老数据！</p>",
+                        analysis: "【为什么要写到 SB 而不是内存？】如果此时直接改内存，一旦前面的老指令发生中断或者分支预测失误，这个改动就无法回滚，造成灾难。所以 SB 是未提交 Store 的隔离带。",
+                        activeNodes: ["n-su", "n-sb"],
+                        activeWires: ["w-su-sb"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sw x10, 0(s1)", status: "执行中", addr: "0x8000" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s1)", status: "已就绪", addr: "0x8000" }
+                        ],
+                        sb: [
+                            { idx: "SB 0", addr: "0x8000", val: "0xDEADBEEF", ready: "已缓存" }
+                        ],
+                        updates: {
+                            "val-rs-st": "Executing (执行)", "val-rs-ld": "Ready (就绪)",
+                            "val-su-addr": "0x8000", "val-su-val": "0xDEADBEEF",
+                            "val-sb-count": "1"
+                        }
+                    },
+                    {
+                        title: "Load 单元发射，触发旁路转发",
+                        desc: "<p>Load 指令发射，物理地址也算出来为 <code>0x8000</code>。</p><p>Load 去访问 Cache 之前，LSU 会<strong>前置检索 Store Buffer</strong>。</p><p>LSU 发现 SB 0 存储的地址也是 <code>0x8000</code>！于是发生<strong>旁路转发（Forwarding）</strong>，直接在 Store Buffer 里截获了 <code>0xDEADBEEF</code> 并返回给 Load。</p>",
+                        analysis: "【性能收益】Load 指令彻底免去了去 L1D Cache 甚至去外存读取的漫长延迟。数据从 Store Buffer 瞬间抄了近路流回 Load 单元，极大压缩了 RAW 依赖链的耗时！",
+                        activeNodes: ["n-lu", "n-sb"],
+                        activeWires: ["w-sb-lu"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sw x10, 0(s1)", status: "已完成", addr: "0x8000" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s1)", status: "已完成 (转发)", addr: "0x8000" }
+                        ],
+                        sb: [
+                            { idx: "SB 0", addr: "0x8000", val: "0xDEADBEEF", ready: "已缓存" }
+                        ],
+                        updates: {
+                            "val-rs-ld": "Completed (完成)", "val-lu-addr": "0x8000", "val-lu-status": "Forwarded (旁路成功)"
+                        }
+                    },
+                    {
+                        title: "Store 提交退休，落库 Cache",
+                        desc: "<p>Store 指令成为 ROB 头部，由于没有任何异常，被安全<strong>顺序提交（Commit）</strong>。</p><p>此时，Store 终于拿到了“通行证”，把 <code>0xDEADBEEF</code> 从 Store Buffer 写入了 <strong>L1D Cache</strong>。然后清空 Store Buffer。</p>",
+                        analysis: "此时，这笔写入才真正对外部系统和其他核“全局可见”。整个过程完美保持了串行逻辑的正确性。",
+                        activeNodes: ["n-sb", "n-cache"],
+                        activeWires: ["w-sb-cache"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sw x10, 0(s1)", status: "已提交(Retire)", addr: "0x8000" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s1)", status: "已提交(Retire)", addr: "0x8000" }
+                        ],
+                        sb: [],
+                        updates: {
+                            "val-sb-count": "0", "val-cache-status": "Written (已写入)",
+                            "val-su-addr": "-", "val-su-val": "-",
+                            "val-lu-addr": "-", "val-lu-status": "-"
+                        }
+                    }
+                ]
+            },
+            // 场景 1: 内存序违规与自学习规避
+            {
+                name: "内存序违规与回滚规避",
+                totalSteps: 7,
+                steps: [
+                    {
+                        title: "Store 地址未知，Load 就绪",
+                        desc: "<p>指令流为：<code>sd x10, 0(s1)</code> (Store, PC 0x1000) 和 <code>ld x11, 0(s2)</code> (Load, PC 0x1008)。物理上 s1=s2=0x8000。</p><p>但是，Store 的基地址寄存器 <code>s1</code> 还没算出来（地址未知）。而 Load 的 <code>s2</code> 早就就绪了。</p><p>黑名单预测器目前为空，没有历史违规警示。</p>",
+                        analysis: "【面临抉择】此时 Load 该不该执行？Store 的地址还没出来，它们有可能是同一个地址，也有可能是不同的地址。等，还是不等？LSU 选择超前推测（不等）。",
+                        activeNodes: ["n-rs"],
+                        activeWires: ["w-rs-lu"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sd x10, 0(s1)", status: "地址未知", addr: "未就绪" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s2)", status: "等发射", addr: "0x8000" }
+                        ],
+                        sb: [],
+                        updates: {
+                            "val-rs-st": "Addr Pending (等地址)", "val-rs-ld": "Ready (就绪)",
+                            "val-lu-addr": "-", "val-lu-status": "-",
+                            "val-su-addr": "-", "val-su-val": "-",
+                            "val-sb-count": "0", "val-moc-violation": "FALSE",
+                            "val-rec-status": "Normal", "val-rec-reason": "-",
+                            "val-bl-pair": "Empty"
+                        }
+                    },
+                    {
+                        title: "Load 盲目推测“抢跑”",
+                        desc: "<p>Load 决定进行<strong>推测执行 (Speculation)</strong>。它越过前面还没算好地址的 Store，直接拿着 <code>0x8000</code> 去查了 L1D Cache。</p><p>Cache 命中了旧的数据 <code>0x0000</code>。Load 揣着旧值完成了计算，在 ROB 中写回，标记为“推测完成”。</p>",
+                        analysis: "如果这两个地址其实不重合，那这次抢跑就赚大了，成功掩盖了访存开销！但由于这一次 s1 其实也等于 0x8000，危险正在逼近...",
+                        activeNodes: ["n-lu", "n-cache"],
+                        activeWires: ["w-lu-cache"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sd x10, 0(s1)", status: "地址未知", addr: "未就绪" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s2)", status: "已完成 (推测)", addr: "0x8000" }
+                        ],
+                        sb: [],
+                        updates: {
+                            "val-rs-ld": "Completed (推测完成)", "val-lu-addr": "0x8000", "val-lu-status": "Speculative (推测读取)"
+                        }
+                    },
+                    {
+                        title: "Store 算出物理地址，发现冲突！",
+                        desc: "<p>Store 终于算出了地址 <code>0x8000</code>，并带上写入值 <code>0xAAAA</code> 准备发射。</p><p><strong>内存序检查器 (MOC)</strong> 开始履行职责：它向后扫描 ROB，发现年轻的 Load (PC 0x1008) 居然早已经推测完成了，而且读的也是 <code>0x8000</code>！</p><p>由于 Store 没写，Load 读了旧的错误数据。这就是 <strong>RAW 内存序违规</strong>！</p>",
+                        analysis: "【发现违规】此时如果不管，Load 指令就会拿着错误的值 (0x0) 提交，造成整个计算系统逻辑崩溃。MOC 必须立刻拉响违规警报！",
+                        activeNodes: ["n-su", "n-moc"],
+                        activeWires: ["w-su-moc"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sd x10, 0(s1)", status: "执行中", addr: "0x8000" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s2)", status: "违规 (Violation)", addr: "0x8000" }
+                        ],
+                        sb: [
+                            { idx: "SB 0", addr: "0x8000", val: "0xAAAA", ready: "已缓存" }
+                        ],
+                        updates: {
+                            "val-su-addr": "0x8000", "val-su-val": "0xAAAA",
+                            "val-sb-count": "1", "val-moc-violation": "TRUE (违规警告!)"
+                        }
+                    },
+                    {
+                        title: "惩罚：流水线回滚，记录黑名单",
+                        desc: "<p>警报拉响后，<strong>OooRecovery 恢复器</strong>启动：</p><p>1. 它将产生违规的 PC 对 <code>(LD_PC: 0x1008, ST_PC: 0x1000)</code> 塞入<strong>黑名单预测器</strong>中。</p><p>2. 发射 <strong>Pipeline Flush</strong> 信号，将 Store 之后的所有指令（包括那个抢跑犯错的 Load）全部闪红清空！</p>",
+                        analysis: "【代价分析】流水线 Flush 代价高昂。所有已经做好的推测工作全部作废，处理器重新从 Store 指令处重新获取指令重新运行。但这是保证程序 100% 正确的唯一底线。",
+                        activeNodes: ["n-rec", "n-bl"],
+                        activeWires: ["w-moc-rec"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sd x10, 0(s1)", status: "待重运行", addr: "0x8000" }
+                        ],
+                        sb: [],
+                        updates: {
+                            "val-rec-status": "FLUSHING (清空流水线)", "val-rec-reason": "MemoryOrderViolation",
+                            "val-bl-pair": "ld:0x1008 &larr; sd:0x1000", "val-moc-violation": "FALSE",
+                            "val-sb-count": "0", "val-lu-addr": "-", "val-lu-status": "-",
+                            "val-su-addr": "-", "val-su-val": "-"
+                        }
+                    },
+                    {
+                        title: "重新运行，Store 先执行",
+                        desc: "<p>流水线重整旗鼓。Store 指令 (PC 0x1000) 重新被分派执行，再次算出物理地址 <code>0x8000</code>，并将最新值 <code>0xAAAA</code> 存入 Store Buffer 中。</p><p>与此同时，那个曾经违规的 Load 指令 (PC 0x1008) 也被重新取指，放回保留站（RS）中等待。</p>",
+                        analysis: "由于流水线状态被全部回滚重构，整个处理器重新处于安全状态，但黑名单预测器里现在多了一条宝贵的“警示线”。",
+                        activeNodes: ["n-su"],
+                        activeWires: ["w-su-sb"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sd x10, 0(s1)", status: "执行完成", addr: "0x8000" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s2)", status: "等发射", addr: "0x8000" }
+                        ],
+                        sb: [
+                            { idx: "SB 0", addr: "0x8000", val: "0xAAAA", ready: "已缓存" }
+                        ],
+                        updates: {
+                            "val-rec-status": "Normal", "val-rec-reason": "-",
+                            "val-su-addr": "0x8000", "val-su-val": "0xAAAA",
+                            "val-sb-count": "1"
+                        }
+                    },
+                    {
+                        title: "Load 检查黑名单，乖乖挂起",
+                        desc: "<p>Load 指令 (PC 0x1008) 试图再次提前抢跑。</p><p>但在发射前，它检索了<strong>黑名单预测器</strong>。由于它的 PC <code>0x1008</code> 与排在它前面的 Store <code>0x1000</code> 形成了违规对，且该 Store 的物理地址刚刚才写入、还没提交释放。</p><p><strong>自学习生效</strong>：Load 被黑名单强行阻断发射，只能在保留站（RS）里老老实实挂起等待！</p>",
+                        analysis: "【自学习机制的优越性】这一次 Load 学聪明了，没有选择赌博。挂起等待虽然损失了一点点并行度，但完美避开了下一次流水线崩溃清空（Flush）的巨大惩罚！",
+                        activeNodes: ["n-lu", "n-bl"],
+                        activeWires: ["w-lu-bl"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sd x10, 0(s1)", status: "执行完成", addr: "0x8000" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s2)", status: "被阻断等待", addr: "0x8000" }
+                        ],
+                        sb: [
+                            { idx: "SB 0", addr: "0x8000", val: "0xAAAA", ready: "已缓存" }
+                        ],
+                        updates: {
+                            "val-rs-ld": "Blocked (阻断挂起)", "val-lu-status": "Blocked by Blacklist"
+                        }
+                    },
+                    {
+                        title: "Store 提交，Load 从 Buffer 读到正确值",
+                        desc: "<p>Store 提交退休，数据 <code>0xAAAA</code> 从 Store Buffer 写入 L1D Cache。Load 收到释放信号后发射执行。</p><p>由于 Store 已经完成了地址判定并放行，Load 能够从 Cache 或 Store Buffer 里稳稳地拿到真正写入的值 <code>0xAAAA</code>，安全地完成执行并提交！</p>",
+                        analysis: "通过这一次巧妙的“踩刹车”等待，处理器避免了无限重装违规的死循环，在乱序的波涛中平稳航行。这就是乱序访存控制的精髓所在。",
+                        activeNodes: ["n-sb", "n-cache", "n-lu"],
+                        activeWires: ["w-sb-cache", "w-sb-lu"],
+                        rob: [
+                            { entry: "ROB 0", inst: "sd x10, 0(s1)", status: "已提交(Retire)", addr: "0x8000" },
+                            { entry: "ROB 1", inst: "ld x11, 0(s2)", status: "已提交(Retire)", addr: "0x8000" }
+                        ],
+                        sb: [],
+                        updates: {
+                            "val-sb-count": "0", "val-cache-status": "Written (已写入)",
+                            "val-rs-st": "-", "val-rs-ld": "-",
+                            "val-su-addr": "-", "val-su-val": "-",
+                            "val-lu-addr": "-", "val-lu-status": "-"
+                        }
+                    }
+                ]
+            }
+        ];
+
+        let activeScene = 0;
+        let activeStep = 0;
+
+        window.onload = function() {
+            changeScene(0);
+        };
+
+        function changeScene(sceneIdx) {
+            activeScene = sceneIdx;
+            activeStep = 0;
+            
+            // 按钮状态更新
+            document.querySelectorAll('.scene-btn').forEach((btn, idx) => {
+                if (idx === sceneIdx) {
+                    btn.classList.add('active');
+                    if (sceneIdx === 1) btn.classList.add('purple');
+                } else {
+                    btn.classList.remove('active');
+                    btn.classList.remove('purple');
+                }
+            });
+
+            // 更新标签
+            const canvasCard = document.getElementById('canvas-card');
+            const flowLbl = document.getElementById('flow-lbl');
+            const stepLbl = document.getElementById('step-lbl');
+            if (sceneIdx === 0) {
+                canvasCard.className = "card purple";
+                flowLbl.innerText = "场景 A: SW -> LD (旁路)";
+                flowLbl.style.borderColor = "rgba(192, 132, 252, 0.3)";
+                flowLbl.style.background = "rgba(192, 132, 252, 0.06)";
+                flowLbl.style.color = "var(--neon-purple)";
+                stepLbl.className = "step-label";
+            } else {
+                canvasCard.className = "card rose";
+                flowLbl.innerText = "场景 B: SD -> LD (违规回滚)";
+                flowLbl.style.borderColor = "rgba(244, 63, 94, 0.3)";
+                flowLbl.style.background = "rgba(244, 63, 94, 0.06)";
+                flowLbl.style.color = "var(--neon-rose)";
+                stepLbl.className = "step-label purple";
+            }
+
+            renderStep();
+        }
+
+        function resetScene() {
+            activeStep = 0;
+            renderStep();
+        }
+
+        function prevStep() {
+            if (activeStep > 0) {
+                activeStep--;
+                renderStep();
+            }
+        }
+
+        function nextStep() {
+            const sc = scenes[activeScene];
+            if (activeStep < sc.totalSteps - 1) {
+                activeStep++;
+                renderStep();
+            }
+        }
+
+        function renderStep() {
+            const sc = scenes[activeScene];
+            const step = sc.steps[activeStep];
+
+            // 1. 更新控制面板文本
+            document.getElementById('curr-step-num').innerText = activeStep + 1;
+            document.getElementById('total-step-num').innerText = sc.totalSteps;
+            document.getElementById('btn-prev').disabled = activeStep === 0;
+            document.getElementById('btn-next').disabled = activeStep === sc.totalSteps - 1;
+
+            // 2. 更新右侧详解
+            const descCard = document.getElementById('desc-card');
+            if (activeScene === 1) {
+                descCard.className = "desc-card purple";
+            } else {
+                descCard.className = "desc-card";
+            }
+            document.getElementById('lbl-step-prefix').innerText = `步骤 ${activeStep + 1} / ${sc.totalSteps}`;
+            document.getElementById('lbl-step-title').innerText = step.title;
+            document.getElementById('lbl-step-desc').innerHTML = step.desc;
+            document.getElementById('val-analysis-text').innerText = step.analysis;
+
+            // 3. 更新表格 (ROB)
+            const tbodyRob = document.getElementById('tbody-rob');
+            tbodyRob.innerHTML = "";
+            step.rob.forEach(row => {
+                let statusStyle = "";
+                if (row.status.includes("完成") || row.status.includes("转发")) statusStyle = "color: var(--neon-emerald); font-weight:700;";
+                if (row.status.includes("提交")) statusStyle = "color: var(--neon-purple);";
+                if (row.status.includes("违规")) statusStyle = "color: var(--neon-rose); font-weight:700;";
+
+                let highlightClass = "";
+                if (row.status.includes("执行中") || row.status.includes("违规")) {
+                    highlightClass = activeScene === 0 ? "highlight-row" : "highlight-row-purple";
+                }
+
+                tbodyRob.innerHTML += `
+                    <tr class="${highlightClass}">
+                        <td><strong>${row.entry}</strong></td>
+                        <td><code>${row.inst}</code></td>
+                        <td><span style="${statusStyle}">${row.status}</span></td>
+                        <td><code style="font-size:12px;">${row.addr}</code></td>
+                    </tr>
+                `;
+            });
+
+            // 4. 更新表格 (Store Buffer)
+            const tbodySb = document.getElementById('tbody-sb');
+            tbodySb.innerHTML = "";
+            if (step.sb.length === 0) {
+                tbodySb.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 12px 0;">(空 Store Buffer)</td></tr>`;
+            } else {
+                step.sb.forEach(row => {
+                    tbodySb.innerHTML += `
+                        <tr class="highlight-row-purple">
+                            <td><strong>${row.idx}</strong></td>
+                            <td><code>${row.addr}</code></td>
+                            <td><code>${row.val}</code></td>
+                            <td><span style="color: var(--neon-cyan);">${row.ready}</span></td>
+                        </tr>
+                    `;
+                });
+            }
+
+            // 5. 更新节点与线路样式
+            // 节点复位
+            document.querySelectorAll('.node').forEach(nd => {
+                nd.classList.remove('active-cyan');
+                nd.classList.remove('active-purple');
+                nd.classList.remove('active-rose');
+            });
+
+            const activeColor = activeScene === 0 ? 'active-cyan' : 'active-purple';
+            
+            step.activeNodes.forEach(nodeId => {
+                const nd = document.getElementById(nodeId);
+                if (nd) {
+                    if (nodeId === 'n-rec' || (activeScene === 1 && activeStep === 2 && nodeId === 'n-moc')) {
+                        nd.classList.add('active-rose');
+                    } else {
+                        nd.classList.add(activeColor);
+                    }
+                }
+            });
+
+            // 线路复位
+            document.querySelectorAll('.wire').forEach(w => {
+                w.className.baseVal = "wire";
+                w.style.stroke = "rgba(255,255,255,0.04)";
+                w.setAttribute("marker-end", "url(#arrow)");
+            });
+
+            const flowColor = activeScene === 0 ? 'flow-cyan' : 'flow-purple';
+            if (step.activeWires) {
+                step.activeWires.forEach(wireId => {
+                    const w = document.getElementById(wireId);
+                    if (w) {
+                        if (wireId === 'w-moc-rec' || (activeScene === 1 && activeStep === 2 && wireId === 'w-su-moc')) {
+                            w.className.baseVal = "wire flow-rose";
+                            w.style.stroke = "var(--neon-rose)";
+                            w.setAttribute("marker-end", "url(#arrow-rose)");
+                        } else {
+                            w.className.baseVal = `wire ${flowColor}`;
+                            w.style.stroke = activeScene === 0 ? "var(--neon-cyan)" : "var(--neon-purple)";
+                            w.setAttribute("marker-end", activeScene === 0 ? "url(#arrow-cyan)" : "url(#arrow-purple)");
+                        }
+                    }
+                });
+            }
+
+            // 6. 更新其他散落硬件字段
+            for (const [id, value] of Object.entries(step.updates || {})) {
+                const el = document.getElementById(id);
+                if (el) el.innerText = value;
+            }
+        }
+    </script>
+</body>
+</html>

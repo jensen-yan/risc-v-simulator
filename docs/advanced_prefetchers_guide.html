@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>现代处理器高级预取器 (Hardware Prefetchers) 交互全景图</title>
+    <!-- Google Fonts 引入现代极简字体 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #040609;
+            --card-bg: rgba(13, 18, 30, 0.75);
+            --card-border: rgba(56, 189, 248, 0.15);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --neon-cyan: #38bdf8;
+            --neon-purple: #c084fc;
+            --neon-rose: #f43f5e;
+            --neon-emerald: #10b981;
+            --neon-amber: #f59e0b;
+            --glass-blur: blur(20px);
+            --font-sans: 'Outfit', 'Noto Sans SC', -apple-system, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(192, 132, 252, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 85% 80%, rgba(56, 189, 248, 0.05) 0%, transparent 40%);
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 24px min(5vw, 60px);
+            border-bottom: 1px solid var(--card-border);
+            background: rgba(4, 6, 9, 0.85);
+            backdrop-filter: var(--glass-blur);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-title h1 {
+            font-size: 22px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .header-title p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+
+        main {
+            padding: 30px min(5vw, 60px);
+            max-width: 1500px;
+            margin: 0 auto;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            flex-grow: 1;
+        }
+
+        /* 宏观分类对比表 */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: var(--glass-blur);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            position: relative;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 5px;
+            height: 100%;
+            background: linear-gradient(to bottom, var(--neon-cyan), var(--neon-purple));
+            border-radius: 16px 0 0 16px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* 时空分类科普 */
+        .concept-split {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 768px) {
+            .concept-split {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .concept-box {
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .concept-box.cyan h3 { color: var(--neon-cyan); border-left: 3px solid var(--neon-cyan); }
+        .concept-box.purple h3 { color: var(--neon-purple); border-left: 3px solid var(--neon-purple); }
+
+        .concept-box h3 {
+            font-size: 15px;
+            font-weight: 700;
+            padding-left: 10px;
+            margin-bottom: 10px;
+        }
+
+        .concept-box p {
+            font-size: 12.5px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        /* 大对比表格 */
+        .matrix-container {
+            overflow-x: auto;
+            margin-bottom: 20px;
+        }
+
+        .matrix-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            text-align: left;
+        }
+
+        .matrix-table th {
+            padding: 12px 16px;
+            color: var(--text-secondary);
+            border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+            font-weight: 600;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .matrix-table td {
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            line-height: 1.5;
+        }
+
+        .matrix-table tr:hover {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .pref-name {
+            font-weight: 700;
+            font-size: 13px;
+        }
+        .pref-name.cyan { color: var(--neon-cyan); }
+        .pref-name.purple { color: var(--neon-purple); }
+        .pref-name.rose { color: var(--neon-rose); }
+        .pref-name.emerald { color: var(--neon-emerald); }
+        .pref-name.amber { color: var(--neon-amber); }
+
+        .score-bar {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            width: 80px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+
+        .score-fill {
+            height: 100%;
+            border-radius: 3px;
+        }
+
+        /* 交互仿真实验室 */
+        .lab-layout {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 900px) {
+            .lab-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .lab-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .lab-menu-btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            color: var(--text-secondary);
+            padding: 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.3s ease;
+        }
+
+        .lab-menu-btn:hover {
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-primary);
+        }
+
+        .lab-menu-btn.active {
+            color: var(--text-primary);
+            border-color: rgba(56, 189, 248, 0.3);
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(192, 132, 252, 0.08));
+            box-shadow: 0 4px 20px rgba(56, 189, 248, 0.1);
+        }
+
+        .lab-menu-btn h4 {
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .lab-menu-btn.active.s-stride h4 { color: var(--neon-cyan); }
+        .lab-menu-btn.active.s-bop h4 { color: var(--neon-purple); }
+        .lab-menu-btn.active.s-sms h4 { color: var(--neon-emerald); }
+        .lab-menu-btn.active.s-berti h4 { color: var(--neon-rose); }
+
+        .lab-menu-btn p {
+            font-size: 11px;
+            line-height: 1.4;
+        }
+
+        /* 模拟面板内容 */
+        .lab-stage {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            min-height: 480px;
+        }
+
+        .lab-stage-header {
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+            padding-bottom: 12px;
+        }
+
+        .lab-stage-header h3 {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .lab-stage-header p {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* Stride 预取器特有样式 */
+        .stride-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .stride-table th {
+            text-align: left;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-secondary);
+        }
+
+        .stride-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .confidence-badge {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--neon-amber);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 700;
+        }
+
+        .confidence-badge.steady {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--neon-emerald);
+        }
+
+        .confidence-badge.init {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-secondary);
+        }
+
+        /* BOP 预取器特有样式 */
+        .bop-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 600px) {
+            .bop-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .score-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .score-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 6px;
+            padding: 10px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .score-item.best {
+            border-color: var(--neon-purple);
+            background: rgba(192, 132, 252, 0.06);
+        }
+
+        .score-item span.num {
+            font-family: monospace;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .recent-buffer {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+
+        .buffer-box {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        /* SMS 空间预取样式 */
+        .sms-page-grid {
+            display: grid;
+            grid-template-columns: repeat(16, 1fr);
+            gap: 4px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .sms-block {
+            aspect-ratio: 1;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            font-family: monospace;
+            color: rgba(255, 255, 255, 0.2);
+            transition: all 0.2s ease;
+        }
+
+        .sms-block.accessed {
+            background: var(--neon-emerald);
+            color: #040609;
+            font-weight: 700;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+        }
+
+        .sms-block.prefetched {
+            background: rgba(16, 185, 129, 0.2);
+            border: 1px solid var(--neon-emerald);
+            color: var(--neon-emerald);
+        }
+
+        /* Berti 样式 */
+        .berti-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .berti-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .berti-row span.time {
+            font-family: monospace;
+            color: var(--neon-rose);
+        }
+
+        /* 通用按钮组 */
+        .lab-ctrls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: auto;
+            border-top: 1px dashed rgba(255, 255, 255, 0.06);
+            padding-top: 16px;
+        }
+
+        .lbtn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .lbtn:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .lbtn-theme {
+            background: var(--neon-cyan);
+            border-color: var(--neon-cyan);
+            color: #040609;
+        }
+        .lbtn-theme:hover { background: #7dd3fc; }
+
+        .lbtn-theme.purple { background: var(--neon-purple); border-color: var(--neon-purple); color: #040609; }
+        .lbtn-theme.purple:hover { background: #d8b4fe; }
+
+        .lbtn-theme.emerald { background: var(--neon-emerald); border-color: var(--neon-emerald); color: #040609; }
+        .lbtn-theme.emerald:hover { background: #34d399; }
+
+        .lbtn-theme.rose { background: var(--neon-rose); border-color: var(--neon-rose); color: #040609; }
+        .lbtn-theme.rose:hover { background: #fda4af; }
+
+        .live-log {
+            background: #020305;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-family: monospace;
+            font-size: 11px;
+            color: var(--neon-cyan);
+            max-height: 80px;
+            overflow-y: auto;
+        }
+
+        .live-log.purple { color: var(--neon-purple); }
+        .live-log.emerald { color: var(--neon-emerald); }
+        .live-log.rose { color: var(--neon-rose); }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title">
+            <h1>现代处理器经典预取器 (Prefetchers) 全景科普</h1>
+            <p>探索时间与空间预取的底层逻辑，以动态算法推演直观掌握 Stride, BOP, SMS 和 Berti 的设计奥秘</p>
+        </div>
+    </header>
+
+    <main>
+        <!-- 第一部分：时间 vs 空间分类 -->
+        <div class="card">
+            <div class="section-title">
+                <span>📚 预取器的宏观两大门派：时间与空间</span>
+            </div>
+            <div class="concept-split">
+                <div class="concept-box cyan">
+                    <h3>时间预取器 (Temporal Prefetcher)</h3>
+                    <p><strong>核心理念</strong>：“历史会重演”。时间预取器记录发生 Miss 访问的**时序前后关联度**。如果曾经发生过 A 访问之后紧跟 B 访问的现象，当下次 A 发生时，不论 B 与 A 在物理地址上隔了多远，都会立刻将 B 预取出来。典型代表有时间流预取器等。适合非规则的数据结构遍历（如图、指针链表）。</p>
+                </div>
+                <div class="concept-box purple">
+                    <h3>空间预取器 (Spatial Prefetcher)</h3>
+                    <p><strong>核心理念</strong>：“邻里互助”。空间预取器基于物理空间的近邻特征。如果程序访问了某个内存块，它大概率在不久的将来也会读写其相邻的位置。典型代表有 Next-Line、Stride（步长）和 SMS。适合一维数组、结构体矩阵等连续地址空间遍历。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 第二部分：经典预取器大对比矩阵 -->
+        <div class="card">
+            <div class="section-title">
+                <span>📊 经典与前沿预取器对比矩阵 (Prefetcher Comparison Matrix)</span>
+            </div>
+            <div class="matrix-container">
+                <table class="matrix-table">
+                    <thead>
+                        <tr>
+                            <th>预取器名称</th>
+                            <th>门派分类</th>
+                            <th>核心运作原理</th>
+                            <th>准确率 (Accuracy)</th>
+                            <th>覆盖率 (Coverage)</th>
+                            <th>硬件存储开销</th>
+                            <th>主要局限性</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="pref-name cyan">Next-Line</span></td>
+                            <td>纯空间性</td>
+                            <td>只要 Miss，无脑预取下一物理行 (Addr + 1)</td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 40%; background: var(--neon-rose);"></div></div>
+                                <span>低</span>
+                            </td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 50%; background: var(--neon-amber);"></div></div>
+                                <span>中等</span>
+                            </td>
+                            <td>极小 (仅需几位状态控制)</td>
+                            <td>在非连续/跨步长访问中产生严重 cache 污染</td>
+                        </tr>
+                        <tr>
+                            <td><span class="pref-name cyan">Stride (步长)</span></td>
+                            <td>空间性</td>
+                            <td>学习同一个 PC 连续访存的固定跨度 (如 +8, -12)</td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 80%; background: var(--neon-emerald);"></div></div>
+                                <span>高</span>
+                            </td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 60%; background: var(--neon-amber);"></div></div>
+                                <span>中等</span>
+                            </td>
+                            <td>小 (需要 PC 索引的状态表)</td>
+                            <td>无法识别复杂的混合多流或非规则步长访问</td>
+                        </tr>
+                        <tr>
+                            <td><span class="pref-name purple">BOP (最佳偏移)</span></td>
+                            <td>空间性</td>
+                            <td>动态测试一组预设偏移量的得分，选出最优者作为预取距离</td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 75%; background: var(--neon-emerald);"></div></div>
+                                <span>较高</span>
+                            </td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 75%; background: var(--neon-emerald);"></div></div>
+                                <span>较高</span>
+                            </td>
+                            <td>中等 (记录近期访问历史的延迟缓冲区)</td>
+                            <td>收敛到“最佳偏移”需要较长的时间周期训练</td>
+                        </tr>
+                        <tr>
+                            <td><span class="pref-name emerald">SMS (空间流)</span></td>
+                            <td>空间性</td>
+                            <td>记录 4KB 页内的细粒度访问位图，并在新页触及时完整复现</td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 70%; background: var(--neon-emerald);"></div></div>
+                                <span>中高</span>
+                            </td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 85%; background: var(--neon-emerald);"></div></div>
+                                <span>极高</span>
+                            </td>
+                            <td>大 (记录页访问签名指纹的 PHT 表)</td>
+                            <td>对页内访问模式完全随机或单次访问的流不适用</td>
+                        </tr>
+                        <tr>
+                            <td><span class="pref-name rose">Berti (基于延迟关联)</span></td>
+                            <td>时空交叉</td>
+                            <td>根据 Miss 的物理时间延迟计算任意两行访存的共生相关度</td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 90%; background: var(--neon-emerald);"></div></div>
+                                <span>极高</span>
+                            </td>
+                            <td>
+                                <div class="score-bar"><div class="score-fill" style="width: 80%; background: var(--neon-emerald);"></div></div>
+                                <span>高</span>
+                            </td>
+                            <td>中大 (需要高精度的延迟匹配和关联表)</td>
+                            <td>控制电路较为复杂，需要精准测量内存返回时间</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 第三部分：算法交互实验室 -->
+        <div class="card">
+            <div class="section-title">
+                <span>🧪 预取算法动态实验室 (Interactive Simulation Lab)</span>
+            </div>
+            
+            <div class="lab-layout">
+                <!-- 左侧菜单 -->
+                <div class="lab-menu">
+                    <button class="lab-menu-btn active s-stride" id="mbtn-stride" onclick="selectLab('stride')">
+                        <h4>1. Stride Prefetcher</h4>
+                        <p>学习并锁定 PC 的固定跨距规律 (Confidence 置信度决策)</p>
+                    </button>
+                    <button class="lab-menu-btn s-bop" id="mbtn-bop" onclick="selectLab('bop')">
+                        <h4>2. BOP (Best Offset)</h4>
+                        <p>动态轮番测试偏移，挑出最具性价比的预取偏移量</p>
+                    </button>
+                    <button class="lab-menu-btn s-sms" id="mbtn-sms" onclick="selectLab('sms')">
+                        <h4>3. SMS (Spatial Memory Streaming)</h4>
+                        <p>抓取 4KB 页内精细访问特征，进行新页的一篮子打包发射</p>
+                    </button>
+                    <button class="lab-menu-btn s-berti" id="mbtn-berti" onclick="selectLab('berti')">
+                        <h4>4. Berti Prefetcher</h4>
+                        <p>基于跨越时间的延迟共生关系，打破固定步长束缚</p>
+                    </button>
+                </div>
+
+                <!-- 右侧推演看板 -->
+                <div class="lab-stage" id="lab-stage-panel">
+                    <!-- 由下面的 JS 动态注入对应实验室 -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 全局实验室状态
+        let currentLab = 'stride';
+
+        // 1. Stride 实验室状态
+        let strideState = {
+            pc: "0x1008",
+            lastAddr: "-",
+            stride: "-",
+            confidence: 0,
+            stateName: "Init (未就绪)",
+            history: []
+        };
+
+        // 2. BOP 实验室状态
+        let bopState = {
+            offsets: [
+                { val: 1, score: 0 },
+                { val: 3, score: 0 },
+                { val: 8, score: 0 },
+                { val: -4, score: 0 }
+            ],
+            recentBuffer: [90, 92, 100, 105],
+            bestOffset: "None (未选出)",
+            log: "等待触发 Miss 访问..."
+        };
+
+        // 3. SMS 实验室状态
+        let smsState = {
+            activePage: "Page 0x8000",
+            accessedLines: new Set(),
+            prefetchedLines: new Set(),
+            pht: "Empty (空签名表)",
+            log: "请在下面的 4KB 页中点击进行训练访存..."
+        };
+
+        // 4. Berti 实验室状态
+        let bertiState = {
+            missQueue: [],
+            relations: {},
+            tick: 1,
+            log: "等待仿真 Tick 启动..."
+        };
+
+        // 初始化
+        selectLab('stride');
+
+        function selectLab(labName) {
+            currentLab = labName;
+            document.querySelectorAll('.lab-menu-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`mbtn-${labName}`).classList.add('active');
+
+            renderLabStage();
+        }
+
+        function renderLabStage() {
+            const stage = document.getElementById('lab-stage-panel');
+            if (currentLab === 'stride') {
+                stage.innerHTML = `
+                    <div class="lab-stage-header">
+                        <h3>Stride Prefetcher 置信度状态机推演</h3>
+                        <p>当同一个 PC (以 0x1008 为例) 连续发生访存时，预取器会记录它的上一次物理地址，并计算出当前的 Stride (当前地址 - 上次地址)。当 Stride 连续保持稳定，Confidence (置信度) 上升。一旦置信度达到 Steady，预取器才开始朝后发出 Addr + Stride 的预取。</p>
+                    </div>
+
+                    <table class="stride-table">
+                        <thead>
+                            <tr>
+                                <th>追踪的指令 PC</th>
+                                <th>上一次物理地址</th>
+                                <th>探测到的 Stride</th>
+                                <th>置信度评分 (0~3)</th>
+                                <th>当前状态</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>${strideState.pc}</code></td>
+                                <td><span style="font-weight:700; color:var(--neon-cyan);">${strideState.lastAddr}</span></td>
+                                <td><span style="font-weight:700; color:var(--neon-purple);">${strideState.stride}</span></td>
+                                <td><span class="confidence-badge ${strideState.confidence >= 2 ? 'steady' : (strideState.confidence === 0 ? 'init' : '')}">${strideState.confidence}</span></td>
+                                <td><strong>${strideState.stateName}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="live-log">
+                        历史访存流：[ ${strideState.history.join(' &rarr; ') || '无'} ]
+                    </div>
+
+                    <div class="lab-ctrls">
+                        <button class="lbtn lbtn-theme" onclick="accessStride(100)">读地址 100 (首访)</button>
+                        <button class="lbtn lbtn-theme" onclick="accessStride(108)">读地址 108 (+8 跨步)</button>
+                        <button class="lbtn lbtn-theme" onclick="accessStride(116)">读地址 116 (持续稳定)</button>
+                        <button class="lbtn lbtn-theme" onclick="accessStride(124)">读地址 124 (发起预取)</button>
+                        <button class="lbtn lbtn-theme rose" onclick="accessStride(300)">发生随机跳转 (访问 300)</button>
+                        <button class="lbtn" onclick="resetStride()">重置状态</button>
+                    </div>
+                `;
+            } else if (currentLab === 'bop') {
+                let offsetHtml = bopState.offsets.map(o => {
+                    let isBestClass = bopState.bestOffset == o.val ? 'best' : '';
+                    return `
+                        <div class="score-item ${isBestClass}">
+                            <span>偏移量 (Offset) <strong>${o.val > 0 ? '+' + o.val : o.val}</strong></span>
+                            <span>学习得分：<span class="num">${o.score} / 3</span></span>
+                        </div>
+                    `;
+                }).join('');
+
+                stage.innerHTML = `
+                    <div class="lab-stage-header">
+                        <h3>BOP (Best Offset Prefetcher) 动态评分仿真</h3>
+                        <p>BOP 并不依赖单个 PC，而是为了全局的 L2 Cache 寻找一个“黄金预取偏移（Offset）”。它维护一张候选偏移得分表。每当发生一次 Miss 访问，它就拿着当前的 Addr，减去候选偏移量，看看这个计算出的“历史地址”在不在“最近访存历史缓冲区（Recent Request Buffer）”里。如果在，说明这个偏移如果早前起效，现在就能命中！于是该偏移得分 +1。当某偏移先得满 3 分，它就被加冕为 Best Offset 并作为预取发送。</p>
+                    </div>
+
+                    <div class="bop-grid">
+                        <div>
+                            <h4 style="font-size:12px; color:var(--text-secondary); margin-bottom:8px;">最近访存历史缓冲区 (RRB)</h4>
+                            <div class="recent-buffer">
+                                ${bopState.recentBuffer.map(b => `<div class="buffer-box">${b}</div>`).join('')}
+                            </div>
+
+                            <h4 style="font-size:12px; color:var(--text-secondary); margin-top:20px; margin-bottom:8px;">当前的 Best Offset 决策</h4>
+                            <div style="font-size:18px; font-weight:700; color:var(--neon-purple);">${bopState.bestOffset}</div>
+                        </div>
+
+                        <div class="score-list">
+                            <h4 style="font-size:12px; color:var(--text-secondary); border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:4px;">候选偏移打分表</h4>
+                            ${offsetHtml}
+                        </div>
+                    </div>
+
+                    <div class="live-log purple" id="bop-log">
+                        ${bopState.log}
+                    </div>
+
+                    <div class="lab-ctrls">
+                        <button class="lbtn lbtn-theme purple" onclick="accessBop(108)">触发常规 Miss: 访问 108 (命中 108-8=100)</button>
+                        <button class="lbtn lbtn-theme purple" onclick="accessBop(103)">触发常规 Miss: 访问 103 (命中 103-3=100)</button>
+                        <button class="lbtn lbtn-theme purple" onclick="accessBop(113)">触发常规 Miss: 访问 113 (命中 113-8=105)</button>
+                        <button class="lbtn" onclick="resetBop()">重置打分</button>
+                    </div>
+                `;
+            } else if (currentLab === 'sms') {
+                // 渲染 64 个 Line 网格
+                let blocksHtml = "";
+                for (let i = 0; i < 64; i++) {
+                    let cls = "";
+                    if (smsState.accessedLines.has(i)) cls = "accessed";
+                    if (smsState.prefetchedLines.has(i)) cls = "prefetched";
+                    blocksHtml += `<div class="sms-block ${cls}" onclick="clickSmsBlock(${i})">${i}</div>`;
+                }
+
+                stage.innerHTML = `
+                    <div class="lab-stage-header">
+                        <h3>SMS (Spatial Memory Streaming) 空间流打包仿真</h3>
+                        <p>空间流预取器是以 4KB 物理页为宏观视角的。它用 64 位的 Bitmap 监控你在每个物理页内的**精细行访问脚印**。如果发现某个 PC 访问某个页时，总是在页里留下特定间隔的脚印（签名），当下次你跳转到一个全新物理页访问第一行时，它不再等待，而是直接把刚才学习好的整套“空间脚印”以一篮子打包的形式，全部预取到新页的相应位置中！</p>
+                    </div>
+
+                    <div>
+                        <h4 style="font-size:12px; color:var(--text-secondary); margin-bottom:8px;">4KB 活跃物理页行网格 (64个 64B 行)</h4>
+                        <div class="sms-page-grid">
+                            ${blocksHtml}
+                        </div>
+                        <p style="font-size:10px; color:var(--text-secondary); margin-top:6px; text-align:center;">（你可以直接在格子中点击进行访存训练）</p>
+                    </div>
+
+                    <div class="bop-grid" style="margin-top:10px;">
+                        <div>
+                            <h4 style="font-size:12px; color:var(--text-secondary); margin-bottom:4px;">空间签名历史表 (PHT)</h4>
+                            <div style="font-family:monospace; font-size:12px; color:var(--neon-emerald);">${smsState.pht}</div>
+                        </div>
+                        <div class="live-log emerald" style="max-height: 100px;">
+                            ${smsState.log}
+                        </div>
+                    </div>
+
+                    <div class="lab-ctrls">
+                        <button class="lbtn lbtn-theme emerald" onclick="trainSmsPattern()">一键训练：数组跨步访问 (Line 0, 4, 8)</button>
+                        <button class="lbtn lbtn-theme emerald" onclick="jumpToNewPage()">跳转到新物理页 (Page 0x9000)</button>
+                        <button class="lbtn" onclick="resetSms()">重置实验室</button>
+                    </div>
+                `;
+            } else if (currentLab === 'berti') {
+                stage.innerHTML = `
+                    <div class="lab-stage-header">
+                        <h3>Berti 延迟与关联度预取仿真</h3>
+                        <p>Berti 是近几年 HPCA 上的大火设计。它打破了“固定跨度、固定页”的空间束缚。Berti 核心是测量时间轴上的“共生延迟关系”。例如：如果每次 Line A 发生 Miss 之后，在 Tick 时钟上过了 X 个周期，Line B 也百分之百发生 Miss。Berti 会学习到 (A &rarr; B) 具有极强的时间与距离关联。下次 A 触发 Miss 的瞬间，Berti 不管 B 离 A 多远，立刻抢在 CPU 访问前，发出对 B 的预取。</p>
+                    </div>
+
+                    <div class="berti-timeline">
+                        <h4 style="font-size:12px; color:var(--text-secondary); border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:4px;">时间轴访存与关联计算</h4>
+                        <div class="berti-row">
+                            <span>当前时钟 (Simulation Tick)</span>
+                            <span class="time">${bertiState.tick}</span>
+                        </div>
+                        <div class="berti-row">
+                            <span>近期 Miss 记录队</span>
+                            <span style="font-family:monospace; color:var(--text-primary);">${bertiState.missQueue.map(m => `[Addr:${m.addr} @Tick:${m.t}]`).join(' &rarr; ') || '空'}</span>
+                        </div>
+                        <div class="berti-row">
+                            <span>学习到的 (A &rarr; B) 共生关联度表</span>
+                            <span style="font-family:monospace; color:var(--neon-rose);">${formatRelations()}</span>
+                        </div>
+                    </div>
+
+                    <div class="live-log rose">
+                        ${bertiState.log}
+                    </div>
+
+                    <div class="lab-ctrls">
+                        <button class="lbtn lbtn-theme rose" onclick="accessBerti(100)">A: 读地址 100 (Tick++)</button>
+                        <button class="lbtn lbtn-theme rose" onclick="accessBerti(180)">B: 读地址 180 (间隔 +80 距离)</button>
+                        <button class="lbtn lbtn-theme rose" onclick="accessBerti(100, true)">重新触发 A (测试 Berti 能否预判预取 B)</button>
+                        <button class="lbtn" onclick="resetBerti()">重置时钟与表</button>
+                    </div>
+                `;
+            }
+        }
+
+        // --- Stride 实验室交互逻辑 ---
+        function accessStride(addr) {
+            strideState.history.push(addr);
+            if (strideState.lastAddr === "-") {
+                strideState.lastAddr = addr;
+                strideState.stateName = "Transient (过渡期)";
+                strideState.confidence = 1;
+                strideState.stride = "-";
+            } else {
+                let diff = addr - strideState.lastAddr;
+                if (strideState.stride === "-") {
+                    strideState.stride = diff;
+                    strideState.confidence = 1;
+                    strideState.stateName = "Transient (过渡期)";
+                } else if (diff === strideState.stride) {
+                    strideState.confidence = Math.min(3, strideState.confidence + 1);
+                    if (strideState.confidence >= 2) {
+                        strideState.stateName = `Steady (已锁定! 预取: Addr + ${strideState.stride})`;
+                    }
+                } else {
+                    strideState.stride = diff;
+                    strideState.confidence = 0;
+                    strideState.stateName = "Transient (失锁重置)";
+                }
+                strideState.lastAddr = addr;
+            }
+            renderLabStage();
+        }
+
+        function resetStride() {
+            strideState = { pc: "0x1008", lastAddr: "-", stride: "-", confidence: 0, stateName: "Init (未就绪)", history: [] };
+            renderLabStage();
+        }
+
+        // --- BOP 实验室交互逻辑 ---
+        function accessBop(addr) {
+            let hitAny = false;
+            let logMsg = `常规 Miss 访问：${addr}。测试候选偏移：<br/>`;
+            
+            bopState.offsets.forEach(o => {
+                let testAddr = addr - o.val;
+                if (bopState.recentBuffer.includes(testAddr)) {
+                    o.score = Math.min(3, o.score + 1);
+                    logMsg += ` &bull; 偏移 <strong>${o.val > 0 ? '+' + o.val : o.val}</strong> 命中历史中的 ${testAddr}，得分增加到 <span style='color:var(--neon-purple);'>${o.score}</span>！<br/>`;
+                    hitAny = true;
+                    if (o.score >= 3 && bopState.bestOffset === "None (未选出)") {
+                        bopState.bestOffset = `${o.val > 0 ? '+' + o.val : o.val} (锁定最佳!)`;
+                    }
+                }
+            });
+
+            if (!hitAny) {
+                logMsg += ` &bull; 候选偏移算出的历史地址皆不在缓冲区中，得分无变化。`;
+            }
+
+            // 更新缓冲区，把当前地址加入
+            bopState.recentBuffer.push(addr);
+            if (bopState.recentBuffer.length > 5) {
+                bopState.recentBuffer.shift();
+            }
+
+            bopState.log = logMsg;
+            renderLabStage();
+        }
+
+        function resetBop() {
+            bopState = {
+                offsets: [{ val: 1, score: 0 }, { val: 3, score: 0 }, { val: 8, score: 0 }, { val: -4, score: 0 }],
+                recentBuffer: [90, 92, 100, 105],
+                bestOffset: "None (未选出)",
+                log: "打分表重置完毕。等待触发 Miss..."
+            };
+            renderLabStage();
+        }
+
+        // --- SMS 实验室交互逻辑 ---
+        function clickSmsBlock(idx) {
+            smsState.accessedLines.add(idx);
+            smsState.log = `在物理页内访问了行 Block ${idx}。脚印网格更新！`;
+            renderLabStage();
+        }
+
+        function trainSmsPattern() {
+            smsState.accessedLines.add(0);
+            smsState.accessedLines.add(4);
+            smsState.accessedLines.add(8);
+            smsState.pht = "PC: 0x1008 &rarr; 签名: [Line 0, 4, 8]";
+            smsState.log = "模拟训练成功：空间签名历史表 (PHT) 成功学习到空间特征 [Line 0, 4, 8]！";
+            renderLabStage();
+        }
+
+        function jumpToNewPage() {
+            if (smsState.pht.includes("Empty")) {
+                smsState.log = "跳转到新页。但由于没有提前训练 PHT 签名，没有触发空间流预取。请先点击训练！";
+                smsState.accessedLines.clear();
+                smsState.prefetchedLines.clear();
+                smsState.activePage = "Page 0x9000";
+            } else {
+                smsState.accessedLines.clear();
+                smsState.prefetchedLines.clear();
+                smsState.activePage = "Page 0x9000";
+                
+                // 空间流打包预取全部射出！
+                smsState.prefetchedLines.add(4);
+                smsState.prefetchedLines.add(8);
+                smsState.log = "【空间流预取爆发！】跳转到 Page 0x9000，刚访问第一行，预取器便基于 PHT 中的指纹，将该新页下的 Block 4 和 Block 8 一篮子预取完毕！";
+            }
+            renderLabStage();
+        }
+
+        function resetSms() {
+            smsState = { activePage: "Page 0x8000", accessedLines: new Set(), prefetchedLines: new Set(), pht: "Empty (空签名表)", log: "实验室已重置..." };
+            renderLabStage();
+        }
+
+        // --- Berti 实验室交互逻辑 ---
+        function accessBerti(addr, testBerti = false) {
+            let logMsg = "";
+            if (testBerti) {
+                // A 被重新触发，查看是否学习到关联
+                if (bertiState.relations["100"] && bertiState.relations["100"]["180"]) {
+                    logMsg = `【Berti 预取拦截成功！】<br/>A (100) 发生 Miss，Berti 触发检索，发现其与 B (180) 的时间共生性极高。Berti 成功在 Tick ${bertiState.tick} 替 CPU 预取了地址 180！`;
+                } else {
+                    logMsg = `重新读了 100，但还没有学习到稳定延迟关系，未触发预取。`;
+                }
+            } else {
+                // 记录 Miss 时间
+                bertiState.missQueue.push({ addr: addr, t: bertiState.tick });
+                logMsg = `在 Tick ${bertiState.tick} 发生 Miss 访问地址 ${addr}。<br/>`;
+                
+                // 开始做延迟关联计算
+                if (bertiState.missQueue.length >= 2) {
+                    let prev = bertiState.missQueue[bertiState.missQueue.length - 2];
+                    let curr = bertiState.missQueue[bertiState.missQueue.length - 1];
+                    let deltaT = curr.t - prev.t;
+                    
+                    if (prev.addr === 100 && curr.addr === 180) {
+                        if (!bertiState.relations["100"]) bertiState.relations["100"] = {};
+                        if (!bertiState.relations["100"]["180"]) bertiState.relations["100"]["180"] = { count: 0, avgT: 0 };
+                        
+                        let r = bertiState.relations["100"]["180"];
+                        r.avgT = Math.round((r.avgT * r.count + deltaT) / (r.count + 1));
+                        r.count += 1;
+                        
+                        logMsg += `计算得出关联：${prev.addr} &rarr; ${curr.addr}，延迟间隔 ${deltaT} 周期的共生计数上升为 <span style='color:var(--neon-rose); font-weight:700;'>${r.count}</span>！`;
+                    }
+                }
+            }
+
+            bertiState.tick += 4; // 时钟往前跳跃
+            bertiState.log = logMsg;
+            renderLabStage();
+        }
+
+        function formatRelations() {
+            let keys = Object.keys(bertiState.relations);
+            if (keys.length === 0) return "Empty (空)";
+            let str = "";
+            for (let src of keys) {
+                let targets = Object.keys(bertiState.relations[src]);
+                for (let dst of targets) {
+                    let r = bertiState.relations[src][dst];
+                    str += `(${src} &rarr; ${dst}: 频次 ${r.count}次, 延迟间隔约 ${r.avgT}Ticks) `;
+                }
+            }
+            return str;
+        }
+
+        function resetBerti() {
+            bertiState = { missQueue: [], relations: {}, tick: 1, log: "实验室已重置。等待触发 Miss..." };
+            renderLabStage();
+        }
+    </script>
+</body>
+</html>

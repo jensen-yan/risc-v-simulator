@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RISC-V 模拟器预取器 (Prefetcher) 宏观交互导学</title>
+    <!-- Google Fonts 引入现代极简字体 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #06080c;
+            --card-bg: rgba(15, 23, 42, 0.75);
+            --card-border: rgba(56, 189, 248, 0.15);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --neon-cyan: #38bdf8;
+            --neon-purple: #c084fc;
+            --neon-rose: #f43f5e;
+            --neon-emerald: #10b981;
+            --neon-amber: #f59e0b;
+            --glass-blur: blur(16px);
+            --shadow-glow: 0 0 25px rgba(56, 189, 248, 0.25);
+            --shadow-glow-rose: 0 0 25px rgba(244, 63, 94, 0.25);
+            --font-sans: 'Outfit', 'Noto Sans SC', -apple-system, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 10%, rgba(56, 189, 248, 0.06) 0%, transparent 40%),
+                radial-gradient(circle at 90% 90%, rgba(16, 185, 129, 0.05) 0%, transparent 40%);
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 24px min(5vw, 60px);
+            border-bottom: 1px solid var(--card-border);
+            background: rgba(6, 8, 12, 0.85);
+            backdrop-filter: var(--glass-blur);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-title h1 {
+            font-size: 22px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--neon-cyan), var(--neon-emerald));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .header-title p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+
+        .badge-ref {
+            color: var(--neon-emerald);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            background: rgba(16, 185, 129, 0.05);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+
+        .badge-ref:hover {
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.25);
+            background: rgba(16, 185, 129, 0.15);
+        }
+
+        main {
+            padding: 30px min(5vw, 60px);
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr 460px;
+            gap: 30px;
+            flex-grow: 1;
+        }
+
+        @media (max-width: 1200px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* 核心卡片容器 */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: var(--glass-blur);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            margin-bottom: 24px;
+            position: relative;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 5px;
+            height: 100%;
+            background: var(--neon-emerald);
+            border-radius: 16px 0 0 16px;
+        }
+
+        .card.cyan::before { background: var(--neon-cyan); }
+        .card.rose::before { background: var(--neon-rose); }
+        .card.amber::before { background: var(--neon-amber); }
+
+        .card-header {
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 预取器三大机制科普卡片 */
+        .mechanism-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 768px) {
+            .mechanism-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .mechanism-item {
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 10px;
+            padding: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .mechanism-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        .mechanism-item h3 {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--neon-emerald);
+            margin-bottom: 6px;
+        }
+
+        .mechanism-item.cyan h3 { color: var(--neon-cyan); }
+        .mechanism-item.rose h3 { color: var(--neon-rose); }
+
+        .mechanism-item p {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* 交互仿真结构 */
+        .sim-grid {
+            display: grid;
+            grid-template-rows: auto 440px auto;
+            gap: 20px;
+        }
+
+        .scene-selector {
+            display: flex;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 6px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .scene-btn {
+            flex: 1;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .scene-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .scene-btn.active {
+            background: rgba(16, 185, 129, 0.08);
+            border-color: rgba(16, 185, 129, 0.25);
+            color: var(--neon-emerald);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.15);
+        }
+
+        .scene-btn.active.cyan {
+            background: rgba(56, 189, 248, 0.08);
+            border-color: rgba(56, 189, 248, 0.25);
+            color: var(--neon-cyan);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .scene-btn.active.rose {
+            background: rgba(244, 63, 94, 0.08);
+            border-color: rgba(244, 63, 94, 0.25);
+            color: var(--neon-rose);
+            box-shadow: var(--shadow-glow-rose);
+        }
+
+        /* 核心 SVG 拓扑与微架构展示区 */
+        .sim-canvas {
+            background: #040609;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: 240px 1fr 240px;
+            gap: 15px;
+            padding: 20px;
+        }
+
+        .column {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 15px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .hud-node {
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            background: rgba(30, 41, 59, 0.2);
+            border-radius: 10px;
+            padding: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .hud-node h3 {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 4px;
+            margin-bottom: 6px;
+        }
+
+        .hud-content {
+            font-size: 11px;
+            color: var(--text-secondary);
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .hud-content span.val {
+            font-family: monospace;
+            font-size: 11.5px;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        /* 高亮样式 */
+        .hud-node.glow-emerald {
+            border-color: var(--neon-emerald);
+            background: rgba(16, 185, 129, 0.05);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.15);
+        }
+        .hud-node.glow-emerald h3 { color: var(--neon-emerald); }
+
+        .hud-node.glow-cyan {
+            border-color: var(--neon-cyan);
+            background: rgba(56, 189, 248, 0.05);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.15);
+        }
+        .hud-node.glow-cyan h3 { color: var(--neon-cyan); }
+
+        .hud-node.glow-rose {
+            border-color: var(--neon-rose);
+            background: rgba(244, 63, 94, 0.05);
+            box-shadow: var(--shadow-glow-rose);
+            animation: pulse-rose 1s infinite alternate;
+        }
+        .hud-node.glow-rose h3 { color: var(--neon-rose); }
+
+        @keyframes pulse-rose {
+            from { box-shadow: 0 0 5px rgba(244, 63, 94, 0.2); }
+            to { box-shadow: 0 0 20px rgba(244, 63, 94, 0.4); }
+        }
+
+        /* 中部放大区域：Cache Set 渲染 */
+        .cache-set-view {
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            background: rgba(15, 23, 42, 0.3);
+            border-radius: 12px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .cache-set-header {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--neon-cyan);
+            text-align: center;
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+            padding-bottom: 6px;
+            margin-bottom: 10px;
+        }
+
+        .cache-lines {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex-grow: 1;
+            justify-content: center;
+        }
+
+        .cache-line-row {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 6px;
+            padding: 6px 10px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            font-size: 10px;
+            font-family: monospace;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .cache-line-row.prefetched-active {
+            border-color: var(--neon-emerald);
+            background: rgba(16, 185, 129, 0.08);
+        }
+
+        .cache-line-row.prefetched-active-ready {
+            border-color: var(--neon-cyan);
+            background: rgba(56, 189, 248, 0.08);
+        }
+
+        .cache-line-row span.pref-badge {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--neon-emerald);
+            border-radius: 3px;
+            padding: 1px 4px;
+            font-size: 9px;
+            text-align: center;
+            font-weight: 700;
+        }
+
+        .cache-line-row span.pref-badge.no {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-secondary);
+        }
+
+        /* SVG 连线 */
+        .sim-canvas svg.wiring {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .wire {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.03);
+            stroke-width: 2;
+            transition: all 0.3s ease;
+        }
+
+        .wire.flow-emerald {
+            stroke: var(--neon-emerald);
+            stroke-dasharray: 6 4;
+            animation: flow-dash 15s linear infinite;
+        }
+
+        .wire.flow-cyan {
+            stroke: var(--neon-cyan);
+            stroke-dasharray: 6 4;
+            animation: flow-dash 15s linear infinite;
+        }
+
+        .wire.flow-rose {
+            stroke: var(--neon-rose);
+            stroke-dasharray: 6 4;
+            animation: flow-dash 15s linear infinite;
+        }
+
+        @keyframes flow-dash {
+            to { stroke-dashoffset: -400; }
+        }
+
+        /* 运行控制 */
+        .sim-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 10px;
+            padding: 12px 20px;
+        }
+
+        .step-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .step-label span.curr {
+            color: var(--neon-emerald);
+            font-weight: 700;
+        }
+
+        .step-label.cyan span.curr { color: var(--neon-cyan); }
+        .step-label.rose span.curr { color: var(--neon-rose); }
+
+        .ctrl-btns {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .btn-primary {
+            background: var(--neon-emerald);
+            border-color: var(--neon-emerald);
+            color: #040609;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #34d399;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.25);
+        }
+
+        .btn-primary.cyan {
+            background: var(--neon-cyan);
+            border-color: var(--neon-cyan);
+        }
+        .btn-primary.cyan:hover:not(:disabled) {
+            background: #7dd3fc;
+            box-shadow: var(--shadow-glow);
+        }
+
+        .btn-primary.rose {
+            background: var(--neon-rose);
+            border-color: var(--neon-rose);
+        }
+        .btn-primary.rose:hover:not(:disabled) {
+            background: #fda4af;
+            box-shadow: var(--shadow-glow-rose);
+        }
+
+        .btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        /* 下侧统计指标表格 */
+        .stats-panel {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 10px;
+            padding: 16px;
+        }
+
+        .stats-panel h4 {
+            font-size: 12px;
+            color: var(--neon-emerald);
+            margin-bottom: 10px;
+            border-left: 3px solid var(--neon-emerald);
+            padding-left: 8px;
+        }
+
+        .stats-panel.cyan h4 {
+            color: var(--neon-cyan);
+            border-left-color: var(--neon-cyan);
+        }
+
+        .stats-panel.rose h4 {
+            color: var(--neon-rose);
+            border-left-color: var(--neon-rose);
+        }
+
+        .stats-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            font-family: monospace;
+        }
+
+        .stats-table th {
+            text-align: left;
+            padding: 6px 10px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .stats-table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+        }
+
+        .stats-table tr.changed-val {
+            background: rgba(16, 185, 129, 0.06);
+        }
+
+        .stats-table tr.changed-val-rose {
+            background: rgba(244, 63, 94, 0.06);
+        }
+
+        /* 右边栏：讲解描述卡片 */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .desc-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: var(--glass-blur);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .desc-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 5px;
+            height: 100%;
+            background: var(--neon-emerald);
+            border-radius: 16px 0 0 16px;
+        }
+
+        .desc-card.cyan::before { background: var(--neon-cyan); }
+        .desc-card.rose::before { background: var(--neon-rose); }
+
+        .desc-header {
+            margin-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 12px;
+        }
+
+        .desc-lbl {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--neon-emerald);
+            font-weight: 700;
+        }
+        .desc-card.cyan .desc-lbl { color: var(--neon-cyan); }
+        .desc-card.rose .desc-lbl { color: var(--neon-rose); }
+
+        .desc-header h3 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-top: 4px;
+        }
+
+        .desc-body {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            flex-grow: 1;
+        }
+
+        .desc-body p {
+            margin-bottom: 12px;
+        }
+
+        .desc-body code {
+            background: rgba(255, 255, 255, 0.06);
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: var(--text-primary);
+        }
+
+        .desc-body strong {
+            color: var(--text-primary);
+        }
+
+        .analysis-box {
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px dashed rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 15px;
+        }
+
+        .analysis-title {
+            font-weight: 700;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--neon-emerald);
+        }
+        .desc-card.cyan .analysis-title { color: var(--neon-cyan); }
+        .desc-card.rose .analysis-title { color: var(--neon-rose); }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title">
+            <h1>LSU Cache 预取器 (Prefetcher) 宏观交互导学</h1>
+            <p>通过生动的交互场景，彻底理解自适应限流、组污染防线与紧急推测避让机制</p>
+        </div>
+        <a href="file:///Users/yanyue/workspace/claude-test/claude-first/risc-v-simulator/docs/superpowers/specs/2026-04-10-prefetch-convergence-design.md" class="badge-ref" target="_blank">📄 预取收敛设计 Spec</a>
+    </header>
+
+    <main>
+        <!-- 左栏：架构仿真与统计 -->
+        <div class="left-section">
+            <!-- 预取收敛三大防御支柱 -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>预取器控污限流防线</h2>
+                </div>
+                <div class="mechanism-grid">
+                    <div class="mechanism-item">
+                        <h3>1. 已驻留过滤 (Resident)</h3>
+                        <p>发出预取前，若目标下一行已经存储在 Cache 中或已经在 Miss 队列（MSHR）里等待填充，立即丢弃，防范总线重复申请。</p>
+                    </div>
+                    <div class="mechanism-item cyan">
+                        <h3>2. 组污染控制 (Throttle)</h3>
+                        <p>若目标 Set 组里存在<strong>已被预取但未被 CPU 命中读取</strong>的行，判定程序当前非顺序流，强行关闭当前组的预取，防止有效数据被逐出。</p>
+                    </div>
+                    <div class="mechanism-item rose">
+                        <h3>3. 推测避让让路 (Cancel)</h3>
+                        <p>当 Set 满且发生急迫的常规 Miss 时，Cache 启动自救，<strong>强行注销（Cancel）</strong>在该 Set 下在途但未完成的推测预取，为真实需求让位。</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 核心交互演练沙盒 -->
+            <div class="card" id="sandbox-card">
+                <div class="card-header" style="margin-bottom: 12px;">
+                    <h2>Interactive Simulation <span style="font-weight: 400; font-size: 13px; color: var(--text-secondary);">微架构状态演练</span></h2>
+                    <span class="badge-ref" id="scene-lbl" style="border-radius: 4px; font-size: 11px;">Next-Line Prefetch</span>
+                </div>
+
+                <div class="sim-grid">
+                    <!-- 场景切换栏 -->
+                    <div class="scene-selector">
+                        <button class="scene-btn active" id="sbtn-0" onclick="switchScene(0)">场景 A：顺序流预取及命中</button>
+                        <button class="scene-btn" id="sbtn-1" onclick="switchScene(1)">场景 B：随机访问触发组限流</button>
+                        <button class="scene-btn" id="sbtn-2" onclick="switchScene(2)">场景 C：容量压力下撤销预取</button>
+                    </div>
+
+                    <!-- 仿真拓扑画布 -->
+                    <div class="sim-canvas" id="canvas">
+                        <!-- SVG 导电线 -->
+                        <svg class="wiring">
+                            <defs>
+                                <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="rgba(255,255,255,0.08)"/>
+                                </marker>
+                                <marker id="arrow-emerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981"/>
+                                </marker>
+                                <marker id="arrow-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8"/>
+                                </marker>
+                                <marker id="arrow-rose" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#f43f5e"/>
+                                </marker>
+                            </defs>
+
+                            <!-- LU to Cache (0,0) -> (1,0) -->
+                            <path id="w-lu-cache" class="wire" d="M 240 85 H 390" marker-end="url(#arrow)" />
+                            <!-- Cache to MSHR (1,0) -> (2,0) -->
+                            <path id="w-cache-mshr" class="wire" d="M 630 85 H 780" marker-end="url(#arrow)" />
+                            
+                            <!-- Cache to Prefetcher (1,0) -> (0,1) -->
+                            <path id="w-cache-pref" class="wire" d="M 390 135 L 240 285" marker-end="url(#arrow)" />
+                            
+                            <!-- Prefetcher to MSHR (0,1) -> (2,0) -->
+                            <path id="w-pref-mshr" class="wire" d="M 240 330 L 780 125" marker-end="url(#arrow)" />
+                            
+                            <!-- MSHR fill back to Cache (2,0) -> (1,0) -->
+                            <path id="w-mshr-cache" class="wire" d="M 780 105 L 630 105" marker-end="url(#arrow)" />
+                            
+                            <!-- MSHR cancel to Cache (2,0) -> (1,0) [紧急红线] -->
+                            <path id="w-mshr-cancel" class="wire" d="M 780 70 L 630 70" marker-end="url(#arrow)" />
+                        </svg>
+
+                        <!-- 左侧：触发单元 -->
+                        <div class="column">
+                            <div class="hud-node" id="n-lu">
+                                <h3>Load/Store 触发 <span>Access Unit</span></h3>
+                                <div class="hud-content">
+                                    <p>请求地址: <span class="val" id="val-lu-addr">-</span></p>
+                                    <p>请求类型: <span class="val" id="val-lu-type">-</span></p>
+                                    <p>Cache响应: <span class="val" id="val-lu-resp">-</span></p>
+                                </div>
+                            </div>
+
+                            <div class="hud-node" id="n-prefetcher">
+                                <h3>预取决策器 <span>Prefetcher</span></h3>
+                                <div class="hud-content">
+                                    <p>下一行地址: <span class="val" id="val-pref-addr">-</span></p>
+                                    <p>组污染统计: <span class="val" id="val-pref-unused">-</span></p>
+                                    <p>预取判定: <span class="val" id="val-pref-decision">-</span></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 中间：Cache Set 放大视图 -->
+                        <div class="cache-set-view" id="n-cache">
+                            <div class="cache-set-header" id="val-cache-set-title">L1D Cache Set 1 (4-Way Associative)</div>
+                            <div class="cache-lines" id="cache-set-lines">
+                                <!-- 由 JS 渲染四个 Way -->
+                            </div>
+                        </div>
+
+                        <!-- 右侧：未决队列 (MSHR) -->
+                        <div class="column">
+                            <div class="hud-node" id="n-mshr">
+                                <h3>MSHR 未命中处理队列 <span>MSHR Mapped</span></h3>
+                                <div class="hud-content">
+                                    <p>MSHR 槽 0 (Demand):</p>
+                                    <p>&nbsp;&nbsp;地址: <span class="val" id="val-mshr0-addr">-</span></p>
+                                    <p>&nbsp;&nbsp;倒计时: <span class="val" id="val-mshr0-time">-</span></p>
+                                    <p>MSHR 槽 1 (Prefetch):</p>
+                                    <p>&nbsp;&nbsp;地址: <span class="val" id="val-mshr1-addr">-</span></p>
+                                    <p>&nbsp;&nbsp;倒计时: <span class="val" id="val-mshr1-time">-</span></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 仿真控制面板 -->
+                    <div class="sim-controls">
+                        <div class="step-label" id="step-lbl">
+                            演示步骤：<span class="curr" id="curr-step">1</span> / <span id="total-step">4</span>
+                        </div>
+                        <div class="ctrl-btns">
+                            <button class="btn" id="btn-reset" onclick="resetCurrentScene()">重置</button>
+                            <button class="btn" id="btn-prev" onclick="prevStep()" disabled>上一步</button>
+                            <button class="btn btn-primary" id="btn-next" onclick="nextStep()">单步推进 &rarr;</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 下侧统计面板 -->
+            <div class="stats-panel" id="stats-card">
+                <h4>预取质量指标追踪 (Prefetch Stats Counter)</h4>
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>指标类型</th>
+                            <th>计数器名称</th>
+                            <th>当前计数值</th>
+                            <th>物理作用解释</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr id="row-req">
+                            <td>预取发起</td>
+                            <td><code>prefetch_requests</code></td>
+                            <td><strong id="stat-req">0</strong></td>
+                            <td>发生了 Demand Miss，触发预取决策的总次数。</td>
+                        </tr>
+                        <tr id="row-iss">
+                            <td>预取发出</td>
+                            <td><code>prefetch_issued</code></td>
+                            <td><strong id="stat-iss">0</strong></td>
+                            <td>成功通过所有限流门控，真正向内存发出加载的次数。</td>
+                        </tr>
+                        <tr id="row-hit">
+                            <td>有用命中</td>
+                            <td><code>prefetch_useful_hits</code></td>
+                            <td><strong id="stat-hit">0</strong></td>
+                            <td>预取进来的 Cache Line，在被驱逐前成功被正常 Load 命中的次数（<strong>性能正收益源泉</strong>）。</td>
+                        </tr>
+                        <tr id="row-evict">
+                            <td>无用驱逐</td>
+                            <td><code>prefetch_unused_evictions</code></td>
+                            <td><strong id="stat-evict">0</strong></td>
+                            <td>预取进来的 Cache Line，一次都没被读写就被冷落淘汰，白白占用位置（<strong>污染指标</strong>）。</td>
+                        </tr>
+                        <tr id="row-res">
+                            <td>驻留丢弃</td>
+                            <td><code>prefetch_dropped_already_resident</code></td>
+                            <td><strong id="stat-res">0</strong></td>
+                            <td>检查到下一行已经在 Cache 或 MSHR 中而主动放弃预取。</td>
+                        </tr>
+                        <tr id="row-throt">
+                            <td>限流丢弃</td>
+                            <td><code>prefetch_dropped_set_throttle</code></td>
+                            <td><strong id="stat-throt">0</strong></td>
+                            <td>由于 Set 组污染超标（未用预取数>=1）或 MSHR 资源满而强行抛弃的次数（<strong>防卫机制指标</strong>）。</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 右栏：大白话解析与设计折衷 -->
+        <div class="sidebar">
+            <div class="desc-card" id="desc-card">
+                <div class="desc-header">
+                    <span class="desc-lbl" id="desc-prefix">步骤 1 / 4</span>
+                    <h3 id="desc-title">加载场景中</h3>
+                </div>
+                <div class="desc-body" id="desc-body">
+                    请在左侧切换场景，并使用“单步推进”逐步浏览宏观运行图。
+                </div>
+                
+                <div class="analysis-box">
+                    <div class="analysis-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                        <span>微架构设计折衷 (Design Trade-offs)</span>
+                    </div>
+                    <p style="font-size: 11.5px; line-height: 1.5; margin-top: 6px;" id="desc-analysis">
+                        加载步骤后展示设计考量。
+                    </p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 场景数据结构
+        const scenes = [
+            // 场景 0：顺序流预取及命中
+            {
+                name: "顺序流预取及命中",
+                theme: "emerald",
+                totalSteps: 4,
+                steps: [
+                    {
+                        title: "正常访存未命中 (Demand Miss)",
+                        desc: "<p>CPU 里的 Load 单元执行读操作，想要读取地址 <code>0x8000</code> (Line 512)。</p><p>由于这是第一次读取，Cache Set 1 中没有这个 Tag。发生 <strong>Demand Miss</strong>！</p><p>LSU 将此 Miss 分派给 MSHR 槽 0 准备向内存请求加载，同时向预取器拉响信号：<em>“我们要不要顺便把下一行预取过来？”</em></p>",
+                        analysis: "发生 Miss 时，预取器正式启动。它需要评估下一行 0x8040 (Line 513) 的状态，开始进入它的决策链条。",
+                        activeNodes: ["n-lu", "n-cache"],
+                        activeWires: ["w-lu-cache", "w-cache-pref"],
+                        cacheState: [
+                            { way: "Way 0", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 2", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Invalid", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "Line 512 (Demand)", m0_time: "20 cycles", m1_addr: "-", m1_time: "-" },
+                        stats: { req: 1, iss: 0, hit: 0, evict: 0, res: 0, throt: 0 },
+                        updates: {
+                            "val-lu-addr": "0x8000 (Line 512)", "val-lu-type": "Load Read", "val-lu-resp": "Cache Miss",
+                            "val-pref-addr": "0x8040 (Line 513)", "val-pref-unused": "0 (无污染)", "val-pref-decision": "Checking... (核对中)"
+                        }
+                    },
+                    {
+                        title: "限流检查通过，预取正式分派",
+                        desc: "<p>预取器对下一行 <code>0x8040</code> 进行安全核查：</p><p>① 它<strong>不在</strong> Cache 中，也<strong>没有</strong>在途加载 (驻留过滤通过)；</p><p>② 当前 Set 中未使用的预取行数为 0 (污染限流通过)；</p><p>③ MSHR 中没有塞满。</p><p>全面放行！预取器在 MSHR 槽 1 启动一个 Prefetch 加载，并标记为 <code>mark_prefetched_on_fill</code>，即一旦装入，带上预取标签。</p>",
+                        analysis: "【为什么要通过限流检查？】为了防止总线被推测加载占满。在这个场景下，内存未用预取计数为 0，说明此前是非常纯净的顺序访问。预取属于高概率有用的推测，被允许发出。",
+                        activeNodes: ["n-prefetcher", "n-mshr"],
+                        activeWires: ["w-pref-mshr"],
+                        cacheState: [
+                            { way: "Way 0", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 2", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Invalid", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "Line 512 (Demand)", m0_time: "15 cycles", m1_addr: "Line 513 (Prefetch)", m1_time: "20 cycles" },
+                        stats: { req: 1, iss: 1, hit: 0, evict: 0, res: 0, throt: 0 },
+                        updates: {
+                            "val-pref-decision": "ISSUED (允许发出)"
+                        }
+                    },
+                    {
+                        title: "内存填充完成，Cache 挂上预取标识",
+                        desc: "<p>过了一些周期，主存数据返回：</p><p>① 正常访问的 Line 512 填入 Way 0，<code>prefetched</code> 标为 N (因为是急需数据)；</p><p>② 预取的 Line 513 填入 Way 1，它的 <code>prefetched</code> 属性被强制标为 <strong>Y（预取未用数据）</strong>。</p><p>此时，未决队列 MSHR 得到清空。</p>",
+                        analysis: "将预取行打上特殊的标记（prefetched = Y）非常重要，它是未来我们统计预取质量（Useful Hit 还是 Unused Eviction）的唯一依据。这个标志会一直留在 Cache Line 头部，直到被 CPU 读走或被驱逐。",
+                        activeNodes: ["n-mshr", "n-cache"],
+                        activeWires: ["w-mshr-cache"],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 512", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Line 513", dirty: "N", pref: "Y", cls: "prefetched-active" },
+                            { way: "Way 2", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Invalid", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "-", m0_time: "-", m1_addr: "-", m1_time: "-" },
+                        stats: { req: 1, iss: 1, hit: 0, evict: 0, res: 0, throt: 0 },
+                        updates: {
+                            "val-lu-addr": "-", "val-lu-type": "-", "val-lu-resp": "-",
+                            "val-pref-addr": "-", "val-pref-unused": "-", "val-pref-decision": "-"
+                        }
+                    },
+                    {
+                        title: "完美命中！预取显神威",
+                        desc: "<p>CPU 的下一次 Load 操作试图读取 <code>0x8040</code> (Line 513)。</p><p>这一次，Cache **命中（Hit）**了！Load 单元无需等待，以 1 周期延迟（零停顿）拿到了数据。</p><p>LSU 检测到这是一个 <code>prefetched = Y</code> 的行，将其标签清空为 <code>N</code>（因为它已经被用过了，不再是污染隐患），并将有用命中计数器 <code>prefetch_useful_hits++</code>。</p>",
+                        analysis: "【大获全胜】这就是预取器最理想的画面。提前把数据铺好，Load 指令顺理成章命中，没有产生任何访存 Stalls。处理器的流水线就像开在高速公路上一样顺畅！",
+                        activeNodes: ["n-lu", "n-cache"],
+                        activeWires: ["w-lu-cache"],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 512", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Line 513", dirty: "N", pref: "N", cls: "prefetched-active-ready" },
+                            { way: "Way 2", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Invalid", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "-", m0_time: "-", m1_addr: "-", m1_time: "-" },
+                        stats: { req: 1, iss: 1, hit: 1, evict: 0, res: 0, throt: 0 },
+                        updates: {
+                            "val-lu-addr": "0x8040 (Line 513)", "val-lu-type": "Load Read", "val-lu-resp": "Cache Hit (有用命中!)"
+                        }
+                    }
+                ]
+            },
+            // 场景 1：随机访问触发组限流
+            {
+                name: "随机访问触发组限流",
+                theme: "cyan",
+                totalSteps: 4,
+                steps: [
+                    {
+                        title: "发生第一次 Miss 并完成预取",
+                        desc: "<p>程序发生了一次 Miss，读 Line 512。预取器顺利预取了下一行 Line 513，并把它存进了 Way 1 中，打上 <code>prefetched = Y</code> 标签。</p><p>此时，Line 513 还没有被任何正常指令访问过。</p>",
+                        analysis: "我们当前处于这个状态：Cache Set 1 里塞进了一个推测出来的 Line 513。但注意，如果程序接下来并不读取 513，这个预取行就会成为一个污染源。",
+                        activeNodes: ["n-cache"],
+                        activeWires: [],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 512", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Line 513", dirty: "N", pref: "Y", cls: "prefetched-active" },
+                            { way: "Way 2", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Invalid", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "-", m0_time: "-", m1_addr: "-", m1_time: "-" },
+                        stats: { req: 1, iss: 1, hit: 0, evict: 0, res: 0, throt: 0 },
+                        updates: {
+                            "val-lu-addr": "-", "val-lu-type": "-", "val-lu-resp": "-",
+                            "val-pref-addr": "-", "val-pref-unused": "1 (检测到污染行!)", "val-pref-decision": "-"
+                        }
+                    },
+                    {
+                        title: "发生随机跳转 Miss，触发预取判定",
+                        desc: "<p>由于程序是在进行随机跳转（非顺序遍历），CPU 下一次读操作访问了地址 <code>0x9000</code> (Line 576)。这根本不是之前预取的 Line 513！</p><p>它映射在同一个 Cache Set 1 中，再次发生 <strong>Demand Miss</strong>！</p><p>预取器接收到请求，开始判定是否要把下一行 <code>Line 577</code> 预取过来。</p>",
+                        analysis: "因为发生了跳转，之前的预取数据 513 被冷落了。这对于预取器来说是一个危险信号：程序可能已经偏离了顺序流！",
+                        activeNodes: ["n-lu", "n-cache"],
+                        activeWires: ["w-lu-cache", "w-cache-pref"],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 512", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Line 513", dirty: "N", pref: "Y", cls: "prefetched-active" },
+                            { way: "Way 2", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Invalid", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "Line 576 (Demand)", m0_time: "20 cycles", m1_addr: "-", m1_time: "-" },
+                        stats: { req: 2, iss: 1, hit: 0, evict: 0, res: 0, throt: 0 },
+                        updates: {
+                            "val-lu-addr": "0x9000 (Line 576)", "val-lu-type": "Load Read", "val-lu-resp": "Cache Miss",
+                            "val-pref-addr": "Line 577", "val-pref-unused": "1 (未用预取>=1)", "val-pref-decision": "Checking..."
+                        }
+                    },
+                    {
+                        title: "触发组限流防线，强行丢弃预取",
+                        desc: "<p>预取器调用 <code>countUnusedPrefetchedLinesInSet(Set 1)</code>。检查到 Way 1 里存在 1 个未被使用的预取行 Line 513！</p><p>这触发了<strong>组级污染限流（Set-based Throttling）</strong>：<em>“该组已经堆积了未使用预取，禁止再预取！”</em></p><p>预取器发出警告，**直接丢弃**本次对 Line 577 的预取，计数器 <code>prefetch_dropped_set_throttle++</code>。</p>",
+                        analysis: "【核心设计优越性】如果预取器盲目继续预取 Line 577，它必须驱逐该组里的其他行（甚至可能是一行有用的普通数据）。限流直接“踩刹车”成功拦截了无意义的总线请求，避免了对该 Set 的进一步二次污染！",
+                        activeNodes: ["n-prefetcher"],
+                        activeWires: [],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 512", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Line 513", dirty: "N", pref: "Y", cls: "prefetched-active" },
+                            { way: "Way 2", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Invalid", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "Line 576 (Demand)", m0_time: "15 cycles", m1_addr: "-", m1_time: "-" },
+                        stats: { req: 2, iss: 1, hit: 0, evict: 0, res: 0, throt: 1 },
+                        updates: {
+                            "val-pref-decision": "DROPPED (因组污染超限而丢弃!)"
+                        }
+                    },
+                    {
+                        title: "冷落行被驱逐，记录无用损耗",
+                        desc: "<p>常规未命中的 Line 576 完成加载，装入 Way 2 正常使用。</p><p>而之前的预取行 Line 513 因为一直没有被读取，在后面的 LRU 轮换中被挤出 Cache 释放了。</p><p>在其退休时，它被判定为“从未被使用”，因此增加计数器 <code>prefetch_unused_evictions++</code>。</p>",
+                        analysis: "【污染损失清算】未使用的预取行最终走向了死亡。我们的统计报告抓到了这笔损失。但是多亏了第三步的限流，我们只损失了 1 行，没有让整组沦陷。这就是收敛算法的保护网。",
+                        activeNodes: ["n-cache"],
+                        activeWires: [],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 512", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Invalid", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 2", tag: "Line 576", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Invalid", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "-", m0_time: "-", m1_addr: "-", m1_time: "-" },
+                        stats: { req: 2, iss: 1, hit: 0, evict: 1, res: 0, throt: 1 },
+                        updates: {
+                            "val-lu-addr": "-", "val-lu-type": "-", "val-lu-resp": "-",
+                            "val-pref-addr": "-", "val-pref-unused": "0", "val-pref-decision": "-"
+                        }
+                    }
+                ]
+            },
+            // 场景 2：容量压力下撤销预取
+            {
+                name: "容量压力下撤销预取",
+                theme: "rose",
+                totalSteps: 4,
+                steps: [
+                    {
+                        title: "预取正在慢速读取，且 Set 已满",
+                        desc: "<p>在此之前，预取器发出了对 <code>Line 600</code> 的预取。因为内存延迟大，Line 600 还在 MSHR 槽 1 里被慢速读入。</p><p>此时，Cache Set 1 的 4 个槽位（Way 0 到 Way 3）已经被常规有用数据<strong>完全塞满了</strong>。</p>",
+                        analysis: "这是一个极端场景：总线资源紧绷（在途预取还在加载），且 Cache 物理槽位告急。这时如果发生新的 Miss，分配空间就会遇到巨大的排挤压力。",
+                        activeNodes: ["n-mshr", "n-cache"],
+                        activeWires: [],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 100", dirty: "Y", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Line 101", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 2", tag: "Line 102", dirty: "Y", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Line 103", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "-", m0_time: "-", m1_addr: "Line 600 (Prefetch)", m1_time: "15 cycles" },
+                        stats: { req: 1, iss: 1, hit: 0, evict: 0, res: 0, throt: 0 },
+                        updates: {
+                            "val-lu-addr": "-", "val-lu-type": "-", "val-lu-resp": "-",
+                            "val-pref-addr": "-", "val-pref-unused": "0", "val-pref-decision": "-"
+                        }
+                    },
+                    {
+                        title: "紧急常规 Miss 突发，分配无位置",
+                        desc: "<p>突然，CPU 发生了一个常规的 Load Miss（急需数据 <code>Line 200</code>，否则处理器核心流水线就会立刻陷入停顿死锁）。</p><p>LSU 急迫地想在 Set 1 里分配一行给它，但是发现 4 个 Way 已经被全部塞满，且都没有空闲。常规分配被<strong>阻塞（Block）</strong>了！</p>",
+                        analysis: "常规 Miss 迫在眉睫。如果没有空位，CPU 就只能无期停顿。预取数据虽然在加载，但它毕竟只是个推测，不能抢占真指令的生存空间！",
+                        activeNodes: ["n-lu", "n-cache"],
+                        activeWires: ["w-lu-cache"],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 100", dirty: "Y", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Line 101", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 2", tag: "Line 102", dirty: "Y", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Line 103", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "Line 200 (Demand)", m0_time: "20 cycles", m1_addr: "Line 600 (Prefetch)", m1_time: "12 cycles" },
+                        stats: { req: 2, iss: 1, hit: 0, evict: 0, res: 0, throt: 0 },
+                        updates: {
+                            "val-lu-addr": "Line 200", "val-lu-type": "Demand Read", "val-lu-resp": "Blocked! (无可用槽位!)"
+                        }
+                    },
+                    {
+                        title: "自救自检：强行撤销预取 (Cancel)",
+                        desc: "<p>为了救活阻塞的常规请求，Cache 启动了自救机制：</p><p>它检索 MSHR，发现 MSHR 槽 1 中那个在途的预取 Line 600 正好属于这个 Set，且没有 demand waiter（说明只是纯粹推测数据）。</p><p>Cache 决定<strong>无条件撤销该在途预取</strong>！预取请求被强行从 MSHR 中清除销毁，腾出硬件通道！并在统计中将无用驱逐 <code>prefetch_unused_evictions++</code>。</p>",
+                        analysis: "【推测避让的精髓】通过 `cancelOnePendingPrefetchInSet`，我们将尚未完成的推测直接抹去，虽然浪费了这次预取总线，但及时阻止了它对本已饱和的 Set 的二次强拆，成功完成了避让。",
+                        activeNodes: ["n-cache", "n-mshr"],
+                        activeWires: ["w-mshr-cancel"],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 100", dirty: "Y", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Line 101", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 2", tag: "Line 102", dirty: "Y", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Line 103", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "Line 200 (Demand)", m0_time: "10 cycles", m1_addr: "-", m1_time: "-" },
+                        stats: { req: 2, iss: 1, hit: 0, evict: 1, res: 0, throt: 0 },
+                        updates: {
+                            "val-lu-resp": "MSHR Cancel Triggered (已撤销在途预取以避让)"
+                        }
+                    },
+                    {
+                        title: "常规请求安全加载并填充",
+                        desc: "<p>阻碍排除。急迫的常规 Miss <code>Line 200</code> 获得了独占加载的机会。</p><p>它从 MSHR 中顺利读取出来，并按照 LRU 策略，安全地把其中一行无脏数据的 Line 101 替换掉，成功完成了加载并放行了 CPU 的停顿！</p>",
+                        analysis: "由于推测撤销机制的保驾护航，急迫的常规 Miss 得以化险为夷，确保了程序在最差的内存容量饱和压力下，仍能 100% 正常向前执行。至此，预取器的全部三种保护防线演示完毕。",
+                        activeNodes: ["n-cache"],
+                        activeWires: [],
+                        cacheState: [
+                            { way: "Way 0", tag: "Line 100", dirty: "Y", pref: "N", cls: "" },
+                            { way: "Way 1", tag: "Line 200", dirty: "N", pref: "N", cls: "" },
+                            { way: "Way 2", tag: "Line 102", dirty: "Y", pref: "N", cls: "" },
+                            { way: "Way 3", tag: "Line 103", dirty: "N", pref: "N", cls: "" }
+                        ],
+                        mshr: { m0_addr: "-", m0_time: "-", m1_addr: "-", m1_time: "-" },
+                        stats: { req: 2, iss: 1, hit: 0, evict: 1, res: 0, throt: 0 },
+                        updates: {
+                            "val-lu-addr": "-", "val-lu-type": "-", "val-lu-resp": "Ready & Filled (加载就绪)"
+                        }
+                    }
+                ]
+            }
+        ];
+
+        let curSceneIdx = 0;
+        let curStepIdx = 0;
+
+        window.onload = function() {
+            switchScene(0);
+        };
+
+        function switchScene(idx) {
+            curSceneIdx = idx;
+            curStepIdx = 0;
+
+            // 更新选项卡高亮
+            document.querySelectorAll('.scene-btn').forEach((btn, sidx) => {
+                btn.className = "scene-btn";
+                if (sidx === idx) {
+                    btn.classList.add('active');
+                    if (idx === 1) btn.classList.add('cyan');
+                    if (idx === 2) btn.classList.add('rose');
+                }
+            });
+
+            // 更新标签主题
+            const sandbox = document.getElementById('sandbox-card');
+            const sceneLbl = document.getElementById('scene-lbl');
+            const stepLbl = document.getElementById('step-lbl');
+            const statsCard = document.getElementById('stats-card');
+
+            if (idx === 0) {
+                sandbox.className = "card";
+                sceneLbl.innerText = "场景 A: 顺序流预取及命中";
+                sceneLbl.className = "badge-ref";
+                stepLbl.className = "step-label";
+                statsCard.className = "stats-panel";
+            } else if (idx === 1) {
+                sandbox.className = "card cyan";
+                sceneLbl.innerText = "场景 B: 随机访问触发组限流";
+                sceneLbl.style.borderColor = "rgba(56, 189, 248, 0.3)";
+                sceneLbl.style.color = "var(--neon-cyan)";
+                stepLbl.className = "step-label cyan";
+                statsCard.className = "stats-panel cyan";
+            } else {
+                sandbox.className = "card rose";
+                sceneLbl.innerText = "场景 C: 容量压力下撤销预取";
+                sceneLbl.style.borderColor = "rgba(244, 63, 94, 0.3)";
+                sceneLbl.style.color = "var(--neon-rose)";
+                stepLbl.className = "step-label rose";
+                statsCard.className = "stats-panel rose";
+            }
+
+            renderStep();
+        }
+
+        function resetCurrentScene() {
+            curStepIdx = 0;
+            renderStep();
+        }
+
+        function prevStep() {
+            if (curStepIdx > 0) {
+                curStepIdx--;
+                renderStep();
+            }
+        }
+
+        function nextStep() {
+            const sc = scenes[curSceneIdx];
+            if (curStepIdx < sc.totalSteps - 1) {
+                curStepIdx++;
+                renderStep();
+            }
+        }
+
+        function renderStep() {
+            const sc = scenes[curSceneIdx];
+            const step = sc.steps[curStepIdx];
+
+            // 1. 更新按钮与状态
+            document.getElementById('curr-step').innerText = curStepIdx + 1;
+            document.getElementById('total-step').innerText = sc.totalSteps;
+            document.getElementById('btn-prev').disabled = curStepIdx === 0;
+            document.getElementById('btn-next').disabled = curStepIdx === sc.totalSteps - 1;
+
+            // 按钮主题切换
+            const nextBtn = document.getElementById('btn-next');
+            nextBtn.className = "btn btn-primary";
+            if (curSceneIdx === 1) nextBtn.classList.add('cyan');
+            if (curSceneIdx === 2) nextBtn.classList.add('rose');
+
+            // 2. 右栏文本填充
+            const descCard = document.getElementById('desc-card');
+            descCard.className = "desc-card";
+            if (curSceneIdx === 1) descCard.classList.add('cyan');
+            if (curSceneIdx === 2) descCard.classList.add('rose');
+
+            document.getElementById('desc-prefix').innerText = `步骤 ${curStepIdx + 1} / ${sc.totalSteps}`;
+            document.getElementById('desc-title').innerText = step.title;
+            document.getElementById('desc-body').innerHTML = step.desc;
+            document.getElementById('desc-analysis').innerText = step.analysis;
+
+            // 3. 更新统计面板
+            document.getElementById('stat-req').innerText = step.stats.req;
+            document.getElementById('stat-iss').innerText = step.stats.iss;
+            document.getElementById('stat-hit').innerText = step.stats.hit;
+            document.getElementById('stat-evict').innerText = step.stats.evict;
+            document.getElementById('stat-res').innerText = step.stats.res;
+            document.getElementById('stat-throt').innerText = step.stats.throt;
+
+            // 为发生变化的计数器添加背景高亮
+            const rowClass = curSceneIdx === 2 ? 'changed-val-rose' : 'changed-val';
+            document.getElementById('row-req').className = step.stats.req > 0 && curStepIdx >= 0 && curSceneIdx !== 2 ? rowClass : '';
+            document.getElementById('row-iss').className = step.stats.iss > 0 && curStepIdx >= 1 ? rowClass : '';
+            document.getElementById('row-hit').className = step.stats.hit > 0 && curStepIdx === 3 && curSceneIdx === 0 ? rowClass : '';
+            document.getElementById('row-evict').className = step.stats.evict > 0 && ((curSceneIdx === 1 && curStepIdx === 3) || (curSceneIdx === 2 && curStepIdx >= 2)) ? rowClass : '';
+            document.getElementById('row-throt').className = step.stats.throt > 0 && curSceneIdx === 1 && curStepIdx >= 2 ? rowClass : '';
+
+            // 4. 渲染 Cache Set View (Way 渲染)
+            const cacheLinesBox = document.getElementById('cache-set-lines');
+            cacheLinesBox.innerHTML = "";
+            step.cacheState.forEach(wayRow => {
+                let badge = `<span class="pref-badge no">Normal</span>`;
+                if (wayRow.pref === "Y") {
+                    badge = `<span class="pref-badge">Prefetched</span>`;
+                }
+
+                cacheLinesBox.innerHTML += `
+                    <div class="cache-line-row ${wayRow.cls}">
+                        <strong>${wayRow.way}</strong>
+                        <span>Tag: ${wayRow.tag}</span>
+                        ${badge}
+                    </div>
+                `;
+            });
+
+            // 5. 更新 MSHR 字段
+            document.getElementById('val-mshr0-addr').innerText = step.mshr.m0_addr;
+            document.getElementById('val-mshr0-time').innerText = step.mshr.m0_time;
+            document.getElementById('val-mshr1-addr').innerText = step.mshr.m1_addr;
+            document.getElementById('val-mshr1-time').innerText = step.mshr.m1_time;
+
+            // 6. 更新零碎字段
+            for (const [id, value] of Object.entries(step.updates || {})) {
+                const el = document.getElementById(id);
+                if (el) el.innerText = value;
+            }
+
+            // 7. 更新节点高亮
+            document.querySelectorAll('.hud-node').forEach(nd => {
+                nd.className = "hud-node";
+            });
+            document.getElementById('n-cache').className = "cache-set-view";
+
+            const glowColor = curSceneIdx === 0 ? 'glow-emerald' : (curSceneIdx === 1 ? 'glow-cyan' : 'glow-rose');
+            
+            step.activeNodes.forEach(nodeId => {
+                const nd = document.getElementById(nodeId);
+                if (nd) {
+                    nd.classList.add(glowColor);
+                }
+            });
+
+            // 8. 更新 SVG 连线高亮
+            document.querySelectorAll('.wire').forEach(w => {
+                w.className.baseVal = "wire";
+                w.style.stroke = "rgba(255,255,255,0.03)";
+                w.setAttribute("marker-end", "url(#arrow)");
+            });
+
+            const flowColor = curSceneIdx === 0 ? 'flow-emerald' : (curSceneIdx === 1 ? 'flow-cyan' : 'flow-rose');
+            if (step.activeWires) {
+                step.activeWires.forEach(wireId => {
+                    const w = document.getElementById(wireId);
+                    if (w) {
+                        w.className.baseVal = `wire ${flowColor}`;
+                        w.style.stroke = curSceneIdx === 0 ? "var(--neon-emerald)" : (curSceneIdx === 1 ? "var(--neon-cyan)" : "var(--neon-rose)");
+                        w.setAttribute("marker-end", curSceneIdx === 0 ? "url(#arrow-emerald)" : (curSceneIdx === 1 ? "url(#arrow-cyan)" : "url(#arrow-rose)"));
+                    }
+                });
+            }
+        }
+    </script>
+</body>
+</html>

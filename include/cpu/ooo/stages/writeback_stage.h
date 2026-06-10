@@ -19,6 +19,7 @@ public:
         explicit Context(CPUState& state) : state_(state) {}
 
         bool cdbQueueEmpty() const { return state_.cdb_queue.empty(); }
+        size_t cdbQueueSize() const { return state_.cdb_queue.size(); }
         CommonDataBusEntry popCdbEntry() {
             auto entry = state_.cdb_queue.front();
             state_.cdb_queue.pop();

@@ -8,9 +8,11 @@ WritebackStage::WritebackStage() {
 }
 
 void WritebackStage::execute(Context& context) {
-    // 处理CDB队列中的写回请求
-    while (!context.cdbQueueEmpty()) {
+    size_t used_writeback_ports = 0;
+    while (!context.cdbQueueEmpty() &&
+           used_writeback_ports < OOOPipelineConfig::WRITEBACK_WIDTH) {
         CommonDataBusEntry cdb_entry = context.popCdbEntry();
+        ++used_writeback_ports;
         
         // 检查指令是否有效
         if (!cdb_entry.instruction) {
@@ -57,6 +59,11 @@ void WritebackStage::execute(Context& context) {
     
     if (context.cdbQueueEmpty()) {
         LOGT(WRITEBACK, "cdb queue empty, no writeback");
+    } else {
+        LOGT(WRITEBACK, "cdb queue keeps %zu entries after using %zu/%zu writeback ports",
+             context.cdbQueueSize(),
+             used_writeback_ports,
+             OOOPipelineConfig::WRITEBACK_WIDTH);
     }
 }
 

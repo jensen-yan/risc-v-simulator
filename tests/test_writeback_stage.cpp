@@ -7,6 +7,7 @@
 #include "cpu/ooo/store_buffer.h"
 
 #include <memory>
+#include <vector>
 
 namespace riscv {
 
@@ -64,6 +65,39 @@ TEST_F(WritebackStageContextTest, CompletesMatchingRobEntryThroughNarrowContext)
     EXPECT_EQ(state.register_rename->get_physical_register_value(RegisterFileKind::Integer, 32), 7u);
     EXPECT_TRUE(state.register_rename->is_physical_register_ready(RegisterFileKind::Integer, 32));
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::WRITEBACKS), 1u);
+}
+
+TEST_F(WritebackStageContextTest, LeavesCdbEntriesBeyondWritebackWidthQueued) {
+    std::vector<DynamicInstPtr> instructions;
+    for (size_t i = 0; i < OOOPipelineConfig::WRITEBACK_WIDTH + 1; ++i) {
+        auto inst = state.reorder_buffer->allocate_entry(
+            makeAddiInstruction(1, 0, static_cast<int32_t>(i + 1)),
+            0x100 + i * 4,
+            i + 1);
+        ASSERT_NE(inst, nullptr);
+        inst->set_physical_dest_kind(RegisterFileKind::Integer);
+        inst->set_physical_dest(static_cast<PhysRegNum>(32 + i));
+        inst->set_result(i + 1);
+        state.cdb_queue.push(CommonDataBusEntry(inst));
+        instructions.push_back(inst);
+    }
+
+    WritebackStage::Context context(state);
+    writeback_stage.execute(context);
+
+    EXPECT_EQ(state.cdb_queue.size(), 1u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::WRITEBACKS),
+              OOOPipelineConfig::WRITEBACK_WIDTH);
+
+    for (size_t i = 0; i < OOOPipelineConfig::WRITEBACK_WIDTH; ++i) {
+        EXPECT_EQ(instructions[i]->get_status(), DynamicInst::Status::COMPLETED);
+        EXPECT_TRUE(state.register_rename->is_physical_register_ready(
+            RegisterFileKind::Integer, static_cast<PhysRegNum>(32 + i)));
+    }
+
+    EXPECT_EQ(instructions.back()->get_status(), DynamicInst::Status::ALLOCATED);
+    ASSERT_FALSE(state.cdb_queue.empty());
+    EXPECT_EQ(state.cdb_queue.front().instruction, instructions.back());
 }
 
 } // namespace riscv

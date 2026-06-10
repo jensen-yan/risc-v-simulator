@@ -78,6 +78,7 @@ CommitMemoryEffects::Result CommitMemoryEffects::applyStore(
 
     Result result;
     result.applied = true;
+    result.used_store_memory_port = true;
     return result;
 }
 
@@ -117,7 +118,23 @@ CommitMemoryEffects::Result CommitMemoryEffects::applyAmo(
 
     Result result;
     result.applied = true;
+    result.used_store_memory_port = atomic_info.do_store;
     return result;
+}
+
+bool CommitMemoryEffects::usesStoreMemoryPort(const DynamicInstPtr& instruction) {
+    if (!instruction) {
+        return false;
+    }
+
+    const auto& decoded_info = instruction->get_decoded_info();
+    if (decoded_info.opcode == Opcode::STORE || decoded_info.opcode == Opcode::STORE_FP) {
+        return true;
+    }
+    if (decoded_info.opcode == Opcode::AMO && instruction->has_atomic_execute_info()) {
+        return instruction->get_atomic_execute_info().do_store;
+    }
+    return false;
 }
 
 CommitMemoryEffects::Result CommitMemoryEffects::apply(CPUState& state,

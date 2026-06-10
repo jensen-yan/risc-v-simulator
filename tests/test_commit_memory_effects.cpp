@@ -38,6 +38,7 @@ TEST(CommitMemoryEffectsTest, CommitsStoreToMemoryAndClearsReservation) {
 
     EXPECT_TRUE(result.success);
     EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.used_store_memory_port);
     EXPECT_EQ(state.memory->readWord(0x80), 0x12345678u);
     EXPECT_FALSE(state.reservation_valid);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STORES_COMMITTED), 1u);
@@ -53,6 +54,7 @@ TEST(CommitMemoryEffectsTest, ReportsMissingStoreMemoryInfo) {
 
     EXPECT_FALSE(result.success);
     EXPECT_FALSE(result.applied);
+    EXPECT_FALSE(result.used_store_memory_port);
     EXPECT_EQ(result.error_message, "store commit missing memory info");
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STORES_COMMITTED), 0u);
 }
@@ -76,6 +78,7 @@ TEST(CommitMemoryEffectsTest, CommitsAmoStoreAndReservationState) {
 
     EXPECT_TRUE(result.success);
     EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.used_store_memory_port);
     EXPECT_TRUE(state.reservation_valid);
     EXPECT_EQ(state.reservation_addr, 0x90u);
     EXPECT_EQ(state.memory->readWord(0x90), 0xCAFEBABEu);
@@ -91,6 +94,7 @@ TEST(CommitMemoryEffectsTest, IgnoresNonMemoryInstruction) {
 
     EXPECT_TRUE(result.success);
     EXPECT_FALSE(result.applied);
+    EXPECT_FALSE(result.used_store_memory_port);
 }
 
 } // namespace riscv

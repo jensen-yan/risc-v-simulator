@@ -24,6 +24,7 @@ PERF_COUNTER_DEF(CDB_ENQUEUED, "cpu.execute.cdb_enqueued", "Execution results en
 PERF_COUNTER_DEF(WRITEBACKS, "cpu.writeback.count", "CDB entries consumed in writeback stage")
 PERF_COUNTER_DEF(COMMIT_SLOTS, "cpu.commit.slots", "Total commit stage slots available")
 PERF_COUNTER_DEF(COMMIT_UTILIZED_SLOTS, "cpu.commit.utilized_slots", "Commit slots that successfully retired an instruction")
+PERF_COUNTER_DEF(STALL_COMMIT_STORE_PORT_BUSY, "cpu.stall.commit_store_port_busy", "Commit stopped because store memory write ports were exhausted")
 
 PERF_COUNTER_DEF(BRANCH_INSTRUCTIONS, "cpu.branch.count", "Conditional branch instructions executed")
 PERF_COUNTER_DEF(BRANCH_MISPREDICTS, "cpu.branch.conditional_mispredicts", "Conditional branch misprediction count")

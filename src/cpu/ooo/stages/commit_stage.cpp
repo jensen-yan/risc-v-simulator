@@ -97,8 +97,24 @@ void CommitStage::execute(Context& context) {
     
     // 尝试提交指令
     size_t committed_this_cycle = 0;
+    size_t store_memory_ports_used = 0;
     while (context.canCommit() &&
            committed_this_cycle < effective_commit_width) {
+        const auto next_head_entry_id = context.robHeadEntry();
+        const auto next_commit_inst = context.robEntry(next_head_entry_id);
+        if (CommitMemoryEffects::usesStoreMemoryPort(next_commit_inst) &&
+            store_memory_ports_used >= OOOPipelineConfig::STORE_COMMIT_WIDTH) {
+            state.recordPipelineStall(PerfCounterId::STALL_COMMIT_STORE_PORT_BUSY);
+            LOGT(COMMIT,
+                 "store memory commit ports exhausted: inst=%" PRId64
+                 " rob[%d] used=%zu/%zu",
+                 next_commit_inst->get_instruction_id(),
+                 next_head_entry_id,
+                 store_memory_ports_used,
+                 OOOPipelineConfig::STORE_COMMIT_WIDTH);
+            break;
+        }
+
         auto commit_result = context.commitInstruction();
         if (!commit_result.success) {
             LOGW(COMMIT, "commit failed: %s", commit_result.error_message.c_str());
@@ -161,6 +177,9 @@ void CommitStage::execute(Context& context) {
             if (!memory_effect.success) {
                 handle_exception(state, memory_effect.error_message, committed_inst->get_pc());
                 break;
+            }
+            if (memory_effect.used_store_memory_port) {
+                ++store_memory_ports_used;
             }
         } catch (const SimulatorException& e) {
             handle_exception(state, e.what(), committed_inst->get_pc());

@@ -47,6 +47,7 @@ bool ExecuteMemoryInflight::tryMove(ExecutionUnit& unit,
 }
 
 void ExecuteMemoryInflight::advance(CPUState& state, const CompletionCallback& complete) {
+    size_t replay_ports_used = 0;
     for (auto& entry : state.memory_access_inflight) {
         if (!entry.valid || !entry.state.instruction) {
             continue;
@@ -65,6 +66,18 @@ void ExecuteMemoryInflight::advance(CPUState& state, const CompletionCallback& c
                  inflight.remaining_cycles);
             continue;
         }
+
+        if (replay_ports_used >= OOOPipelineConfig::MEMORY_REPLAY_WIDTH) {
+            state.recordPipelineStall(PerfCounterId::STALL_MEMORY_REPLAY_PORT_BUSY);
+            LOGT(EXECUTE,
+                 "inst=%" PRId64 " %s inflight ready but replay ports exhausted %zu/%zu",
+                 inflight.instruction->get_instruction_id(),
+                 entry.unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE",
+                 replay_ports_used,
+                 OOOPipelineConfig::MEMORY_REPLAY_WIDTH);
+            continue;
+        }
+        ++replay_ports_used;
 
         if (entry.unit_type == ExecutionUnitType::LOAD) {
             LOGT(EXECUTE,

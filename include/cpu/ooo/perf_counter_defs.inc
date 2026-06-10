@@ -85,6 +85,7 @@ PERF_COUNTER_DEF(STALL_EXECUTE_DEPENDENCY_BLOCKED, "cpu.stall.execute_dependency
 PERF_COUNTER_DEF(STALL_EXECUTE_RESOURCE_BLOCKED, "cpu.stall.execute_resource_blocked", "Execute stalled because ready instructions wait for resources")
 PERF_COUNTER_DEF(STALL_EXECUTE_NO_UNIT, "cpu.stall.execute_no_unit", "Execute stage had ready instruction but no execution unit")
 PERF_COUNTER_DEF(STALL_EXECUTE_AMO_WAIT, "cpu.stall.execute_amo_wait", "AMO delayed by older uncommitted store-like operations")
+PERF_COUNTER_DEF(STALL_MEMORY_REPLAY_PORT_BUSY, "cpu.stall.memory_replay_port_busy", "Memory inflight completion delayed because replay ports were exhausted")
 
 PERF_COUNTER_DEF(LOAD_REPLAYS, "cpu.memory.load_replays", "Load instructions replayed due to memory ordering")
 PERF_COUNTER_DEF(LOAD_REPLAYS_HOST_COMM, "cpu.memory.load_replays.host_comm", "Load replays caused by host-communication serialization")

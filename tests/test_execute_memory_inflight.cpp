@@ -4,6 +4,7 @@
 
 #include <limits>
 #include <memory>
+#include <vector>
 
 namespace riscv {
 
@@ -131,6 +132,53 @@ TEST(ExecuteMemoryInflightTest, AdvanceCompletesLoadAndClearsEntry) {
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_COUNT), 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_TOTAL), 7u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_MAX), 7u);
+}
+
+TEST(ExecuteMemoryInflightTest, AdvanceLimitsReadyCompletionsByReplayWidth) {
+    CPUState state;
+    std::vector<DynamicInstPtr> instructions;
+    for (size_t i = 0; i < OOOPipelineConfig::MEMORY_REPLAY_WIDTH + 1; ++i) {
+        auto inst = create_dynamic_inst(makeInstruction(Opcode::LOAD), 0x100 + i * 4, i + 1);
+        auto& entry = state.memory_access_inflight[i];
+        entry.valid = true;
+        entry.unit_type = ExecutionUnitType::LOAD;
+        entry.state.instruction = inst;
+        entry.state.remaining_cycles = 0;
+        entry.state.result = 0x1000 + i;
+        entry.wait_latency_cycles = 5;
+        instructions.push_back(inst);
+    }
+
+    std::vector<uint64_t> completed_ids;
+    ExecuteMemoryInflight::advance(
+        state,
+        [&](ExecutionUnit& unit, ExecutionUnitType unit_type) {
+            EXPECT_EQ(unit_type, ExecutionUnitType::LOAD);
+            completed_ids.push_back(unit.instruction->get_instruction_id());
+        });
+
+    ASSERT_EQ(completed_ids.size(), OOOPipelineConfig::MEMORY_REPLAY_WIDTH);
+    for (size_t i = 0; i < OOOPipelineConfig::MEMORY_REPLAY_WIDTH; ++i) {
+        EXPECT_EQ(completed_ids[i], instructions[i]->get_instruction_id());
+        EXPECT_FALSE(state.memory_access_inflight[i].valid);
+    }
+
+    auto& delayed_entry = state.memory_access_inflight[OOOPipelineConfig::MEMORY_REPLAY_WIDTH];
+    EXPECT_TRUE(delayed_entry.valid);
+    EXPECT_EQ(delayed_entry.state.remaining_cycles, 0);
+    EXPECT_EQ(delayed_entry.state.instruction, instructions.back());
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_MEMORY_REPLAY_PORT_BUSY), 1u);
+
+    ExecuteMemoryInflight::advance(
+        state,
+        [&](ExecutionUnit& unit, ExecutionUnitType unit_type) {
+            EXPECT_EQ(unit_type, ExecutionUnitType::LOAD);
+            completed_ids.push_back(unit.instruction->get_instruction_id());
+        });
+
+    EXPECT_FALSE(delayed_entry.valid);
+    ASSERT_EQ(completed_ids.size(), OOOPipelineConfig::MEMORY_REPLAY_WIDTH + 1);
+    EXPECT_EQ(completed_ids.back(), instructions.back()->get_instruction_id());
 }
 
 TEST(ExecuteMemoryInflightTest, AdvanceCompletesStoreWithZeroResult) {

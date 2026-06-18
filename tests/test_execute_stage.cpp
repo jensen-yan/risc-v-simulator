@@ -4,6 +4,32 @@
 
 namespace riscv {
 
+namespace {
+
+DecodedInstruction makeAddiInstruction(RegNum rd, int32_t imm) {
+    DecodedInstruction decoded;
+    decoded.type = InstructionType::I_TYPE;
+    decoded.opcode = Opcode::OP_IMM;
+    decoded.rd = rd;
+    decoded.rs1 = 0;
+    decoded.rs2 = 0;
+    decoded.imm = imm;
+    decoded.execution_cycles = 1;
+    return decoded;
+}
+
+size_t countBusyCompletionPendingAluUnits(const CPUState& state) {
+    size_t count = 0;
+    for (const auto& unit : state.alu_units) {
+        if (unit.busy && unit.completion_pending) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+} // namespace
+
 /**
  * ExecuteStage模块单元测试
  * 当前覆盖率：28.9% -> 目标：65%+
@@ -61,6 +87,50 @@ TEST_F(ExecuteStageTest, EmptyReservationStationRecordsFrontendStarvedThroughCon
               OOOPipelineConfig::DISPATCH_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_EXECUTE_NO_READY), 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED), 1u);
+}
+
+TEST_F(ExecuteStageTest, CompletionBackpressureKeepsExecutionUnitBusy) {
+    CPUState state;
+    state.reservation_station = std::make_unique<ReservationStation>();
+    state.reorder_buffer = std::make_unique<ReorderBuffer>();
+    state.store_buffer = std::make_unique<StoreBuffer>();
+
+    for (size_t i = 0; i < OOOPipelineConfig::COMPLETION_WIDTH + 1; ++i) {
+        auto inst = state.reorder_buffer->allocate_entry(
+            makeAddiInstruction(static_cast<RegNum>(i + 1), static_cast<int32_t>(i + 1)),
+            0x100 + i * 4,
+            i + 1);
+        ASSERT_NE(inst, nullptr);
+        inst->set_physical_dest_kind(RegisterFileKind::Integer);
+        inst->set_physical_dest(static_cast<PhysRegNum>(32 + i));
+        inst->set_src1_ready(true, 0);
+        inst->set_src2_ready(true, 0);
+        inst->set_src3_ready(true, 0);
+
+        auto issue_result = state.reservation_station->issue_instruction(inst);
+        ASSERT_TRUE(issue_result.success);
+    }
+
+    ExecuteStage::Context context(state);
+    execute_stage_->execute(context);
+
+    size_t busy_alu_units = 0;
+    for (const auto& unit : state.alu_units) {
+        if (unit.busy) {
+            ++busy_alu_units;
+        }
+    }
+    ASSERT_EQ(busy_alu_units, OOOPipelineConfig::COMPLETION_WIDTH + 1);
+    EXPECT_TRUE(state.completion_fabric.empty());
+
+    state.completion_fabric.beginCycle();
+    execute_stage_->execute(context);
+
+    EXPECT_EQ(state.completion_fabric.size(), OOOPipelineConfig::COMPLETION_WIDTH);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::COMPLETION_ACCEPTED),
+              OOOPipelineConfig::COMPLETION_WIDTH);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_COMPLETION_PORT_BUSY), 1u);
+    EXPECT_EQ(countBusyCompletionPendingAluUnits(state), 1u);
 }
 
 } // namespace riscv

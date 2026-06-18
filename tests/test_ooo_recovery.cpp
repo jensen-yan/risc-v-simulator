@@ -53,7 +53,7 @@ TEST_F(OooRecoveryTest, FullPipelineRecoveryClearsSpeculativeStructuresAndRecord
     ASSERT_NE(younger, nullptr);
     state.fetch_buffer.push(makeFetched(0x108));
     state.fetch_buffer.push(makeFetched(0x10c));
-    state.cdb_queue.push(CommonDataBusEntry(younger));
+    ASSERT_TRUE(state.completion_fabric.trySubmit(CompletionEvent(younger)));
     state.rename_checkpoints.emplace(1, state.register_rename->capture_checkpoint());
     state.reservation_valid = true;
     state.reservation_addr = 0x2000;
@@ -73,10 +73,10 @@ TEST_F(OooRecoveryTest, FullPipelineRecoveryClearsSpeculativeStructuresAndRecord
               OOOPipelineConfig::RECOVERY_REDIRECT_LATENCY);
     EXPECT_EQ(result.flushed_rob_entries, 2u);
     EXPECT_EQ(result.fetch_buffer_dropped, 2u);
-    EXPECT_EQ(result.flushed_cdb_entries, 1u);
+    EXPECT_EQ(result.flushed_completion_events, 1u);
     EXPECT_TRUE(state.reorder_buffer->is_empty());
     EXPECT_TRUE(state.fetch_buffer.empty());
-    EXPECT_TRUE(state.cdb_queue.empty());
+    EXPECT_TRUE(state.completion_fabric.empty());
     EXPECT_TRUE(state.rename_checkpoints.empty());
     EXPECT_FALSE(state.reservation_valid);
     EXPECT_EQ(state.reservation_addr, 0u);
@@ -121,8 +121,8 @@ TEST_F(OooRecoveryTest, YoungerThanRecoveryFlushesOnlyYoungerWork) {
     ASSERT_NE(younger, nullptr);
 
     state.fetch_buffer.push(makeFetched(0x10c));
-    state.cdb_queue.push(CommonDataBusEntry(older));
-    state.cdb_queue.push(CommonDataBusEntry(younger));
+    ASSERT_TRUE(state.completion_fabric.trySubmit(CompletionEvent(older)));
+    ASSERT_TRUE(state.completion_fabric.trySubmit(CompletionEvent(younger)));
     state.branch_units[0].busy = true;
     state.branch_units[0].instruction = current;
     state.alu_units[0].busy = true;
@@ -150,15 +150,14 @@ TEST_F(OooRecoveryTest, YoungerThanRecoveryFlushesOnlyYoungerWork) {
               OOOPipelineConfig::RECOVERY_REDIRECT_LATENCY);
     EXPECT_EQ(result.flushed_rob_entries, 1u);
     EXPECT_EQ(result.fetch_buffer_dropped, 1u);
-    EXPECT_EQ(result.flushed_cdb_entries, 1u);
+    EXPECT_EQ(result.flushed_completion_events, 1u);
     EXPECT_TRUE(result.flushed_l1d_inflight);
     EXPECT_NE(state.reorder_buffer->get_entry(older->get_rob_entry()), nullptr);
     EXPECT_NE(state.reorder_buffer->get_entry(current->get_rob_entry()), nullptr);
     EXPECT_EQ(state.reorder_buffer->get_entry(younger->get_rob_entry()), nullptr);
-    ASSERT_FALSE(state.cdb_queue.empty());
-    EXPECT_EQ(state.cdb_queue.front().instruction, older);
-    state.cdb_queue.pop();
-    EXPECT_TRUE(state.cdb_queue.empty());
+    ASSERT_FALSE(state.completion_fabric.empty());
+    EXPECT_EQ(state.completion_fabric.popReadyEvent().instruction, older);
+    EXPECT_TRUE(state.completion_fabric.empty());
     EXPECT_TRUE(state.fetch_buffer.empty());
     EXPECT_TRUE(state.branch_units[0].busy);
     EXPECT_EQ(state.branch_units[0].instruction, current);

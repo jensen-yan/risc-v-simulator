@@ -123,7 +123,9 @@ flowchart LR
 ```mermaid
 flowchart TD
   subgraph Execute["Execute path"]
-    ES["ExecuteStage\n调度 / execution-unit ticking / complete to CDB"]
+    ES["ExecuteStage\n调度 / execution-unit ticking / submit completion"]
+    CF["CompletionFabric\ncompletion arbitration / backpressure / fanout"]
+    WS["WritebackStage\nwakeup / PRF write / ROB complete"]
     ELC["ExecuteLoadCompletion\nready load 完成状态机"]
     ELH["ExecuteLoadHazard\nROB older store hazard replay"]
     ELA["ExecuteLoadAccess\nforwarding / memory read / D$ read / exception"]
@@ -147,6 +149,7 @@ flowchart TD
   REC["OooRecovery\nshared flush / younger cleanup / restart"]
 
   ES --> ELC
+  ES --> CF
   ELC --> ELH
   ELC --> ELA
   ELA --> ELV
@@ -157,6 +160,8 @@ flowchart TD
   ESA --> EMI
   ESA --> EMO
   ES --> ECR
+  EMI --> CF
+  CF --> WS
   ECR --> REC
   EMO --> REC
 
@@ -181,8 +186,10 @@ flowchart TD
   优先看 `ExecuteStoreAccess`。
 - 改 D$ hit/miss/blocking/outstanding/stall counter：
   优先看 `ExecuteDCacheAccess`。
-- 改已发出的 load/store miss 如何等待和回到 CDB：
-  优先看 `ExecuteMemoryInflight`。
+- 改已发出的 load/store miss 如何等待并提交完成事件：
+  优先看 `ExecuteMemoryInflight` 和 `CompletionFabric`。
+- 改执行完成带宽、completion backpressure、写回 fanout：
+  优先看 `CompletionFabric`、`ExecuteStage` 和 `WritebackStage`。
 - 改 addr-unknown store speculation、Bad Addr-Unknown Pair、load-store violation recovery trigger：
   优先看 `ExecuteMemoryOrder`。
 - 改执行阶段早恢复、branch/JALR younger cleanup、rename checkpoint restore：
@@ -221,7 +228,7 @@ flowchart TD
 - 一个性能实验需要替换或比较不同策略，现有模块没有合适落点。
 
 不满足这些条件时，优先把逻辑留在现有模块或补文档导航。
-例如 ALU/FP/BRANCH 的简单 ticking、CDB enqueue 的统一收尾、dispatch loop 的基本形状，暂时保留在 `ExecuteStage` 更直观。
+例如 ALU/FP/BRANCH 的简单 ticking、Completion Fabric 之外的 dispatch loop 基本形状，暂时保留在 `ExecuteStage` 更直观。
 
 ### 性能探索入口索引
 

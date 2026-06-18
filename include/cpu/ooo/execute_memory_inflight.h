@@ -8,7 +8,7 @@ namespace riscv {
 
 class ExecuteMemoryInflight {
 public:
-    using CompletionCallback = std::function<void(ExecutionUnit&, ExecutionUnitType)>;
+    using CompletionCallback = std::function<bool(ExecutionUnit&, ExecutionUnitType)>;
 
     static bool hasAny(const CPUState& state);
     static bool tryMove(ExecutionUnit& unit,

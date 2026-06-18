@@ -9,30 +9,30 @@ WritebackStage::WritebackStage() {
 
 void WritebackStage::execute(Context& context) {
     size_t used_writeback_ports = 0;
-    while (!context.cdbQueueEmpty() &&
+    while (!context.completionFabricEmpty() &&
            used_writeback_ports < OOOPipelineConfig::WRITEBACK_WIDTH) {
-        CommonDataBusEntry cdb_entry = context.popCdbEntry();
+        CompletionEvent completion_event = context.popCompletionEvent();
         ++used_writeback_ports;
         
         // 检查指令是否有效
-        if (!cdb_entry.instruction) {
-            LOGW(WRITEBACK, "invalid cdb entry, skip");
+        if (!completion_event.instruction) {
+            LOGW(WRITEBACK, "invalid completion event, skip");
             continue;
         }
         
-        auto instruction = cdb_entry.instruction;
+        auto instruction = completion_event.instruction;
         auto rob_entry = instruction->get_rob_entry();
         auto phys_dest = instruction->get_physical_dest();
         auto dest_kind = instruction->get_physical_dest_kind();
         auto result = instruction->get_result();
         
-        LOGT(WRITEBACK, "cdb writeback: rob[%d] p%d = 0x%" PRIx64,
+        LOGT(WRITEBACK, "completion writeback: rob[%d] p%d = 0x%" PRIx64,
                 rob_entry, static_cast<int>(phys_dest), result);
 
         context.incrementCounter(PerfCounterId::WRITEBACKS);
         
         // 更新保留站中的操作数
-        context.updateWaitingOperands(cdb_entry);
+        context.updateWaitingOperands(completion_event);
         
         // 更新寄存器重命名映射
         context.updatePhysicalRegister(dest_kind, phys_dest, result, rob_entry);
@@ -48,7 +48,7 @@ void WritebackStage::execute(Context& context) {
                                      instruction->is_jump(),
                                      instruction->get_jump_target());
         } else {
-            LOGT(WRITEBACK, "stale cdb entry, skip update: rob[%d] current=%p cdb=%p",
+            LOGT(WRITEBACK, "stale completion event, skip update: rob[%d] current=%p event=%p",
                    rob_entry,
                    static_cast<const void*>(rob_instruction.get()),
                    static_cast<const void*>(instruction.get()));
@@ -57,11 +57,11 @@ void WritebackStage::execute(Context& context) {
         LOGT(WRITEBACK, "rob[%d] status updated to COMPLETED", rob_entry);
     }
     
-    if (context.cdbQueueEmpty()) {
-        LOGT(WRITEBACK, "cdb queue empty, no writeback");
+    if (context.completionFabricEmpty()) {
+        LOGT(WRITEBACK, "completion fabric empty, no writeback");
     } else {
-        LOGT(WRITEBACK, "cdb queue keeps %zu entries after using %zu/%zu writeback ports",
-             context.cdbQueueSize(),
+        LOGT(WRITEBACK, "completion fabric keeps %zu events after using %zu/%zu writeback ports",
+             context.completionFabricSize(),
              used_writeback_ports,
              OOOPipelineConfig::WRITEBACK_WIDTH);
     }

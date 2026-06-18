@@ -99,7 +99,10 @@ TEST(ExecuteMemoryInflightTest, AdvanceKeepsEntryWhileCyclesRemain) {
     int completed = 0;
     ExecuteMemoryInflight::advance(
         state,
-        [&](ExecutionUnit&, ExecutionUnitType) { ++completed; });
+        [&](ExecutionUnit&, ExecutionUnitType) {
+            ++completed;
+            return true;
+        });
 
     EXPECT_TRUE(entry.valid);
     EXPECT_EQ(entry.state.remaining_cycles, 1);
@@ -124,6 +127,7 @@ TEST(ExecuteMemoryInflightTest, AdvanceCompletesLoadAndClearsEntry) {
             ++completed;
             EXPECT_EQ(unit_type, ExecutionUnitType::LOAD);
             EXPECT_EQ(unit.result, 0xCAFEu);
+            return true;
         });
 
     EXPECT_EQ(completed, 1);
@@ -155,6 +159,7 @@ TEST(ExecuteMemoryInflightTest, AdvanceLimitsReadyCompletionsByReplayWidth) {
         [&](ExecutionUnit& unit, ExecutionUnitType unit_type) {
             EXPECT_EQ(unit_type, ExecutionUnitType::LOAD);
             completed_ids.push_back(unit.instruction->get_instruction_id());
+            return true;
         });
 
     ASSERT_EQ(completed_ids.size(), OOOPipelineConfig::MEMORY_REPLAY_WIDTH);
@@ -174,6 +179,7 @@ TEST(ExecuteMemoryInflightTest, AdvanceLimitsReadyCompletionsByReplayWidth) {
         [&](ExecutionUnit& unit, ExecutionUnitType unit_type) {
             EXPECT_EQ(unit_type, ExecutionUnitType::LOAD);
             completed_ids.push_back(unit.instruction->get_instruction_id());
+            return true;
         });
 
     EXPECT_FALSE(delayed_entry.valid);
@@ -198,11 +204,51 @@ TEST(ExecuteMemoryInflightTest, AdvanceCompletesStoreWithZeroResult) {
             ++completed;
             EXPECT_EQ(unit_type, ExecutionUnitType::STORE);
             EXPECT_EQ(unit.result, 0u);
+            return true;
         });
 
     EXPECT_EQ(completed, 1);
     EXPECT_FALSE(entry.valid);
     EXPECT_EQ(entry.state.instruction, nullptr);
+}
+
+TEST(ExecuteMemoryInflightTest, AdvanceKeepsLoadEntryWhenCompletionBackpressures) {
+    CPUState state;
+    auto inst = create_dynamic_inst(makeInstruction(Opcode::LOAD), 0x100, 1);
+    auto& entry = state.memory_access_inflight[0];
+    entry.valid = true;
+    entry.unit_type = ExecutionUnitType::LOAD;
+    entry.state.instruction = inst;
+    entry.state.remaining_cycles = 0;
+    entry.state.result = 0xCAFE;
+    entry.wait_latency_cycles = 7;
+
+    int attempts = 0;
+    ExecuteMemoryInflight::advance(
+        state,
+        [&](ExecutionUnit& unit, ExecutionUnitType unit_type) {
+            ++attempts;
+            EXPECT_EQ(unit_type, ExecutionUnitType::LOAD);
+            EXPECT_EQ(unit.result, 0xCAFEu);
+            return false;
+        });
+
+    EXPECT_EQ(attempts, 1);
+    EXPECT_TRUE(entry.valid);
+    EXPECT_TRUE(entry.state.completion_pending);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_COUNT), 1u);
+
+    ExecuteMemoryInflight::advance(
+        state,
+        [&](ExecutionUnit&, ExecutionUnitType unit_type) {
+            ++attempts;
+            EXPECT_EQ(unit_type, ExecutionUnitType::LOAD);
+            return true;
+        });
+
+    EXPECT_EQ(attempts, 2);
+    EXPECT_FALSE(entry.valid);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_COUNT), 1u);
 }
 
 } // namespace riscv

@@ -152,7 +152,7 @@ OooRecovery::Result OooRecovery::recoverFullPipeline(CPUState& state,
     }
     state.rename_checkpoints.clear();
 
-    result.flushed_cdb_entries = clearQueue(state.cdb_queue);
+    result.flushed_completion_events = state.completion_fabric.clear();
 
     if (request.flush_store_buffer && state.store_buffer) {
         state.store_buffer->flush();
@@ -185,25 +185,8 @@ OooRecovery::Result OooRecovery::recoverFullPipeline(CPUState& state,
     return result;
 }
 
-uint64_t OooRecovery::flushYoungerCdbEntries(CPUState& state, uint64_t instruction_id) {
-    if (state.cdb_queue.empty()) {
-        return 0;
-    }
-
-    std::queue<CommonDataBusEntry> kept_entries;
-    uint64_t flushed = 0;
-    while (!state.cdb_queue.empty()) {
-        auto entry = state.cdb_queue.front();
-        state.cdb_queue.pop();
-        if (entry.valid && entry.instruction &&
-            entry.instruction->get_instruction_id() > instruction_id) {
-            ++flushed;
-            continue;
-        }
-        kept_entries.push(std::move(entry));
-    }
-    state.cdb_queue = std::move(kept_entries);
-    return flushed;
+uint64_t OooRecovery::flushYoungerCompletionEvents(CPUState& state, uint64_t instruction_id) {
+    return state.completion_fabric.flushYoungerThan(instruction_id);
 }
 
 bool OooRecovery::flushYoungerExecutionUnits(CPUState& state, const YoungerThanRequest& request) {
@@ -326,7 +309,8 @@ OooRecovery::Result OooRecovery::recoverYoungerThan(CPUState& state,
     if (state.store_buffer) {
         state.store_buffer->flush_after(request.instruction_id);
     }
-    result.flushed_cdb_entries = flushYoungerCdbEntries(state, request.instruction_id);
+    result.flushed_completion_events =
+        flushYoungerCompletionEvents(state, request.instruction_id);
     result.flushed_l1d_inflight = flushYoungerExecutionUnits(state, request);
     if (result.flushed_l1d_inflight && state.l1d_cache) {
         state.l1d_cache->flushInFlight();
@@ -339,8 +323,10 @@ OooRecovery::Result OooRecovery::recoverYoungerThan(CPUState& state,
 
     LOGT(EXECUTE,
          "ooo recovery younger-than completed inst=%" PRIu64
-         " flushed_rob=%" PRIu64 " flushed_cdb=%" PRIu64,
-         request.instruction_id, result.flushed_rob_entries, result.flushed_cdb_entries);
+         " flushed_rob=%" PRIu64 " flushed_completion=%" PRIu64,
+         request.instruction_id,
+         result.flushed_rob_entries,
+         result.flushed_completion_events);
     return result;
 }
 

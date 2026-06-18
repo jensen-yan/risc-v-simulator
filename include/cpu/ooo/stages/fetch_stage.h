@@ -32,7 +32,7 @@ public:
             state_.fetch_buffer.push(instruction);
         }
 
-        bool cdbQueueEmpty() const { return state_.cdb_queue.empty(); }
+        bool completionFabricEmpty() const { return state_.completion_fabric.empty(); }
         bool reorderBufferEmpty() const { return state_.reorder_buffer->is_empty(); }
         bool anyExecutionUnitBusy() const;
 

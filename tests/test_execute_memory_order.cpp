@@ -109,13 +109,13 @@ TEST(ExecuteMemoryOrderTest, RecoversOverlappingAddrUnknownSpeculationViolation)
     FetchedInstruction fetched;
     fetched.pc = 0x300;
     state.fetch_buffer.push(fetched);
-    state.cdb_queue.push(CommonDataBusEntry(load));
+    ASSERT_TRUE(state.completion_fabric.trySubmit(CompletionEvent(load)));
 
     EXPECT_TRUE(ExecuteMemoryOrder::tryRecoverViolation(store, state));
 
     EXPECT_EQ(state.pc, 0x100u);
     EXPECT_TRUE(state.fetch_buffer.empty());
-    EXPECT_TRUE(state.cdb_queue.empty());
+    EXPECT_TRUE(state.completion_fabric.empty());
     EXPECT_TRUE(state.reorder_buffer->is_empty());
     EXPECT_TRUE(state.isBlockedAddrUnknownPair(load->get_pc(), store->get_pc()));
     EXPECT_EQ(state.load_profiles[load->get_pc()].speculated_addr_unknown_violation, 1u);

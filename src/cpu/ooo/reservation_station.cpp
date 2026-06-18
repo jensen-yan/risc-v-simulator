@@ -195,12 +195,12 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
     return results;
 }
 
-void ReservationStation::update_operands(const CommonDataBusEntry& cdb_entry, StoreBuffer* store_buffer) {
-    if (!cdb_entry.valid || !cdb_entry.instruction) return;
+void ReservationStation::update_operands(const CompletionEvent& completion_event, StoreBuffer* store_buffer) {
+    if (!completion_event.valid || !completion_event.instruction) return;
     
-    auto phys_dest = cdb_entry.instruction->get_physical_dest();
-    auto dest_kind = cdb_entry.instruction->get_physical_dest_kind();
-    auto result = cdb_entry.instruction->get_result();
+    auto phys_dest = completion_event.instruction->get_physical_dest();
+    auto dest_kind = completion_event.instruction->get_physical_dest_kind();
+    auto result = completion_event.instruction->get_result();
     if (dest_kind == RegisterFileKind::None) {
         return;
     }

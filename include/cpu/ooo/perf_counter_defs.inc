@@ -20,8 +20,8 @@ PERF_COUNTER_DEF(TOPDOWN_SLOTS_RESOURCE_BLOCKED, "cpu.topdown.slots.resource_blo
 PERF_COUNTER_DEF(TOPDOWN_SLOTS_NO_UNIT, "cpu.topdown.slots.no_unit", "Execute slots selected work but found no execution unit")
 PERF_COUNTER_DEF(TOPDOWN_SLOTS_AMO_WAIT, "cpu.topdown.slots.amo_wait", "Execute slots selected AMO work delayed by older store-like operations")
 PERF_COUNTER_DEF(TOPDOWN_SLOTS_OTHER, "cpu.topdown.slots.other", "Execute slots not classified by the slot topdown-lite categories")
-PERF_COUNTER_DEF(CDB_ENQUEUED, "cpu.execute.cdb_enqueued", "Execution results enqueued to CDB")
-PERF_COUNTER_DEF(WRITEBACKS, "cpu.writeback.count", "CDB entries consumed in writeback stage")
+PERF_COUNTER_DEF(COMPLETION_ACCEPTED, "cpu.completion.accepted", "Execution completion events accepted by the completion fabric")
+PERF_COUNTER_DEF(WRITEBACKS, "cpu.writeback.count", "Completion events consumed in writeback stage")
 PERF_COUNTER_DEF(COMMIT_SLOTS, "cpu.commit.slots", "Total commit stage slots available")
 PERF_COUNTER_DEF(COMMIT_UTILIZED_SLOTS, "cpu.commit.utilized_slots", "Commit slots that successfully retired an instruction")
 PERF_COUNTER_DEF(STALL_COMMIT_STORE_PORT_BUSY, "cpu.stall.commit_store_port_busy", "Commit stopped because store memory write ports were exhausted")
@@ -85,6 +85,7 @@ PERF_COUNTER_DEF(STALL_EXECUTE_DEPENDENCY_BLOCKED, "cpu.stall.execute_dependency
 PERF_COUNTER_DEF(STALL_EXECUTE_RESOURCE_BLOCKED, "cpu.stall.execute_resource_blocked", "Execute stalled because ready instructions wait for resources")
 PERF_COUNTER_DEF(STALL_EXECUTE_NO_UNIT, "cpu.stall.execute_no_unit", "Execute stage had ready instruction but no execution unit")
 PERF_COUNTER_DEF(STALL_EXECUTE_AMO_WAIT, "cpu.stall.execute_amo_wait", "AMO delayed by older uncommitted store-like operations")
+PERF_COUNTER_DEF(STALL_COMPLETION_PORT_BUSY, "cpu.stall.completion_port_busy", "Execution result held because completion fabric bandwidth was exhausted")
 PERF_COUNTER_DEF(STALL_MEMORY_REPLAY_PORT_BUSY, "cpu.stall.memory_replay_port_busy", "Memory inflight completion delayed because replay ports were exhausted")
 
 PERF_COUNTER_DEF(LOAD_REPLAYS, "cpu.memory.load_replays", "Load instructions replayed due to memory ordering")

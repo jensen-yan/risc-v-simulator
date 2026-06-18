@@ -81,20 +81,26 @@ void ExecuteMemoryInflight::advance(CPUState& state, const CompletionCallback& c
 
         if (entry.unit_type == ExecutionUnitType::LOAD) {
             LOGT(EXECUTE,
-                 "inst=%" PRId64 " LOAD inflight done, result=0x%" PRIx64 " -> CDB",
+                 "inst=%" PRId64 " LOAD inflight done, result=0x%" PRIx64 " -> completion fabric",
                  inflight.instruction->get_instruction_id(),
                  inflight.result);
-            state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_COUNT);
-            state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_TOTAL,
-                                          entry.wait_latency_cycles);
-            const uint64_t max_latency =
-                state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_MAX);
-            if (entry.wait_latency_cycles > max_latency) {
-                state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_MAX,
-                                              entry.wait_latency_cycles - max_latency);
+            const bool first_completion_attempt = !inflight.completion_pending;
+            if (first_completion_attempt) {
+                state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_COUNT);
+                state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_TOTAL,
+                                              entry.wait_latency_cycles);
+                const uint64_t max_latency =
+                    state.perf_counters.value(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_MAX);
+                if (entry.wait_latency_cycles > max_latency) {
+                    state.perf_counters.increment(PerfCounterId::MEMORY_INFLIGHT_LOAD_MISS_LATENCY_MAX,
+                                                  entry.wait_latency_cycles - max_latency);
+                }
+                ExecuteMemoryOrder::recordLoadReplayBucket(inflight.instruction, state);
             }
-            ExecuteMemoryOrder::recordLoadReplayBucket(inflight.instruction, state);
-            complete(inflight, ExecutionUnitType::LOAD);
+            if (!complete(inflight, ExecutionUnitType::LOAD)) {
+                inflight.completion_pending = true;
+                continue;
+            }
         } else {
             inflight.result = 0;
             LOGT(EXECUTE,
@@ -104,7 +110,10 @@ void ExecuteMemoryInflight::advance(CPUState& state, const CompletionCallback& c
                 resetMemoryAccessInFlightState(entry);
                 return;
             }
-            complete(inflight, ExecutionUnitType::STORE);
+            if (!complete(inflight, ExecutionUnitType::STORE)) {
+                inflight.completion_pending = true;
+                continue;
+            }
         }
 
         resetMemoryAccessInFlightState(entry);

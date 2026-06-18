@@ -7,7 +7,7 @@ namespace riscv {
 
 /**
  * 写回阶段实现
- * 负责处理CDB队列中的写回请求，更新保留站、寄存器重命名和ROB状态
+ * 负责处理完成事件，更新保留站、寄存器重命名和ROB状态
  */
 class WritebackStage : public PipelineStage {
 public:
@@ -18,18 +18,16 @@ public:
     public:
         explicit Context(CPUState& state) : state_(state) {}
 
-        bool cdbQueueEmpty() const { return state_.cdb_queue.empty(); }
-        size_t cdbQueueSize() const { return state_.cdb_queue.size(); }
-        CommonDataBusEntry popCdbEntry() {
-            auto entry = state_.cdb_queue.front();
-            state_.cdb_queue.pop();
-            return entry;
+        bool completionFabricEmpty() const { return state_.completion_fabric.empty(); }
+        size_t completionFabricSize() const { return state_.completion_fabric.size(); }
+        CompletionEvent popCompletionEvent() {
+            return state_.completion_fabric.popReadyEvent();
         }
         void incrementCounter(PerfCounterId id, uint64_t amount = 1) {
             state_.perf_counters.increment(id, amount);
         }
-        void updateWaitingOperands(const CommonDataBusEntry& cdb_entry) {
-            state_.reservation_station->update_operands(cdb_entry, state_.store_buffer.get());
+        void updateWaitingOperands(const CompletionEvent& completion_event) {
+            state_.reservation_station->update_operands(completion_event, state_.store_buffer.get());
         }
         void updatePhysicalRegister(RegisterFileKind kind,
                                     PhysRegNum reg,

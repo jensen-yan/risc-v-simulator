@@ -140,8 +140,8 @@ TEST_F(ReservationStationTest, OperandDependency) {
     auto dispatch_result = rs.dispatch_instruction();
     EXPECT_FALSE(dispatch_result.success) << "操作数未准备好时不应该调度";
     
-    // 通过CDB更新操作数
-    // 创建一个模拟的DynamicInst来测试CDB更新
+    // 通过完成事件更新操作数
+    // 创建一个模拟的DynamicInst来测试完成事件更新
     DecodedInstruction test_decoded;
     test_decoded.type = InstructionType::R_TYPE;
     test_decoded.opcode = Opcode::OP;
@@ -157,9 +157,9 @@ TEST_F(ReservationStationTest, OperandDependency) {
     mock_inst->set_physical_dest_kind(RegisterFileKind::Integer);
     mock_inst->set_result(0xAABBCCDD);
     
-    CommonDataBusEntry cdb_entry(mock_inst);
+    CompletionEvent completion_event(mock_inst);
     
-    rs.update_operands(cdb_entry, nullptr);
+    rs.update_operands(completion_event, nullptr);
     
     // 现在应该可以调度了
     dispatch_result = rs.dispatch_instruction();

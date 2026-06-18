@@ -40,11 +40,11 @@ protected:
     }
 };
 
-TEST_F(WritebackStageContextTest, EmptyCdbSkipsWritebackThroughNarrowContext) {
+TEST_F(WritebackStageContextTest, EmptyCompletionFabricSkipsWritebackThroughNarrowContext) {
     WritebackStage::Context context(state);
     writeback_stage.execute(context);
 
-    EXPECT_TRUE(state.cdb_queue.empty());
+    EXPECT_TRUE(state.completion_fabric.empty());
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::WRITEBACKS), 0u);
 }
 
@@ -54,12 +54,12 @@ TEST_F(WritebackStageContextTest, CompletesMatchingRobEntryThroughNarrowContext)
     inst->set_physical_dest_kind(RegisterFileKind::Integer);
     inst->set_physical_dest(32);
     inst->set_result(7);
-    state.cdb_queue.push(CommonDataBusEntry(inst));
+    ASSERT_TRUE(state.completion_fabric.trySubmit(CompletionEvent(inst)));
 
     WritebackStage::Context context(state);
     writeback_stage.execute(context);
 
-    EXPECT_TRUE(state.cdb_queue.empty());
+    EXPECT_TRUE(state.completion_fabric.empty());
     EXPECT_EQ(inst->get_status(), DynamicInst::Status::COMPLETED);
     EXPECT_TRUE(inst->is_result_ready());
     EXPECT_EQ(state.register_rename->get_physical_register_value(RegisterFileKind::Integer, 32), 7u);
@@ -67,7 +67,7 @@ TEST_F(WritebackStageContextTest, CompletesMatchingRobEntryThroughNarrowContext)
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::WRITEBACKS), 1u);
 }
 
-TEST_F(WritebackStageContextTest, LeavesCdbEntriesBeyondWritebackWidthQueued) {
+TEST_F(WritebackStageContextTest, LeavesCompletionEventsBeyondWritebackWidthQueued) {
     std::vector<DynamicInstPtr> instructions;
     for (size_t i = 0; i < OOOPipelineConfig::WRITEBACK_WIDTH + 1; ++i) {
         auto inst = state.reorder_buffer->allocate_entry(
@@ -78,14 +78,17 @@ TEST_F(WritebackStageContextTest, LeavesCdbEntriesBeyondWritebackWidthQueued) {
         inst->set_physical_dest_kind(RegisterFileKind::Integer);
         inst->set_physical_dest(static_cast<PhysRegNum>(32 + i));
         inst->set_result(i + 1);
-        state.cdb_queue.push(CommonDataBusEntry(inst));
+        ASSERT_TRUE(state.completion_fabric.trySubmit(CompletionEvent(inst)));
+        if (i + 1 == OOOPipelineConfig::COMPLETION_WIDTH) {
+            state.completion_fabric.beginCycle();
+        }
         instructions.push_back(inst);
     }
 
     WritebackStage::Context context(state);
     writeback_stage.execute(context);
 
-    EXPECT_EQ(state.cdb_queue.size(), 1u);
+    EXPECT_EQ(state.completion_fabric.size(), 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::WRITEBACKS),
               OOOPipelineConfig::WRITEBACK_WIDTH);
 
@@ -96,8 +99,8 @@ TEST_F(WritebackStageContextTest, LeavesCdbEntriesBeyondWritebackWidthQueued) {
     }
 
     EXPECT_EQ(instructions.back()->get_status(), DynamicInst::Status::ALLOCATED);
-    ASSERT_FALSE(state.cdb_queue.empty());
-    EXPECT_EQ(state.cdb_queue.front().instruction, instructions.back());
+    ASSERT_FALSE(state.completion_fabric.empty());
+    EXPECT_EQ(state.completion_fabric.popReadyEvent().instruction, instructions.back());
 }
 
 } // namespace riscv

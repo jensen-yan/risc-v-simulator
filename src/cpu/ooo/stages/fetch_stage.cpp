@@ -134,7 +134,7 @@ void FetchStage::execute(Context& context) {
     auto try_halt_if_drained = [&]() {
         if (context.reorderBufferEmpty() &&
             context.fetchBufferEmpty() &&
-            context.cdbQueueEmpty()) {
+            context.completionFabricEmpty()) {
             context.setHalted(true);
             LOGT(FETCH, "pipeline drained, program finished");
         }
@@ -296,7 +296,7 @@ void FetchStage::execute(Context& context) {
     // checkpoint 在合法执行过程中也会出现远大于 memory_size 的 PC。
     if (context.reorderBufferEmpty() &&
         context.fetchBufferEmpty() &&
-        context.cdbQueueEmpty() &&
+        context.completionFabricEmpty() &&
         !context.hasIcacheMissWait()) {
         if (!context.anyExecutionUnitBusy()) {
             context.setHalted(true);

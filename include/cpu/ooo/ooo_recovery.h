@@ -39,7 +39,7 @@ public:
     struct Result {
         uint64_t flushed_rob_entries = 0;
         uint64_t fetch_buffer_dropped = 0;
-        uint64_t flushed_cdb_entries = 0;
+        uint64_t flushed_completion_events = 0;
         bool flushed_l1d_inflight = false;
     };
 
@@ -49,7 +49,7 @@ public:
 
 private:
     static void recordFlushCounters(CPUState& state, Reason reason, uint64_t flushed_rob_entries);
-    static uint64_t flushYoungerCdbEntries(CPUState& state, uint64_t instruction_id);
+    static uint64_t flushYoungerCompletionEvents(CPUState& state, uint64_t instruction_id);
     static bool flushYoungerExecutionUnits(CPUState& state, const YoungerThanRequest& request);
     static void restoreRenameCheckpointForSurvivingWork(CPUState& state,
                                                         uint64_t instruction_id,

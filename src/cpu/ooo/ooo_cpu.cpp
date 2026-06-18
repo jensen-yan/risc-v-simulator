@@ -93,7 +93,7 @@ void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memor
     recreateRuntimeComponents(state, memory);
     state.resetExecutionUnits();
     clearQueue(state.fetch_buffer);
-    clearQueue(state.cdb_queue);
+    state.completion_fabric.clear();
 }
 
 void sampleRobOccupancy(CPUState& state) {
@@ -236,6 +236,8 @@ void OutOfOrderCPU::step() {
     }
     
     try {
+        cpu_state_.completion_fabric.beginCycle();
+
         if (cpu_state_.l1i_cache) {
             cpu_state_.l1i_cache->tick();
         }
@@ -931,7 +933,7 @@ void OutOfOrderCPU::dumpPipelineState() const {
     cpu_state_.reservation_station->dump_execution_units();
     
     std::cout << "Fetch Buffer Size: " << cpu_state_.fetch_buffer.size() << std::endl;
-    std::cout << "CDB Queue Size: " << cpu_state_.cdb_queue.size() << std::endl;
+    std::cout << "Completion Fabric Size: " << cpu_state_.completion_fabric.size() << std::endl;
 }
 
 

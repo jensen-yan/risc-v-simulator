@@ -82,13 +82,13 @@ bool ExecuteControlRecovery::tryRecoverEarly(ExecutionUnit& unit,
     LOGT(EXECUTE,
          "early control recovery: inst=%" PRId64 " pc=0x%" PRIx64
          " predicted_next=0x%" PRIx64 " actual_next=0x%" PRIx64
-         " flushed_rob=%zu flushed_cdb=%zu",
+         " flushed_rob=%zu flushed_completion=%zu",
          instruction_id,
          instruction_pc,
          predicted_next_pc,
          actual_next_pc,
          static_cast<size_t>(recovery_result.flushed_rob_entries),
-         static_cast<size_t>(recovery_result.flushed_cdb_entries));
+         static_cast<size_t>(recovery_result.flushed_completion_events));
     return true;
 }
 

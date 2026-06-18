@@ -45,6 +45,18 @@ _Avoid_: syscall, normal memory-mapped device
 The CPU mode that models instruction flow through fetch, decode, issue, execute, writeback, and commit with speculative execution and in-order retirement.
 _Avoid_: OOO blob, pipeline code
 
+**Structural Constraint Simulator**:
+The modeling role for the out-of-order CPU: capture the timing and resource constraints that explain performance behavior without attempting cycle-accurate RTL reproduction.
+_Avoid_: full RTL replica, teaching-only Tomasulo model, functional-only simulator
+
+**Completion Fabric**:
+The out-of-order pipeline's result-completion boundary that arbitrates when executed work becomes visible to wakeup, physical-register writeback, and ROB completion.
+_Avoid_: treating the Common Data Bus as the long-term domain boundary
+
+**Completion Backpressure**:
+The structural constraint where an execution unit that has produced a result must keep holding it when the Completion Fabric cannot accept another completion event in the current cycle.
+_Avoid_: silently buffering every completed result in an unbounded queue
+
 **Stage Context**:
 A stage-specific adapter that exposes only the state and actions a pipeline stage needs for one execution step.
 _Avoid_: passing raw `CPUState` as the stage interface
@@ -124,6 +136,9 @@ _Avoid_: blacklist entry
 ## Relationships
 
 - An **Out-of-Order Pipeline** executes each stage through a **Stage Context**.
+- A **Structural Constraint Simulator** should model performance-visible resource contention while keeping implementation detail below full RTL fidelity.
+- A **Completion Fabric** replaces the Common Data Bus as the domain concept for execution-result completion; any CDB-like queue is only a legacy or migration detail.
+- **Completion Backpressure** keeps completed execution units occupied when completion bandwidth is exhausted.
 - The **Simulator** owns the run lifecycle and may create a **Reference Execution Context** when **DiffTest** is enabled for an out-of-order run.
 - A **Checkpoint Runner** drives the **Simulator** over an **Instruction Window** after importing a workload slice.
 - **Address Translation** delegates Sv39-specific page-table traversal to the **SV39 Page Walker** and is constrained by **Privilege State**.
@@ -153,5 +168,8 @@ _Avoid_: blacklist entry
 ## Flagged Ambiguities
 
 - Use **Execute Memory Order** for the decision and accounting around memory-order speculation. Use **OOO Recovery** for the shared pipeline cleanup rules.
+- Use **Structural Constraint Simulator** for the intended OOO modeling fidelity; do not describe this direction as full RTL reproduction or as a purely functional simulator.
+- Use **Completion Fabric** for the future result-completion boundary; use Common Data Bus only when referring to legacy implementation or migration work.
+- Use **Completion Backpressure** when completion bandwidth stalls a completed execution unit; do not model this as an always-available result queue.
 - Use **Address Translation** for the fetch/load/store translation boundary. Use **SV39 Page Walker** only for the Sv39 page-table walk inside that boundary.
 - Use **DiffTest** for commit-time reference comparison, not for ordinary unit tests or benchmark result checks.

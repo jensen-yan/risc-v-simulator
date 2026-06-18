@@ -38,13 +38,13 @@ enum class ExecutionUnitType {
 class DynamicInst;
 using DynamicInstPtr = std::shared_ptr<DynamicInst>;
 
-// 公共数据总线项 - 使用DynamicInst指针保持数据一致性
-struct CommonDataBusEntry {
+// 执行完成事件 - 使用DynamicInst指针保持数据一致性
+struct CompletionEvent {
     DynamicInstPtr instruction;    // 直接使用DynamicInst指针作为数据源
     bool valid;
     
-    CommonDataBusEntry() : instruction(nullptr), valid(false) {}
-    explicit CommonDataBusEntry(DynamicInstPtr inst) : instruction(inst), valid(true) {}
+    CompletionEvent() : instruction(nullptr), valid(false) {}
+    explicit CompletionEvent(DynamicInstPtr inst) : instruction(inst), valid(true) {}
 };
 
 // 分支预测结果
@@ -75,6 +75,7 @@ struct OOOPipelineConfig {
     static constexpr size_t ISSUE_WIDTH = 4;
     static constexpr size_t DISPATCH_WIDTH = 4;
     static constexpr size_t WRITEBACK_WIDTH = 2;
+    static constexpr size_t COMPLETION_WIDTH = WRITEBACK_WIDTH;
     static constexpr size_t COMMIT_WIDTH = 4;
     static constexpr size_t STORE_COMMIT_WIDTH = 1;
     static constexpr size_t RECOVERY_REDIRECT_LATENCY = 2;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/types.h"
+#include "cpu/ooo/completion_fabric.h"
 #include "core/memory.h"
 #include "core/decoder.h"
 #include "cpu/ooo/register_rename.h"
@@ -67,6 +68,7 @@ struct ExecutionUnit {
     uint64_t result;
     bool has_exception;
     std::string exception_msg;
+    bool completion_pending;
     // 跳转指令相关字段
     uint64_t jump_target;
     bool is_jump;
@@ -147,6 +149,7 @@ inline void resetExecutionUnitState(ExecutionUnit& unit) {
     unit.result = 0;
     unit.has_exception = false;
     unit.exception_msg.clear();
+    unit.completion_pending = false;
     unit.jump_target = 0;
     unit.is_jump = false;
     unit.load_address = 0;
@@ -253,7 +256,7 @@ struct CPUState {
     
     // 流水线缓冲区
     std::queue<FetchedInstruction> fetch_buffer;  // 取指缓冲区
-    std::queue<CommonDataBusEntry> cdb_queue;    // 通用数据总线队列
+    CompletionFabric completion_fabric;          // 执行完成事件仲裁与缓冲
     
     // 核心组件（共享引用）
     std::shared_ptr<Memory> memory;

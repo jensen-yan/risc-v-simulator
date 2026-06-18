@@ -85,7 +85,7 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
         return Result::Completed;
     }
 
-    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu done, %s result=0x%" PRIx64 " -> CDB",
+    LOGT(EXECUTE, "inst=%" PRId64 " LOAD%zu done, %s result=0x%" PRIx64 " -> completion fabric",
          unit.instruction->get_instruction_id(),
          unit_index,
          (load_result == ExecuteLoadAccess::Result::Forwarded ? "(store-forwarded)"

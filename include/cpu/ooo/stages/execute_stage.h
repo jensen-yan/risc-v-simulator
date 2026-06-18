@@ -70,7 +70,7 @@ private:
     void update_execution_units(CPUState& state);
     
     // 执行单元完成时的公共处理逻辑
-    void complete_execution_unit(ExecutionUnit& unit,
+    bool complete_execution_unit(ExecutionUnit& unit,
                                  ExecutionUnitType unit_type,
                                  size_t unit_index,
                                  CPUState& state,

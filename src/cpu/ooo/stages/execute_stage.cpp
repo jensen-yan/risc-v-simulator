@@ -48,7 +48,7 @@ void ExecuteStage::execute(Context& context) {
     ExecuteMemoryInflight::advance(
         state,
         [this, &state](ExecutionUnit& unit, ExecutionUnitType unit_type) {
-            complete_execution_unit(
+            return complete_execution_unit(
                 unit, unit_type, 0, state, /*release_dispatch_unit=*/false);
         });
 
@@ -123,6 +123,7 @@ void ExecuteStage::execute(Context& context) {
         unit->busy = true;
         unit->instruction = dispatch_result.instruction;
         unit->has_exception = false;
+        unit->completion_pending = false;
         unit->dcache.reset();
         unit->remaining_cycles = decoded_info.execution_cycles;
 
@@ -240,7 +241,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                     continue;
                 }
 
-                LOGT(EXECUTE, "inst=%" PRId64 " ALU%zu done, result=0x%" PRIx64 " -> CDB",
+                LOGT(EXECUTE, "inst=%" PRId64 " ALU%zu done, result=0x%" PRIx64 " -> completion fabric",
                     unit.instruction->get_instruction_id(), i, unit.result);
                 
                 complete_execution_unit(unit, ExecutionUnitType::ALU, i, state);
@@ -256,7 +257,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
 
             if (unit.remaining_cycles <= 0) {
-                LOGT(EXECUTE, "inst=%" PRId64 " FP%zu done, result=0x%" PRIx64 " -> CDB",
+                LOGT(EXECUTE, "inst=%" PRId64 " FP%zu done, result=0x%" PRIx64 " -> completion fabric",
                     unit.instruction->get_instruction_id(), i, unit.result);
                 complete_execution_unit(unit, ExecutionUnitType::FP, i, state);
             }
@@ -272,7 +273,7 @@ void ExecuteStage::update_execution_units(CPUState& state) {
                 unit.instruction->get_instruction_id(), i, unit.remaining_cycles);
             
             if (unit.remaining_cycles <= 0) {
-                LOGT(EXECUTE, "inst=%" PRId64 " BRANCH%zu done -> CDB",
+                LOGT(EXECUTE, "inst=%" PRId64 " BRANCH%zu done -> completion fabric",
                     unit.instruction->get_instruction_id(), i);
                 complete_execution_unit(unit, ExecutionUnitType::BRANCH, i, state);
             }
@@ -317,28 +318,47 @@ void ExecuteStage::update_execution_units(CPUState& state) {
     }
 }
 
-void ExecuteStage::complete_execution_unit(ExecutionUnit& unit,
+bool ExecuteStage::complete_execution_unit(ExecutionUnit& unit,
                                            ExecutionUnitType unit_type,
                                            size_t unit_index,
                                            CPUState& state,
                                            bool release_dispatch_unit) {
-    unit.instruction->set_complete_cycle(state.cycle_count);
-
-    if (unit.has_exception) {
-        unit.instruction->set_exception(unit.exception_msg);
-    } else {
-        unit.instruction->clear_exception();
+    if (!unit.instruction) {
+        resetExecutionUnitState(unit);
+        return true;
     }
 
-    // 设置执行结果和跳转信息到DynamicInst
-    unit.instruction->set_result(unit.result);
-    unit.instruction->set_jump_info(unit.is_jump, unit.jump_target);
-    ExecuteControlRecovery::tryRecoverEarly(unit, unit_type, unit_index, state);
+    if (!unit.completion_pending) {
+        unit.instruction->set_complete_cycle(state.cycle_count);
+
+        if (unit.has_exception) {
+            unit.instruction->set_exception(unit.exception_msg);
+        } else {
+            unit.instruction->clear_exception();
+        }
+
+        // 设置执行结果和跳转信息到DynamicInst
+        unit.instruction->set_result(unit.result);
+        unit.instruction->set_jump_info(unit.is_jump, unit.jump_target);
+        ExecuteControlRecovery::tryRecoverEarly(unit, unit_type, unit_index, state);
+        unit.completion_pending = true;
+    }
     
-    // 执行完成，发送到CDB
-    CommonDataBusEntry cdb_entry(unit.instruction);
-    state.cdb_queue.push(cdb_entry);
-    state.perf_counters.increment(PerfCounterId::CDB_ENQUEUED);
+    CompletionEvent completion_event(unit.instruction);
+    if (!state.completion_fabric.trySubmit(completion_event)) {
+        state.recordPipelineStall(PerfCounterId::STALL_COMPLETION_PORT_BUSY);
+        LOGT(EXECUTE,
+             "inst=%" PRId64 " completion fabric full, hold %s%zu result",
+             unit.instruction->get_instruction_id(),
+             unit_type == ExecutionUnitType::ALU ? "ALU" :
+             unit_type == ExecutionUnitType::FP ? "FP" :
+             unit_type == ExecutionUnitType::BRANCH ? "BRANCH" :
+             unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE",
+             unit_index);
+        return false;
+    }
+
+    state.perf_counters.increment(PerfCounterId::COMPLETION_ACCEPTED);
     
     // 清空对应的保留站条目
     RSEntry rs_entry = unit.instruction->get_rs_entry();
@@ -350,6 +370,7 @@ void ExecuteStage::complete_execution_unit(ExecutionUnit& unit,
 
     // 释放执行单元
     resetExecutionUnitState(unit);
+    return true;
 }
 
 } // namespace riscv 

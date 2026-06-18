@@ -19,7 +19,7 @@ using ReservationStationEntry = DynamicInst;
  * 
  * 功能：
  * 1. 管理等待执行的指令
- * 2. 监听公共数据总线(CDB)，更新操作数状态
+ * 2. 监听完成事件，更新操作数状态
  * 3. 选择准备好的指令发射到执行单元
  * 4. 支持不同类型的执行单元（ALU、分支、访存）
  */
@@ -80,8 +80,8 @@ public:
         size_t limit,
         const std::function<bool(const DynamicInstPtr&)>& can_dispatch = {});
     
-    // 更新操作数（来自CDB）
-    void update_operands(const CommonDataBusEntry& cdb_entry, StoreBuffer* store_buffer);
+    // 更新操作数（来自完成事件）
+    void update_operands(const CompletionEvent& completion_event, StoreBuffer* store_buffer);
     
     // 释放保留站表项
     void release_entry(RSEntry rs_entry);

@@ -8,10 +8,11 @@ Before non-trivial exploration or implementation, read the relevant files in thi
 
 1. `README.md` for build, run, and test commands.
 2. `ARCHITECTURE.md` for module boundaries, directory responsibilities, and main execution paths.
-3. `PLANS.md` for ExecPlan conventions.
-4. `tasks/` for current task background, refactor plans, and phase records.
-5. `CONTEXT.md` for the project glossary and canonical domain language.
-6. `docs/exec-plans/active/` for active long-running work.
+3. `docs/adr/` for accepted architecture and process decisions that constrain future changes.
+4. `PLANS.md` for ExecPlan conventions.
+5. `tasks/` for current task background, refactor plans, and phase records.
+6. `CONTEXT.md` for the project glossary and canonical domain language.
+7. `docs/exec-plans/active/` for active long-running work.
 
 ## Domain Language
 
@@ -21,6 +22,6 @@ Do not duplicate large architecture descriptions into `AGENTS.md`, `README.md`, 
 
 ## Architecture Decisions
 
-This repo does not currently have a committed `docs/adr/` convention.
+This repo uses lightweight ADRs in `docs/adr/` for decisions that are hard to reverse, surprising without context, and based on a real trade-off.
 
-If ADRs are added later, read the relevant ADRs before proposing or changing architecture in the affected area.
+Read the relevant ADRs before proposing or changing architecture in the affected area. Do not create ADRs for small reversible implementation choices; keep those in code review notes, task docs, or ExecPlans.

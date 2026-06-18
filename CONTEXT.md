@@ -5,6 +5,42 @@ It is a glossary, not a duplicate of `ARCHITECTURE.md`.
 
 ## Language
 
+**Simulator**:
+The top-level execution boundary that owns program loading, memory, CPU selection, run lifecycle, and externally visible run results.
+_Avoid_: main loop, driver, harness
+
+**Instruction Window**:
+A bounded run interval with separate warmup and measurement portions, used to evaluate a loaded checkpoint or workload slice without treating startup effects as measured work.
+_Avoid_: benchmark run, fixed cycle loop
+
+**DiffTest**:
+The commit-time architectural-state comparison between the out-of-order CPU and a reference in-order CPU.
+_Avoid_: unit test, trace checker, random validation
+
+**Reference Execution Context**:
+The in-order CPU and memory state kept alongside an out-of-order run so DiffTest can compare committed architectural state against a simpler reference.
+_Avoid_: golden model, backup CPU
+
+**Checkpoint Runner**:
+The component that imports a checkpoint workload slice, runs its warmup and measurement windows, and reports slice-level success, failure reason, IPC, and metadata.
+_Avoid_: benchmark script, loader
+
+**Address Translation**:
+The system-level virtual-to-physical translation boundary for instruction fetch, load, and store accesses under the current privilege state.
+_Avoid_: page walker, address helper
+
+**SV39 Page Walker**:
+The RISC-V Sv39 page-table walk used by Address Translation when virtual memory is active.
+_Avoid_: TLB, generic translation
+
+**Privilege State**:
+The architectural privilege-mode state that determines effective access mode, translation behavior, and privileged return behavior.
+_Avoid_: mode flag, CSR dump
+
+**Host Communication**:
+The tohost/fromhost memory-mapped convention that lets a guest program communicate completion or status to the simulator host.
+_Avoid_: syscall, normal memory-mapped device
+
 **Out-of-Order Pipeline**:
 The CPU mode that models instruction flow through fetch, decode, issue, execute, writeback, and commit with speculative execution and in-order retirement.
 _Avoid_: OOO blob, pipeline code
@@ -88,11 +124,14 @@ _Avoid_: blacklist entry
 ## Relationships
 
 - An **Out-of-Order Pipeline** executes each stage through a **Stage Context**.
+- The **Simulator** owns the run lifecycle and may create a **Reference Execution Context** when **DiffTest** is enabled for an out-of-order run.
+- A **Checkpoint Runner** drives the **Simulator** over an **Instruction Window** after importing a workload slice.
+- **Address Translation** delegates Sv39-specific page-table traversal to the **SV39 Page Walker** and is constrained by **Privilege State**.
+- **Host Communication** is protected by **Execute Host-Comm Access** so tohost/fromhost state is not observed before older instructions retire.
 - **Execute Memory Order** observes **Addr-Unknown Store** state when deciding whether a younger load may proceed.
 - **Execute Control Recovery** runs when an execution unit completes a control-flow instruction before commit has seen it.
 - **Execute DCache Access** is the cache timing submodule used by execute-side load/store paths.
 - **Execute Load Value** is shared by store-forwarded loads and memory-loaded values before writeback.
-- **Execute Host-Comm Access** protects tohost/fromhost accesses from observing state before older instructions retire.
 - **Execute Memory Inflight** owns already-issued load/store cache misses until they complete or request recovery.
 - **Execute Load Hazard** decides whether a load replays or may continue before forwarding/memory access.
 - **Execute Load Access** runs after **Execute Load Hazard** allows the load to proceed.
@@ -114,3 +153,5 @@ _Avoid_: blacklist entry
 ## Flagged Ambiguities
 
 - Use **Execute Memory Order** for the decision and accounting around memory-order speculation. Use **OOO Recovery** for the shared pipeline cleanup rules.
+- Use **Address Translation** for the fetch/load/store translation boundary. Use **SV39 Page Walker** only for the Sv39 page-table walk inside that boundary.
+- Use **DiffTest** for commit-time reference comparison, not for ordinary unit tests or benchmark result checks.

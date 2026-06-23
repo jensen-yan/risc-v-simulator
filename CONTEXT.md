@@ -1,175 +1,140 @@
-# RISC-V Simulator Context
+# RISC-V Simulator 上下文
 
-This file records project-specific domain language used by architecture work.
-It is a glossary, not a duplicate of `ARCHITECTURE.md`.
+本文档记录架构工作中使用的项目领域语言。它是一份术语表，不是
+`ARCHITECTURE.md` 的重复版本。
 
-## Language
+## 核心边界
 
-**Simulator**:
-The top-level execution boundary that owns program loading, memory, CPU selection, run lifecycle, and externally visible run results.
-_Avoid_: main loop, driver, harness
+**Simulator（模拟器）**：
+顶层执行边界，负责程序加载、内存、CPU 选择、运行生命周期，以及外部可见的运行结果。
+_避免使用_：main loop、driver、harness
 
-**Instruction Window**:
-A bounded run interval with separate warmup and measurement portions, used to evaluate a loaded checkpoint or workload slice without treating startup effects as measured work.
-_Avoid_: benchmark run, fixed cycle loop
+**Instruction Window（指令窗口）**：
+一个有边界的运行区间，包含独立的预热部分和测量部分，用于评估已加载的 checkpoint 或 workload slice。
+_避免使用_：benchmark run、fixed cycle loop
 
-**DiffTest**:
-The commit-time architectural-state comparison between the out-of-order CPU and a reference in-order CPU.
-_Avoid_: unit test, trace checker, random validation
+**Checkpoint Runner（检查点运行器）**：
+导入 checkpoint workload slice、运行指令窗口，并报告 slice 级别成功、失败原因、IPC 和元数据的组件。
+_避免使用_：benchmark script、loader
 
-**Reference Execution Context**:
-The in-order CPU and memory state kept alongside an out-of-order run so DiffTest can compare committed architectural state against a simpler reference.
-_Avoid_: golden model, backup CPU
+**DiffTest（差分测试）**：
+乱序 CPU 与参考顺序 CPU 在提交时进行的架构状态比较。
+_避免使用_：unit test、trace checker、random validation
 
-**Checkpoint Runner**:
-The component that imports a checkpoint workload slice, runs its warmup and measurement windows, and reports slice-level success, failure reason, IPC, and metadata.
-_Avoid_: benchmark script, loader
+**Reference Execution Context（参考执行上下文）**：
+与乱序运行并行维护的顺序 CPU 和内存状态，用于支撑 DiffTest。
+_避免使用_：golden model、backup CPU
 
-**Address Translation**:
-The system-level virtual-to-physical translation boundary for instruction fetch, load, and store accesses under the current privilege state.
-_Avoid_: page walker, address helper
+## 系统语义
 
-**SV39 Page Walker**:
-The RISC-V Sv39 page-table walk used by Address Translation when virtual memory is active.
-_Avoid_: TLB, generic translation
+**Address Translation（地址翻译）**：
+系统级虚拟地址到物理地址的翻译边界，服务于当前特权状态下的取指、load 和 store 访问。
+_避免使用_：page walker、address helper
 
-**Privilege State**:
-The architectural privilege-mode state that determines effective access mode, translation behavior, and privileged return behavior.
-_Avoid_: mode flag, CSR dump
+**SV39 Page Walker（SV39 页表遍历器）**：
+虚拟内存启用时，Address Translation 使用的 RISC-V Sv39 页表遍历逻辑。
+_避免使用_：TLB、generic translation
 
-**Host Communication**:
-The tohost/fromhost memory-mapped convention that lets a guest program communicate completion or status to the simulator host.
-_Avoid_: syscall, normal memory-mapped device
+**Privilege State（特权状态）**：
+决定有效访问模式、地址翻译行为和特权返回行为的架构特权模式状态。
+_避免使用_：mode flag、CSR dump
 
-**Out-of-Order Pipeline**:
-The CPU mode that models instruction flow through fetch, decode, issue, execute, writeback, and commit with speculative execution and in-order retirement.
-_Avoid_: OOO blob, pipeline code
+**Host Communication（主机通信）**：
+tohost/fromhost 内存映射约定，用来让 guest 程序向模拟器 host 通知完成状态或其他状态。
+_避免使用_：syscall、normal memory-mapped device
 
-**Structural Constraint Simulator**:
-The modeling role for the out-of-order CPU: capture the timing and resource constraints that explain performance behavior without attempting cycle-accurate RTL reproduction.
-_Avoid_: full RTL replica, teaching-only Tomasulo model, functional-only simulator
+## 乱序流水线
 
-**Completion Fabric**:
-The out-of-order pipeline's result-completion boundary that arbitrates when executed work becomes visible to wakeup, physical-register writeback, and ROB completion.
-_Avoid_: treating the Common Data Bus as the long-term domain boundary
+**Out-of-Order Pipeline（乱序流水线）**：
+CPU 模式，建模指令经过 fetch、decode、issue、execute、writeback 和 commit 的流动过程，包含推测执行和顺序退休。
+_避免使用_：OOO blob、pipeline code
 
-**Completion Backpressure**:
-The structural constraint where an execution unit that has produced a result must keep holding it when the Completion Fabric cannot accept another completion event in the current cycle.
-_Avoid_: silently buffering every completed result in an unbounded queue
+**Structural Constraint Simulator（结构约束模拟器）**：
+乱序 CPU 的建模定位：捕捉能够解释性能行为的时序和资源约束，但不尝试复刻周期精确的 RTL。
+_避免使用_：full RTL replica、teaching-only Tomasulo model、functional-only simulator
 
-**Stage Context**:
-A stage-specific adapter that exposes only the state and actions a pipeline stage needs for one execution step.
-_Avoid_: passing raw `CPUState` as the stage interface
+**Stage Context（阶段上下文）**：
+面向特定流水级的适配器，只暴露该流水级在一次执行步骤中需要的状态和动作。
+_避免使用_：把原始 `CPUState` 当作阶段接口传入
 
-**Execute Memory Order**:
-The execute-side rules that decide when loads may pass unresolved older stores and how the simulator recovers from a detected ordering violation.
-_Avoid_: scattering addr-unknown speculation and recovery rules inside `ExecuteStage`
+**Completion Fabric（完成网络）**：
+乱序流水线的结果完成边界，仲裁已执行工作何时对唤醒、物理寄存器写回和 ROB 完成可见。
+_避免使用_：把 Common Data Bus 当作长期领域边界
 
-**Execute Control Recovery**:
-The execute-side early recovery path for resolved branch/JALR mispredictions, including rename checkpoint restore, younger-work cleanup, RAS repair, and recovery counters.
-_Avoid_: burying early control recovery inside generic execution-unit completion
+**Completion Backpressure（完成反压）**：
+执行单元已经产生结果，但当前周期 Completion Fabric 无法再接收完成事件时，执行单元继续持有该结果的结构约束。
+_避免使用_：把每个已完成结果都静默缓存在无界队列里
 
-**Execute DCache Access**:
-The execute-side D$ timing handshake for load/store execution, including request start, blocked/outstanding handling, latency accounting, and cache counter updates.
-_Avoid_: duplicating D$ request bookkeeping inside load/store execution branches
+**OOO Recovery（乱序恢复）**：
+redirect、trap、fence 或其他恢复原因之后，乱序流水线移除推测工作的共享规则。
+_避免使用_：把 flush 清理规则分散到各个流水级中
 
-**Execute Load Value**:
-The execute-side formatting rule that turns raw load bytes into the architectural value, including signed/unsigned integer extension and FLW NaN-boxing.
-_Avoid_: duplicating load value extension switches across forwarding and memory paths
+## 执行阶段
 
-**Execute Host-Comm Access**:
-The execute-side serialization rule for tohost/fromhost memory-mapped accesses, which must wait until the instruction is at the ROB head before touching host communication state.
-_Avoid_: hiding host-comm MMIO ordering checks inside individual load/store completion branches
+**Execute Memory Order（执行阶段内存顺序）**：
+执行侧规则，用于决定 load 何时可以越过地址尚未解析的更老 store，以及如何从检测到的顺序违规中恢复。
+_避免使用_：把地址未知推测和恢复规则分散写在 `ExecuteStage` 内部
 
-**Execute Memory Inflight**:
-The execute-side queue for load/store D$ misses that have issued their cache request and no longer occupy a load/store execution unit or reservation-station entry.
-_Avoid_: scattering inflight queue movement, wait-cycle advancement, and completion cleanup across `ExecuteStage`
+**Execute Control Recovery（执行阶段控制流恢复）**：
+执行侧的早期恢复路径，用于已经解析的 branch/JALR 预测错误。
+_避免使用_：把早期控制流恢复埋在通用执行单元完成逻辑里
 
-**Execute Load Hazard**:
-The execute-side replay decision for a load that sees an older AMO, address-unknown store, or overlapping store before it can read memory.
-_Avoid_: spreading ROB store-hazard kind mapping, replay counters, and caused-by counters through load completion
+**Execute DCache Access（执行阶段 DCache 访问）**：
+执行侧 load/store 的 D$ 时序握手，包括请求启动、阻塞处理、延迟统计和 cache 计数器更新。
+_避免使用_：在 load/store 执行分支里重复 D$ 请求记账逻辑
 
-**Execute Load Access**:
-The execute-side load access path after hazard checks, including store-to-load forwarding, optional memory merge, D$ read timing, exception capture, and final value publication.
-_Avoid_: keeping forwarding, memory read, cache wait, and result formatting interleaved in `ExecuteStage`
+**Execute Load Path（执行阶段 Load 路径）**：
+执行侧 load 从冒险检查到结果发布的路径，包括 replay 决策、store-to-load forwarding、内存读取、值格式化和异常发布。
+_避免使用_：把 load hazard、access、value 和 completion 拆成互相重复的领域术语
 
-**Execute Load Completion**:
-The execute-side orchestration that decides whether a ready load completes, replays, moves to memory inflight, waits on cache pressure, or publishes an exception.
-_Avoid_: making `ExecuteStage` stitch together host-comm replay, ROB hazard replay, cache wait, and load result publication
+**Execute Store Access（执行阶段 Store 访问）**：
+执行侧 store 完成路径，包括 host-comm 串行化、D$ 写时序、inflight 移动，以及内存顺序违规恢复触发。
+_避免使用_：把 store cache 时序和恢复触发决策直接混进 `ExecuteStage`
 
-**Execute Store Access**:
-The execute-side store completion path, including host-comm serialization, D$ write timing, inflight movement, and memory-order violation recovery trigger.
-_Avoid_: mixing store cache timing and recovery-trigger decisions directly into `ExecuteStage`
+**Execute Memory Inflight（执行阶段内存未完成队列）**：
+执行侧队列，保存已经发出 cache 请求、且不再占用执行单元或 reservation-station 项的 load/store D$ miss。
+_避免使用_：把 inflight 队列移动、等待推进和完成清理分散在 `ExecuteStage` 各处
 
-**OOO Recovery**:
-The out-of-order pipeline rules that remove speculative work after a redirect, trap, fence, or other pipeline recovery reason.
-_Avoid_: scattering flush cleanup rules across individual stages
+**Execute Host-Comm Access（执行阶段主机通信访问）**：
+tohost/fromhost 内存映射访问的执行侧串行化规则；这类访问必须等到指令到达 ROB head 后才能触碰主机通信状态。
+_避免使用_：把 host-comm MMIO 顺序检查藏在各个 load/store 完成分支里
 
-**Commit Retire Effects**:
-The bookkeeping that happens after an instruction is successfully retired, including store-buffer retirement, rename checkpoint cleanup, and load/store profile updates.
-_Avoid_: mixing retired-work bookkeeping into the main commit loop
+## 提交阶段
 
-**Commit Memory Effects**:
-The architectural memory and LR/SC reservation updates applied when a store, floating-point store, or AMO instruction retires.
-_Avoid_: mixing store/AMO memory side effects into unrelated commit bookkeeping
+**Commit Memory Effects（提交阶段内存效果）**：
+store、浮点 store 或 AMO 指令退休时应用的架构内存和 LR/SC reservation 更新。
+_避免使用_：把 store/AMO 的内存副作用混进无关的提交记账逻辑中
 
-**Commit Register Effects**:
-The architectural register, floating-point flag, and rename-map updates applied when an instruction retires.
-_Avoid_: spreading integer/floating-point writeback and rename commit rules through the commit loop
+**Commit Register Effects（提交阶段寄存器效果）**：
+指令退休时应用的架构寄存器、浮点 flag 和 rename-map 更新。
+_避免使用_：把整数/浮点写回和 rename commit 规则散落在 commit loop 里
 
-**Commit Control Flow Effects**:
-The predictor/profile/counter updates and redirect decision applied when a branch, JAL, or JALR retires.
-_Avoid_: mixing predictor training, profile accounting, and commit-loop flush orchestration in one block
+**Commit Control Flow Effects（提交阶段控制流效果）**：
+branch、JAL 或 JALR 退休时应用的预测器、profile、计数器更新，以及 redirect 决策。
+_避免使用_：把预测器训练、profile 统计和 commit-loop flush 编排混在一个代码块里
 
-**Commit System Effects**:
-The CSR, trap, syscall, MRET, and FENCE.I effects applied when a serializing instruction retires.
-_Avoid_: keeping privileged/system instruction semantics as ad hoc branches in the commit loop
+**Commit System Effects（提交阶段系统效果）**：
+串行化指令退休时应用的 CSR、trap、syscall、MRET 和 FENCE.I 效果。
+_避免使用_：把特权/系统指令语义保留为 commit loop 中的零散分支
 
-**Addr-Unknown Store**:
-An older store whose effective address is not yet known when a younger load is considered for dispatch or execution.
-_Avoid_: unresolved store, pending store address
+**Commit Retire Effects（提交阶段退休效果）**：
+指令成功退休后的通用记账工作，包括 store-buffer 退休、rename checkpoint 清理，以及 load/store profile 更新。
+_避免使用_：把已退休工作记账混进主 commit loop
 
-**Bad Addr-Unknown Pair**:
-A remembered load/store PC pair where allowing the load to pass the addr-unknown store caused an ordering violation.
-_Avoid_: blacklist entry
+## 内存顺序术语
 
-## Relationships
+**Addr-Unknown Store（地址未知 Store）**：
+当更年轻的 load 被考虑 dispatch 或 execute 时，尚未知道有效地址的更老 store。
+_避免使用_：unresolved store、pending store address
 
-- An **Out-of-Order Pipeline** executes each stage through a **Stage Context**.
-- A **Structural Constraint Simulator** should model performance-visible resource contention while keeping implementation detail below full RTL fidelity.
-- A **Completion Fabric** replaces the Common Data Bus as the domain concept for execution-result completion; any CDB-like queue is only a legacy or migration detail.
-- **Completion Backpressure** keeps completed execution units occupied when completion bandwidth is exhausted.
-- The **Simulator** owns the run lifecycle and may create a **Reference Execution Context** when **DiffTest** is enabled for an out-of-order run.
-- A **Checkpoint Runner** drives the **Simulator** over an **Instruction Window** after importing a workload slice.
-- **Address Translation** delegates Sv39-specific page-table traversal to the **SV39 Page Walker** and is constrained by **Privilege State**.
-- **Host Communication** is protected by **Execute Host-Comm Access** so tohost/fromhost state is not observed before older instructions retire.
-- **Execute Memory Order** observes **Addr-Unknown Store** state when deciding whether a younger load may proceed.
-- **Execute Control Recovery** runs when an execution unit completes a control-flow instruction before commit has seen it.
-- **Execute DCache Access** is the cache timing submodule used by execute-side load/store paths.
-- **Execute Load Value** is shared by store-forwarded loads and memory-loaded values before writeback.
-- **Execute Memory Inflight** owns already-issued load/store cache misses until they complete or request recovery.
-- **Execute Load Hazard** decides whether a load replays or may continue before forwarding/memory access.
-- **Execute Load Access** runs after **Execute Load Hazard** allows the load to proceed.
-- **Execute Load Completion** orchestrates **Execute Load Hazard**, **Execute Load Access**, and cache/inflight follow-up for a ready load unit.
-- **Execute Store Access** runs when a store execution unit reaches completion and may either finish, replay, move to inflight, or trigger recovery.
-- **OOO Recovery** clears younger work or the full speculative pipeline after a stage has identified the recovery reason and restart point.
-- **Commit Retire Effects** runs after the instruction's architectural state has been committed.
-- **Commit Memory Effects** runs before generic retire bookkeeping so store/AMO state becomes architectural first.
-- **Commit Register Effects** runs after memory effects and before generic retire bookkeeping so integer/floating-point register state is architectural before DiffTest/tracing.
-- **Commit Control Flow Effects** runs after retire bookkeeping and reports only the redirect flush decision back to `CommitStage`.
-- **Commit System Effects** reports stop/flush metadata back to `CommitStage`; it owns the privileged state mutation and serializing recovery.
-- A **Bad Addr-Unknown Pair** causes **Execute Memory Order** to block later speculation for the same load/store PC pair.
+**Bad Addr-Unknown Pair（坏地址未知对）**：
+被记录下来的 load/store PC 对；对于这对 PC，曾经允许 load 越过地址未知 store，并因此导致内存顺序违规。
+_避免使用_：blacklist entry
 
-## Example Dialogue
+## 术语边界
 
-> **Dev:** "Should this load pass the older store with an unresolved address?"
-> **Domain expert:** "That is an **Execute Memory Order** decision. If the PCs form a **Bad Addr-Unknown Pair**, block it; otherwise the load may speculate and **OOO Recovery** will clear the younger work if a violation is detected."
-
-## Flagged Ambiguities
-
-- Use **Execute Memory Order** for the decision and accounting around memory-order speculation. Use **OOO Recovery** for the shared pipeline cleanup rules.
-- Use **Structural Constraint Simulator** for the intended OOO modeling fidelity; do not describe this direction as full RTL reproduction or as a purely functional simulator.
-- Use **Completion Fabric** for the future result-completion boundary; use Common Data Bus only when referring to legacy implementation or migration work.
-- Use **Completion Backpressure** when completion bandwidth stalls a completed execution unit; do not model this as an always-available result queue.
-- Use **Address Translation** for the fetch/load/store translation boundary. Use **SV39 Page Walker** only for the Sv39 page-table walk inside that boundary.
-- Use **DiffTest** for commit-time reference comparison, not for ordinary unit tests or benchmark result checks.
+- 用 **Structural Constraint Simulator** 表示预期的 OOO 建模精度；不要描述成完整 RTL 复刻或纯功能模拟器。
+- 用 **Completion Fabric** 表示结果完成边界；Common Data Bus 只用于指代遗留实现或迁移细节。
+- 用 **Completion Backpressure** 表示完成带宽导致已完成执行单元停住；不要把它建模成永远可用的结果队列。
+- 用 **Address Translation** 表示 fetch/load/store 的地址翻译边界；**SV39 Page Walker** 只表示边界内部的 Sv39 页表遍历。
+- 用 **DiffTest** 表示提交时参考比较，不用于普通单元测试或 benchmark 结果检查。

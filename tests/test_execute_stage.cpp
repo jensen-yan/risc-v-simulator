@@ -77,14 +77,14 @@ TEST_F(ExecuteStageTest, EmptyReservationStationRecordsFrontendStarvedThroughCon
     ExecuteStage::Context context(state);
     execute_stage_->execute(context);
 
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DISPATCH_SLOTS),
-              OOOPipelineConfig::DISPATCH_WIDTH);
-    EXPECT_EQ(state.perf_counters.value(PerfCounterId::DISPATCH_UTILIZED_SLOTS), 0u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::ISSUE_SLOTS),
+              OOOPipelineConfig::ISSUE_WIDTH);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::ISSUE_UTILIZED_SLOTS), 0u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_TOTAL),
-              OOOPipelineConfig::DISPATCH_WIDTH);
+              OOOPipelineConfig::ISSUE_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_EXECUTED), 0u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_FRONTEND_EMPTY),
-              OOOPipelineConfig::DISPATCH_WIDTH);
+              OOOPipelineConfig::ISSUE_WIDTH);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_EXECUTE_NO_READY), 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_EXECUTE_FRONTEND_STARVED), 1u);
 }
@@ -107,8 +107,8 @@ TEST_F(ExecuteStageTest, CompletionBackpressureKeepsExecutionUnitBusy) {
         inst->set_src2_ready(true, 0);
         inst->set_src3_ready(true, 0);
 
-        auto issue_result = state.reservation_station->issue_instruction(inst);
-        ASSERT_TRUE(issue_result.success);
+        auto dispatch_result = state.reservation_station->dispatch_instruction(inst);
+        ASSERT_TRUE(dispatch_result.success);
     }
 
     ExecuteStage::Context context(state);

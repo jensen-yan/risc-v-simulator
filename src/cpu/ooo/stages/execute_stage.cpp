@@ -49,22 +49,22 @@ void ExecuteStage::execute(Context& context) {
         state,
         [this, &state](ExecutionUnit& unit, ExecutionUnitType unit_type) {
             return complete_execution_unit(
-                unit, unit_type, 0, state, /*release_dispatch_unit=*/false);
+                unit, unit_type, 0, state, /*release_issue_unit=*/false);
         });
 
-    context.incrementCounter(PerfCounterId::DISPATCH_SLOTS, OOOPipelineConfig::DISPATCH_WIDTH);
-    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_TOTAL, OOOPipelineConfig::DISPATCH_WIDTH);
+    context.incrementCounter(PerfCounterId::ISSUE_SLOTS, OOOPipelineConfig::ISSUE_WIDTH);
+    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_TOTAL, OOOPipelineConfig::ISSUE_WIDTH);
     const auto addr_unknown_store_snapshot =
         ExecuteMemoryOrder::captureAddrUnknownStoreSnapshot(state);
 
-    const auto dispatch_results = context.dispatchReadyInstructions(
-        OOOPipelineConfig::DISPATCH_WIDTH,
+    const auto issue_results = context.issueReadyInstructions(
+        OOOPipelineConfig::ISSUE_WIDTH,
         [&](const DynamicInstPtr& instruction) {
             return !ExecuteMemoryOrder::markBlockedAddrUnknownPairIfNeeded(
                 state, instruction, addr_unknown_store_snapshot);
         });
     bool empty_cycle_blocked_by_inflight_memory = false;
-    if (dispatch_results.empty()) {
+    if (issue_results.empty()) {
         LOGT(EXECUTE, "no ready instruction in reservation station");
         context.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_READY);
 
@@ -88,32 +88,32 @@ void ExecuteStage::execute(Context& context) {
         }
     }
 
-    size_t dispatched_this_cycle = 0;
+    size_t issued_this_cycle = 0;
     size_t no_unit_slots = 0;
     size_t amo_wait_slots = 0;
     size_t resource_blocked_slots = 0;
-    for (size_t slot = 0; slot < dispatch_results.size(); ++slot) {
-        auto dispatch_result = dispatch_results[slot];
-        LOGT(EXECUTE, "dispatch slot=%zu inst=%" PRId64 " from rs[%d] to execution unit",
-             slot, dispatch_result.instruction->get_instruction_id(), dispatch_result.rs_entry);
+    for (size_t slot = 0; slot < issue_results.size(); ++slot) {
+        auto issue_result = issue_results[slot];
+        LOGT(EXECUTE, "issue slot=%zu inst=%" PRId64 " from rs[%d] to execution unit",
+             slot, issue_result.instruction->get_instruction_id(), issue_result.rs_entry);
 
-        const auto& decoded_info = dispatch_result.instruction->get_decoded_info();
+        const auto& decoded_info = issue_result.instruction->get_decoded_info();
         if (decoded_info.opcode == Opcode::AMO &&
-            context.hasEarlierStoreUncommitted(dispatch_result.instruction->get_instruction_id())) {
-            dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
-            context.releaseExecutionUnit(dispatch_result.unit_type, dispatch_result.unit_id);
+            context.hasEarlierStoreUncommitted(issue_result.instruction->get_instruction_id())) {
+            issue_result.instruction->set_status(DynamicInst::Status::DISPATCHED);
+            context.releaseExecutionUnit(issue_result.unit_type, issue_result.unit_id);
             context.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
             amo_wait_slots++;
-            LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay dispatch",
-                 dispatch_result.instruction->get_instruction_id());
+            LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay issue",
+                 issue_result.instruction->get_instruction_id());
             continue;
         }
 
-        ExecutionUnit* unit = context.executionUnit(dispatch_result.unit_type, dispatch_result.unit_id);
+        ExecutionUnit* unit = context.executionUnit(issue_result.unit_type, issue_result.unit_id);
 
         if (!unit || unit->busy) {
-            dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
-            context.releaseExecutionUnit(dispatch_result.unit_type, dispatch_result.unit_id);
+            issue_result.instruction->set_status(DynamicInst::Status::DISPATCHED);
+            context.releaseExecutionUnit(issue_result.unit_type, issue_result.unit_id);
             LOGT(EXECUTE, "no available execution unit");
             context.recordPipelineStall(PerfCounterId::STALL_EXECUTE_NO_UNIT);
             no_unit_slots++;
@@ -121,26 +121,26 @@ void ExecuteStage::execute(Context& context) {
         }
 
         unit->busy = true;
-        unit->instruction = dispatch_result.instruction;
+        unit->instruction = issue_result.instruction;
         unit->has_exception = false;
         unit->completion_pending = false;
         unit->dcache.reset();
         unit->remaining_cycles = decoded_info.execution_cycles;
 
-        if (dispatch_result.unit_type == ExecutionUnitType::LOAD) {
-            auto& memory_info = dispatch_result.instruction->get_memory_info();
+        if (issue_result.unit_type == ExecutionUnitType::LOAD) {
+            auto& memory_info = issue_result.instruction->get_memory_info();
             if (ExecuteMemoryOrder::markBlockedAddrUnknownPairIfNeeded(
-                    state, dispatch_result.instruction, addr_unknown_store_snapshot)) {
-                dispatch_result.instruction->set_status(DynamicInst::Status::ISSUED);
+                    state, issue_result.instruction, addr_unknown_store_snapshot)) {
+                issue_result.instruction->set_status(DynamicInst::Status::DISPATCHED);
                 context.releaseExecutionUnit(
-                    ExecutionUnitType::LOAD, dispatch_result.unit_id);
+                    ExecutionUnitType::LOAD, issue_result.unit_id);
                 resource_blocked_slots++;
                 continue;
             }
             const auto older_unknown_store_pc = ExecuteMemoryOrder::findFirstOlderAddrUnknownStorePc(
-                addr_unknown_store_snapshot, dispatch_result.instruction->get_instruction_id());
+                addr_unknown_store_snapshot, issue_result.instruction->get_instruction_id());
             if (older_unknown_store_pc.has_value()) {
-                const uint64_t load_pc = dispatch_result.instruction->get_pc();
+                const uint64_t load_pc = issue_result.instruction->get_pc();
                 if (!memory_info.speculated_past_addr_unknown_store &&
                     state.shouldSpeculatePastAddrUnknownStore(load_pc, *older_unknown_store_pc)) {
                     const uint64_t store_pc = *older_unknown_store_pc;
@@ -150,15 +150,15 @@ void ExecuteStage::execute(Context& context) {
                     context.incrementCounter(PerfCounterId::LOADS_SPECULATED_ADDR_UNKNOWN);
                     LOGT(EXECUTE,
                          "inst=%" PRId64
-                         " load dispatch speculates past unresolved STORE pc=0x%" PRIx64,
-                         dispatch_result.instruction->get_instruction_id(),
+                         " load issue speculates past unresolved STORE pc=0x%" PRIx64,
+                         issue_result.instruction->get_instruction_id(),
                          store_pc);
                 }
             }
         }
 
         const char* unit_type_str = "";
-        switch (dispatch_result.unit_type) {
+        switch (issue_result.unit_type) {
             case ExecutionUnitType::ALU:
                 unit_type_str = "ALU";
                 break;
@@ -177,28 +177,28 @@ void ExecuteStage::execute(Context& context) {
         }
 
         LOGT(EXECUTE, "inst=%" PRId64 " start on %s%d, cycles=%d",
-             dispatch_result.instruction->get_instruction_id(),
+             issue_result.instruction->get_instruction_id(),
              unit_type_str,
-             dispatch_result.unit_id,
+             issue_result.unit_id,
              unit->remaining_cycles);
 
-        context.incrementCounter(PerfCounterId::DISPATCHED_INSTRUCTIONS);
-        dispatch_result.instruction->set_execute_cycle(context.cycleCount());
+        context.incrementCounter(PerfCounterId::ISSUED_INSTRUCTIONS);
+        issue_result.instruction->set_execute_cycle(context.cycleCount());
         OOOExecuteSemantics::executeInstruction(
-            *unit, dispatch_result.instruction, context.stateForExecuteSemantics());
-        dispatched_this_cycle++;
+            *unit, issue_result.instruction, context.stateForExecuteSemantics());
+        issued_this_cycle++;
     }
 
-    context.incrementCounter(PerfCounterId::DISPATCH_UTILIZED_SLOTS, dispatched_this_cycle);
-    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_EXECUTED, dispatched_this_cycle);
+    context.incrementCounter(PerfCounterId::ISSUE_UTILIZED_SLOTS, issued_this_cycle);
+    context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_EXECUTED, issued_this_cycle);
     context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_NO_UNIT, no_unit_slots);
     context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_AMO_WAIT, amo_wait_slots);
     context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_RESOURCE_BLOCKED, resource_blocked_slots);
 
     const size_t classified_slots =
-        dispatched_this_cycle + no_unit_slots + amo_wait_slots + resource_blocked_slots;
-    if (classified_slots < OOOPipelineConfig::DISPATCH_WIDTH) {
-        const size_t empty_slots = OOOPipelineConfig::DISPATCH_WIDTH - classified_slots;
+        issued_this_cycle + no_unit_slots + amo_wait_slots + resource_blocked_slots;
+    if (classified_slots < OOOPipelineConfig::ISSUE_WIDTH) {
+        const size_t empty_slots = OOOPipelineConfig::ISSUE_WIDTH - classified_slots;
         if (empty_cycle_blocked_by_inflight_memory) {
             context.incrementCounter(PerfCounterId::TOPDOWN_SLOTS_RESOURCE_BLOCKED, empty_slots);
         } else {
@@ -214,10 +214,10 @@ void ExecuteStage::execute(Context& context) {
                 }
             }
         }
-    } else if (classified_slots > OOOPipelineConfig::DISPATCH_WIDTH) {
+    } else if (classified_slots > OOOPipelineConfig::ISSUE_WIDTH) {
         context.incrementCounter(
             PerfCounterId::TOPDOWN_SLOTS_OTHER,
-            classified_slots - OOOPipelineConfig::DISPATCH_WIDTH);
+            classified_slots - OOOPipelineConfig::ISSUE_WIDTH);
     }
 }
 
@@ -322,7 +322,7 @@ bool ExecuteStage::complete_execution_unit(ExecutionUnit& unit,
                                            ExecutionUnitType unit_type,
                                            size_t unit_index,
                                            CPUState& state,
-                                           bool release_dispatch_unit) {
+                                           bool release_issue_unit) {
     if (!unit.instruction) {
         resetExecutionUnitState(unit);
         return true;
@@ -364,7 +364,7 @@ bool ExecuteStage::complete_execution_unit(ExecutionUnit& unit,
     RSEntry rs_entry = unit.instruction->get_rs_entry();
     state.reservation_station->release_entry(rs_entry);
 
-    if (release_dispatch_unit) {
+    if (release_issue_unit) {
         state.reservation_station->release_execution_unit(unit_type, unit_index);
     }
 

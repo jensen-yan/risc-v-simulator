@@ -1,7 +1,7 @@
 #include "cpu/ooo/ooo_cpu.h"
 #include "cpu/ooo/stages/fetch_stage.h"
 #include "cpu/ooo/stages/decode_stage.h"
-#include "cpu/ooo/stages/issue_stage.h"
+#include "cpu/ooo/stages/dispatch_stage.h"
 #include "cpu/ooo/stages/execute_stage.h"
 #include "cpu/ooo/stages/writeback_stage.h"
 #include "cpu/ooo/stages/commit_stage.h"
@@ -213,7 +213,7 @@ OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
     // 创建流水线阶段
     fetch_stage_ = std::make_unique<FetchStage>();
     decode_stage_ = std::make_unique<DecodeStage>();
-    issue_stage_ = std::make_unique<IssueStage>();
+    dispatch_stage_ = std::make_unique<DispatchStage>();
     execute_stage_ = std::make_unique<ExecuteStage>();
     writeback_stage_ = std::make_unique<WritebackStage>();
     commit_stage_ = std::make_unique<CommitStage>();
@@ -252,8 +252,8 @@ void OutOfOrderCPU::step() {
         writeback_stage_->execute(writeback_context); // 写回阶段
         ExecuteStage::Context execute_context(cpu_state_);
         execute_stage_->execute(execute_context); // 执行阶段
-        IssueStage::Context issue_context(cpu_state_);
-        issue_stage_->execute(issue_context);  // 发射阶段
+        DispatchStage::Context dispatch_context(cpu_state_);
+        dispatch_stage_->execute(dispatch_context);  // 派发阶段
         DecodeStage::Context decode_context(cpu_state_);
         decode_stage_->execute(decode_context); // 译码阶段
         FetchStage::Context fetch_context(cpu_state_);
@@ -618,13 +618,13 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
         cpu_state_.perf_counters.value(PerfCounterId::STALL_EXECUTE_NO_UNIT);
     const uint64_t execute_amo_wait =
         cpu_state_.perf_counters.value(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
-    const uint64_t dispatched =
-        cpu_state_.perf_counters.value(PerfCounterId::DISPATCHED_INSTRUCTIONS);
+    const uint64_t issued =
+        cpu_state_.perf_counters.value(PerfCounterId::ISSUED_INSTRUCTIONS);
 
     const uint64_t frontend_bound_cycles = execute_frontend_starved;
     const uint64_t backend_bound_cycles =
         execute_dependency_blocked + execute_resource_blocked + execute_no_unit + execute_amo_wait;
-    const uint64_t executing_cycles = dispatched;
+    const uint64_t executing_cycles = issued;
 
     const uint64_t accounted =
         frontend_bound_cycles + backend_bound_cycles + executing_cycles;
@@ -647,7 +647,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
 
     printUintStat("cpu.topdown.cycles.total", cycles, "Legacy topdown-lite total cycles");
     printUintStat("cpu.topdown.cycles.executing", executing_cycles,
-                 "Legacy non-exclusive executing proxy (dispatched instructions; may exceed cycles on wide cores)");
+                 "Legacy non-exclusive executing proxy (issued instructions; may exceed cycles on wide cores)");
     printUintStat("cpu.topdown.cycles.frontend_bound", frontend_bound_cycles,
                  "Legacy cycles where Execute had no work because RS is empty");
     printUintStat("cpu.topdown.cycles.backend_bound", backend_bound_cycles,
@@ -690,36 +690,36 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
     };
 
     printUintStat("cpu.topdown.slots.total", topdown_slots_total,
-                  "Execute dispatch slots available (cycles * dispatch width)");
+                  "Issue/select slots available (cycles * issue width)");
     printUintStat("cpu.topdown.slots.executed", topdown_slots_executed,
-                  "Execute slots that dispatched an instruction");
+                  "Issue slots that selected an instruction");
     printUintStat("cpu.topdown.slots.frontend_empty", topdown_slots_frontend_empty,
-                  "Execute slots empty because the reservation station had no work");
+                  "Issue slots empty because the reservation station had no work");
     printUintStat("cpu.topdown.slots.dep_blocked", topdown_slots_dep_blocked,
-                  "Execute slots empty because reservation-station entries waited for operands");
+                  "Issue slots empty because reservation-station entries waited for operands");
     printUintStat("cpu.topdown.slots.resource_blocked", topdown_slots_resource_blocked,
-                  "Execute slots empty because ready work could not acquire a dispatch resource");
+                  "Issue slots empty because ready work could not acquire an issue resource");
     printUintStat("cpu.topdown.slots.no_unit", topdown_slots_no_unit,
-                  "Execute slots selected work but found no execution unit");
+                  "Issue slots selected work but found no execution unit");
     printUintStat("cpu.topdown.slots.amo_wait", topdown_slots_amo_wait,
-                  "Execute slots selected AMO work delayed by older store-like operations");
+                  "Issue slots selected AMO work delayed by older store-like operations");
     printUintStat("cpu.topdown.slots.other", topdown_slots_other,
-                  "Execute slots not classified by the slot topdown-lite categories");
+                  "Issue slots not classified by the slot topdown-lite categories");
 
     printDoubleStat("cpu.topdown.slots.executed_pct", slotPct(topdown_slots_executed),
-                    "Executed slots / total execute dispatch slots (%)");
+                    "Executed slots / total issue slots (%)");
     printDoubleStat("cpu.topdown.slots.frontend_empty_pct", slotPct(topdown_slots_frontend_empty),
-                    "Frontend-empty slots / total execute dispatch slots (%)");
+                    "Frontend-empty slots / total issue slots (%)");
     printDoubleStat("cpu.topdown.slots.dep_blocked_pct", slotPct(topdown_slots_dep_blocked),
-                    "Dependency-blocked slots / total execute dispatch slots (%)");
+                    "Dependency-blocked slots / total issue slots (%)");
     printDoubleStat("cpu.topdown.slots.resource_blocked_pct", slotPct(topdown_slots_resource_blocked),
-                    "Resource-blocked slots / total execute dispatch slots (%)");
+                    "Resource-blocked slots / total issue slots (%)");
     printDoubleStat("cpu.topdown.slots.no_unit_pct", slotPct(topdown_slots_no_unit),
-                    "No-unit slots / total execute dispatch slots (%)");
+                    "No-unit slots / total issue slots (%)");
     printDoubleStat("cpu.topdown.slots.amo_wait_pct", slotPct(topdown_slots_amo_wait),
-                    "AMO-wait slots / total execute dispatch slots (%)");
+                    "AMO-wait slots / total issue slots (%)");
     printDoubleStat("cpu.topdown.slots.other_pct", slotPct(topdown_slots_other),
-                    "Other slots / total execute dispatch slots (%)");
+                    "Other slots / total issue slots (%)");
 
     // 指令域：用ROB flushed_entries衡量BadSpec的“工作量”（不是周期）。
     const uint64_t flushed_entries = cpu_state_.perf_counters.value(PerfCounterId::ROB_FLUSHED_ENTRIES);

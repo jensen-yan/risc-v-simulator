@@ -72,8 +72,8 @@ struct OOOStatistics {
 struct OOOPipelineConfig {
     static constexpr size_t FETCH_WIDTH = 4;
     static constexpr size_t DECODE_WIDTH = 4;
-    static constexpr size_t ISSUE_WIDTH = 4;
     static constexpr size_t DISPATCH_WIDTH = 4;
+    static constexpr size_t ISSUE_WIDTH = 4;
     static constexpr size_t WRITEBACK_WIDTH = 2;
     static constexpr size_t COMPLETION_WIDTH = WRITEBACK_WIDTH;
     static constexpr size_t COMMIT_WIDTH = 4;

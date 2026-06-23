@@ -57,6 +57,14 @@ _避免使用_：full RTL replica、teaching-only Tomasulo model、functional-on
 面向特定流水级的适配器，只暴露该流水级在一次执行步骤中需要的状态和动作。
 _避免使用_：把原始 `CPUState` 当作阶段接口传入
 
+**Dispatch（派发到 Issue Queue）**：
+指令完成重命名后进入 Reservation Station / Issue Queue 的后端边界；当前代码中这部分主要由 `DispatchStage` 完成。
+_避免使用_：把 Dispatch 用来指代从 Issue Queue 选择 ready 指令并送入执行单元
+
+**Issue / Ready Select（发射 / 就绪选择）**：
+从 Reservation Station / Issue Queue 中选择操作数已就绪且资源可用的指令，并让它开始占用对应执行单元的边界；当前代码中这部分主要由 `ReservationStation::issue_ready_instructions` 和 `ExecuteStage` 完成。
+_避免使用_：把进入 Reservation Station / Issue Queue 也叫 Issue
+
 **Completion Fabric（完成网络）**：
 乱序流水线的结果完成边界，仲裁已执行工作何时对唤醒、物理寄存器写回和 ROB 完成可见。
 _避免使用_：把 Common Data Bus 当作长期领域边界

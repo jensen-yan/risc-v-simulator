@@ -14,7 +14,7 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
     if (ExecuteHostCommAccess::mustSerialize(
             state, unit.instruction, unit.load_address, unit.load_size)) {
         auto blocked_inst = unit.instruction;
-        blocked_inst->set_status(DynamicInst::Status::ISSUED);
+        blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
         state.reservation_station->release_execution_unit(
             ExecutionUnitType::LOAD, static_cast<int>(unit_index));
         resetExecutionUnitState(unit);
@@ -36,7 +36,7 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
     const auto load_result = ExecuteLoadAccess::perform(unit, state);
     if (load_result == ExecuteLoadAccess::Result::BlockedByStore) {
         auto blocked_inst = unit.instruction;
-        blocked_inst->set_status(DynamicInst::Status::ISSUED);
+        blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
         state.reservation_station->release_execution_unit(
             ExecutionUnitType::LOAD, static_cast<int>(unit_index));
         resetExecutionUnitState(unit);
@@ -58,7 +58,7 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
 
         if (!unit.dcache.request_sent) {
             auto blocked_inst = unit.instruction;
-            blocked_inst->set_status(DynamicInst::Status::ISSUED);
+            blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
             state.reservation_station->release_execution_unit(
                 ExecutionUnitType::LOAD, static_cast<int>(unit_index));
             resetExecutionUnitState(unit);

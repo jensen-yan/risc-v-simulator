@@ -63,7 +63,7 @@ TEST(ExecuteLoadHazardTest, ReplaysOnOlderAddressUnknownStore) {
     EXPECT_EQ(decision, ExecuteLoadHazard::Decision::Replayed);
     EXPECT_FALSE(unit.busy);
     EXPECT_EQ(unit.instruction, nullptr);
-    EXPECT_EQ(load->get_status(), DynamicInst::Status::ISSUED);
+    EXPECT_EQ(load->get_status(), DynamicInst::Status::DISPATCHED);
     EXPECT_EQ(load->get_memory_info().replay_count, 1u);
     EXPECT_EQ(load->get_memory_info().replay_rob_store_addr_unknown_count, 1u);
     EXPECT_EQ(store->get_memory_info().caused_rob_addr_unknown_block_count, 1u);

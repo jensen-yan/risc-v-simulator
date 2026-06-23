@@ -74,7 +74,7 @@ void CommitStage::execute(Context& context) {
     if (head_entry) {
         switch (head_entry->get_status()) {
             case DynamicInst::Status::ALLOCATED: state_str = "ALLOCATED"; break;
-            case DynamicInst::Status::ISSUED: state_str = "ISSUED"; break;
+            case DynamicInst::Status::DISPATCHED: state_str = "DISPATCHED"; break;
             case DynamicInst::Status::EXECUTING: state_str = "EXECUTING"; break;
             case DynamicInst::Status::COMPLETED: state_str = "COMPLETED"; break;
             case DynamicInst::Status::RETIRED: state_str = "RETIRED"; break;

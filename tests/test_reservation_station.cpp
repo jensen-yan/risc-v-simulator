@@ -78,17 +78,17 @@ protected:
 
 // 测试2：保留站容量测试
 TEST_F(ReservationStationTest, CapacityTest) {
-    std::vector<ReservationStation::IssueResult> results;
+    std::vector<ReservationStation::DispatchResult> results;
     const size_t initial_free = rs.get_free_entry_count();
     
     // 填满保留站
-    for (size_t i = 0; i < initial_free + 8; ++i) {  // 尝试发射超过容量的指令
+    for (size_t i = 0; i < initial_free + 8; ++i) {  // 尝试派发超过容量的指令
         auto inst = createInstruction(InstructionType::R_TYPE, Opcode::OP, i % 32, 2, 3);
         auto dynamic_inst = createDynamicInst(
             inst, 32 + static_cast<int>(i), 33, 34 + static_cast<int>(i),
             true, true, 0x1000 + static_cast<uint32_t>(i) * 4, static_cast<int>(i) + 1);
         
-        auto result = rs.issue_instruction(dynamic_inst);
+        auto result = rs.dispatch_instruction(dynamic_inst);
         results.push_back(result);
         
         if (!result.success) {
@@ -96,7 +96,7 @@ TEST_F(ReservationStationTest, CapacityTest) {
         }
     }
     
-    // 检查是否有发射失败的情况
+    // 检查是否有派发失败的情况
     bool found_failure = false;
     for (const auto& result : results) {
         if (!result.success) {
@@ -106,39 +106,39 @@ TEST_F(ReservationStationTest, CapacityTest) {
         }
     }
     
-    EXPECT_TRUE(found_failure) << "当保留站满时应该发射失败";
+    EXPECT_TRUE(found_failure) << "当保留站满时应该派发失败";
     EXPECT_EQ(rs.get_free_entry_count(), 0) << "保留站满时应该没有空闲表项";
 }
 
-// 测试3：基本调度功能
-TEST_F(ReservationStationTest, BasicDispatch) {
-    // 发射一个准备好的指令
+// 测试3：基本发射功能
+TEST_F(ReservationStationTest, BasicIssue) {
+    // 派发一个准备好的指令
     auto inst = createInstruction(InstructionType::R_TYPE, Opcode::OP, 1, 2, 3);
     auto dynamic_inst = createDynamicInst(inst, 32, 33, 34, true, true);  // 两个操作数都准备好
     
-    auto issue_result = rs.issue_instruction(dynamic_inst);
-    EXPECT_TRUE(issue_result.success);
+    auto dispatch_result = rs.dispatch_instruction(dynamic_inst);
+    EXPECT_TRUE(dispatch_result.success);
     
-    // 尝试调度
-    auto dispatch_result = rs.dispatch_instruction();
+    // 尝试发射
+    auto issue_result = rs.issue_ready_instruction();
     
-    EXPECT_TRUE(dispatch_result.success) << "调度应该成功";
-    EXPECT_EQ(dispatch_result.unit_type, ExecutionUnitType::ALU) << "应该分配到ALU单元";
-    EXPECT_GE(dispatch_result.unit_id, 0) << "单元ID应该有效";
+    EXPECT_TRUE(issue_result.success) << "发射应该成功";
+    EXPECT_EQ(issue_result.unit_type, ExecutionUnitType::ALU) << "应该分配到ALU单元";
+    EXPECT_GE(issue_result.unit_id, 0) << "单元ID应该有效";
 }
 
 // 测试4：操作数依赖处理
 TEST_F(ReservationStationTest, OperandDependency) {
-    // 发射一个操作数未准备好的指令
+    // 派发一个操作数未准备好的指令
     auto inst = createInstruction(InstructionType::R_TYPE, Opcode::OP, 1, 2, 3);
     auto dynamic_inst = createDynamicInst(inst, 32, 33, 34, false, true);  // src1未准备好
     
-    auto issue_result = rs.issue_instruction(dynamic_inst);
-    EXPECT_TRUE(issue_result.success);
+    auto dispatch_result = rs.dispatch_instruction(dynamic_inst);
+    EXPECT_TRUE(dispatch_result.success);
     
-    // 尝试调度，应该失败（操作数未准备好）
-    auto dispatch_result = rs.dispatch_instruction();
-    EXPECT_FALSE(dispatch_result.success) << "操作数未准备好时不应该调度";
+    // 尝试发射，应该失败（操作数未准备好）
+    auto issue_result = rs.issue_ready_instruction();
+    EXPECT_FALSE(issue_result.success) << "操作数未准备好时不应该发射";
     
     // 通过完成事件更新操作数
     // 创建一个模拟的DynamicInst来测试完成事件更新
@@ -161,9 +161,9 @@ TEST_F(ReservationStationTest, OperandDependency) {
     
     rs.update_operands(completion_event, nullptr);
     
-    // 现在应该可以调度了
-    dispatch_result = rs.dispatch_instruction();
-    EXPECT_TRUE(dispatch_result.success) << "操作数准备好后应该可以调度";
+    // 现在应该可以发射了
+    issue_result = rs.issue_ready_instruction();
+    EXPECT_TRUE(issue_result.success) << "操作数准备好后应该可以发射";
 }
 
 // 测试5：不同指令类型的执行单元分配
@@ -188,18 +188,18 @@ TEST_F(ReservationStationTest, ExecutionUnitAllocation) {
         auto inst = createInstruction(test_case.type, test_case.opcode, 1, 2, 3);
         auto dynamic_inst = createDynamicInst(inst, 32, 33, 34);
         
-        auto issue_result = rs.issue_instruction(dynamic_inst);
-        EXPECT_TRUE(issue_result.success) << test_case.description + " 发射失败";
+        auto dispatch_result = rs.dispatch_instruction(dynamic_inst);
+        EXPECT_TRUE(dispatch_result.success) << test_case.description + " 派发失败";
         
-        auto dispatch_result = rs.dispatch_instruction();
-        EXPECT_TRUE(dispatch_result.success) << test_case.description + " 调度失败";
-        EXPECT_EQ(dispatch_result.unit_type, test_case.expected_unit) 
+        auto issue_result = rs.issue_ready_instruction();
+        EXPECT_TRUE(issue_result.success) << test_case.description + " 发射失败";
+        EXPECT_EQ(issue_result.unit_type, test_case.expected_unit) 
             << test_case.description + " 执行单元类型错误";
         
-        // 释放保留站表项（调度后指令离开保留站）
-        rs.release_entry(dispatch_result.rs_entry);
+        // 释放保留站表项（发射后指令离开保留站）
+        rs.release_entry(issue_result.rs_entry);
         // 释放执行单元以便下次测试
-        rs.release_execution_unit(dispatch_result.unit_type, dispatch_result.unit_id);
+        rs.release_execution_unit(issue_result.unit_type, issue_result.unit_id);
     }
 }
 
@@ -222,26 +222,26 @@ TEST_F(ReservationStationTest, ExecutionUnitBusy) {
                                                  true,
                                                  static_cast<uint32_t>(0x1000 + i * 4),
                                                  static_cast<ROBEntry>(i + 1)));
-        EXPECT_TRUE(rs.issue_instruction(instructions.back()).success);
+        EXPECT_TRUE(rs.dispatch_instruction(instructions.back()).success);
     }
 
-    ReservationStation::DispatchResult first_dispatch;
+    ReservationStation::ReadyIssueResult first_issue;
     for (size_t i = 0; i < OOOPipelineConfig::ALU_UNITS; ++i) {
-        auto dispatch = rs.dispatch_instruction();
-        EXPECT_TRUE(dispatch.success) << "有空闲 ALU 时应成功调度";
+        auto issue = rs.issue_ready_instruction();
+        EXPECT_TRUE(issue.success) << "有空闲 ALU 时应成功发射";
         if (i == 0) {
-            first_dispatch = dispatch;
+            first_issue = issue;
         }
     }
 
-    auto blocked_dispatch = rs.dispatch_instruction();
-    EXPECT_FALSE(blocked_dispatch.success) << "ALU 全忙时下一条指令不应该调度";
+    auto blocked_issue = rs.issue_ready_instruction();
+    EXPECT_FALSE(blocked_issue.success) << "ALU 全忙时下一条指令不应该发射";
 
     // 释放一个执行单元
-    rs.release_execution_unit(first_dispatch.unit_type, first_dispatch.unit_id);
+    rs.release_execution_unit(first_issue.unit_type, first_issue.unit_id);
     
-    auto resumed_dispatch = rs.dispatch_instruction();
-    EXPECT_TRUE(resumed_dispatch.success) << "释放执行单元后应该可以调度";
+    auto resumed_issue = rs.issue_ready_instruction();
+    EXPECT_TRUE(resumed_issue.success) << "释放执行单元后应该可以发射";
 }
 
 TEST_F(ReservationStationTest, FlushYoungerThanKeepsOlderEntries) {
@@ -251,32 +251,32 @@ TEST_F(ReservationStationTest, FlushYoungerThanKeepsOlderEntries) {
     auto older = createDynamicInst(inst1, 32, 33, 34, true, true, 0x1000, 1);
     auto younger = createDynamicInst(inst2, 35, 36, 37, true, true, 0x1004, 2);
 
-    ASSERT_TRUE(rs.issue_instruction(older).success);
-    ASSERT_TRUE(rs.issue_instruction(younger).success);
+    ASSERT_TRUE(rs.dispatch_instruction(older).success);
+    ASSERT_TRUE(rs.dispatch_instruction(younger).success);
 
     rs.flush_younger_than(older->get_instruction_id());
 
     EXPECT_EQ(rs.get_occupied_entry_count(), 1u);
-    EXPECT_TRUE(rs.dispatch_instruction().success) << "older 指令应保留在保留站中";
-    EXPECT_FALSE(rs.dispatch_instruction().success) << "younger 指令应被冲刷";
+    EXPECT_TRUE(rs.issue_ready_instruction().success) << "older 指令应保留在保留站中";
+    EXPECT_FALSE(rs.issue_ready_instruction().success) << "younger 指令应被冲刷";
 }
 
 // 测试7：流水线刷新
 TEST_F(ReservationStationTest, PipelineFlush) {
-    // 发射一些指令
+    // 派发一些指令
     for (int i = 0; i < 5; ++i) {
         auto inst = createInstruction(InstructionType::R_TYPE, Opcode::OP, i + 1, 2, 3);
         auto dynamic_inst = createDynamicInst(inst, 32 + i, 33, 34 + i, true, true, 0x1000 + i * 4, i + 1);
         
-        auto result = rs.issue_instruction(dynamic_inst);
+        auto result = rs.dispatch_instruction(dynamic_inst);
         EXPECT_TRUE(result.success);
     }
     
     size_t free_before = rs.get_free_entry_count();
     
-    // 调度一些指令占用执行单元
-    rs.dispatch_instruction();
-    rs.dispatch_instruction();
+    // 发射一些指令占用执行单元
+    rs.issue_ready_instruction();
+    rs.issue_ready_instruction();
     
     // 刷新流水线
     rs.flush_pipeline();
@@ -291,92 +291,92 @@ TEST_F(ReservationStationTest, PipelineFlush) {
 
 // 测试8：统计信息
 TEST_F(ReservationStationTest, Statistics) {
-    uint64_t issued_before, dispatched_before, stalls_before;
-    rs.get_statistics(issued_before, dispatched_before, stalls_before);
+    uint64_t dispatched_before, issued_before, stalls_before;
+    rs.get_statistics(dispatched_before, issued_before, stalls_before);
     
-    // 发射几条指令
+    // 派发几条指令
     for (int i = 0; i < 3; ++i) {
         auto inst = createInstruction(InstructionType::R_TYPE, Opcode::OP, i + 1, 2, 3);
         auto dynamic_inst = createDynamicInst(inst, 32 + i, 33, 34 + i, true, true, 0x1000 + i * 4, i + 1);
         
-        auto result = rs.issue_instruction(dynamic_inst);
+        auto result = rs.dispatch_instruction(dynamic_inst);
         EXPECT_TRUE(result.success);
     }
     
-    // 调度几条指令
-    rs.dispatch_instruction();
-    rs.dispatch_instruction();
+    // 发射几条指令
+    rs.issue_ready_instruction();
+    rs.issue_ready_instruction();
     
-    uint64_t issued_after, dispatched_after, stalls_after;
-    rs.get_statistics(issued_after, dispatched_after, stalls_after);
+    uint64_t dispatched_after, issued_after, stalls_after;
+    rs.get_statistics(dispatched_after, issued_after, stalls_after);
     
-    EXPECT_EQ(issued_after, issued_before + 3) << "发射计数应该增加3";
-    EXPECT_EQ(dispatched_after, dispatched_before + 2) << "调度计数应该增加2";
+    EXPECT_EQ(dispatched_after, dispatched_before + 3) << "派发计数应该增加3";
+    EXPECT_EQ(issued_after, issued_before + 2) << "发射计数应该增加2";
     EXPECT_EQ(stalls_after, stalls_before) << "没有资源冲突时停顿次数不应该增加";
 }
 
-// 测试9：优先级调度 (简化版本，只测试基本功能)
-TEST_F(ReservationStationTest, PriorityScheduling) {
-    // 发射一条准备好的指令
+// 测试9：优先级发射 (简化版本，只测试基本功能)
+TEST_F(ReservationStationTest, PriorityIssue) {
+    // 派发一条准备好的指令
     auto inst1 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 1, 2, 3);
     auto dynamic_inst1 = createDynamicInst(inst1, 32, 33, 34, true, true, 0x1000, 5);
     
-    // 发射指令
-    EXPECT_TRUE(rs.issue_instruction(dynamic_inst1).success);
+    // 派发指令
+    EXPECT_TRUE(rs.dispatch_instruction(dynamic_inst1).success);
     
-    // 调度指令
-    auto dispatch_result = rs.dispatch_instruction();
-    EXPECT_TRUE(dispatch_result.success);
-    EXPECT_EQ(dispatch_result.instruction->get_rob_entry(), 5) 
-        << "应该调度正确的指令";
+    // 发射指令
+    auto issue_result = rs.issue_ready_instruction();
+    EXPECT_TRUE(issue_result.success);
+    EXPECT_EQ(issue_result.instruction->get_rob_entry(), 5) 
+        << "应该发射正确的指令";
 }
 
-// 测试10：当最老ready指令执行单元忙碌时，应该继续尝试后续可调度指令
-TEST_F(ReservationStationTest, SkipBusyUnitAndDispatchOtherReadyInstruction) {
+// 测试10：当最老ready指令执行单元忙碌时，应该继续尝试后续可发射指令
+TEST_F(ReservationStationTest, SkipBusyUnitAndIssueOtherReadyInstruction) {
     // 先占用一个 LOAD 执行单元
     auto busy_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
     auto busy_load_inst = createDynamicInst(busy_load, 32, 0, 40, true, true, 0x1000, 1);
-    EXPECT_TRUE(rs.issue_instruction(busy_load_inst).success);
-    auto first_dispatch = rs.dispatch_instruction();
-    EXPECT_TRUE(first_dispatch.success);
-    EXPECT_EQ(first_dispatch.unit_type, ExecutionUnitType::LOAD);
+    EXPECT_TRUE(rs.dispatch_instruction(busy_load_inst).success);
+    auto first_issue = rs.issue_ready_instruction();
+    EXPECT_TRUE(first_issue.success);
+    EXPECT_EQ(first_issue.unit_type, ExecutionUnitType::LOAD);
 
-    // 再放入一条更老的 ready LOAD。由于现在有第二个 LOAD 单元，它应优先被调度。
+    // 再放入一条更老的 ready LOAD。由于现在有第二个 LOAD 单元，它应优先被发射。
     auto blocked_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 3, 4, 0);
     auto blocked_load_inst = createDynamicInst(blocked_load, 41, 0, 42, true, true, 0x1004, 2);
-    EXPECT_TRUE(rs.issue_instruction(blocked_load_inst).success);
+    EXPECT_TRUE(rs.dispatch_instruction(blocked_load_inst).success);
 
     // 放入一条更年轻的 ready STORE，验证不会越过更老且可执行的 LOAD。
     auto ready_store = createInstruction(InstructionType::S_TYPE, Opcode::STORE, 0, 5, 6);
     auto ready_store_inst = createDynamicInst(ready_store, 43, 44, 0, true, true, 0x1008, 3);
-    EXPECT_TRUE(rs.issue_instruction(ready_store_inst).success);
+    EXPECT_TRUE(rs.dispatch_instruction(ready_store_inst).success);
 
-    auto second_dispatch = rs.dispatch_instruction();
-    EXPECT_TRUE(second_dispatch.success) << "第二个 LOAD 单元空闲时，应优先调度更老的 LOAD";
-    EXPECT_EQ(second_dispatch.unit_type, ExecutionUnitType::LOAD);
-    EXPECT_EQ(second_dispatch.instruction->get_instruction_id(),
+    auto second_issue = rs.issue_ready_instruction();
+    EXPECT_TRUE(second_issue.success) << "第二个 LOAD 单元空闲时，应优先发射更老的 LOAD";
+    EXPECT_EQ(second_issue.unit_type, ExecutionUnitType::LOAD);
+    EXPECT_EQ(second_issue.instruction->get_instruction_id(),
               blocked_load_inst->get_instruction_id());
-    EXPECT_NE(second_dispatch.unit_id, first_dispatch.unit_id)
+    EXPECT_NE(second_issue.unit_id, first_issue.unit_id)
         << "更老的 LOAD 应占用另一个 LOAD 单元";
 }
 
-TEST_F(ReservationStationTest, BatchDispatchUsesTwoAvailableAluSlots) {
+TEST_F(ReservationStationTest, BatchIssueUsesTwoAvailableAluSlots) {
     auto inst1 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 1, 2, 3);
     auto dyn1 = createDynamicInst(inst1, 32, 33, 34, true, true, 0x1000, 1);
     auto inst2 = createInstruction(InstructionType::R_TYPE, Opcode::OP, 4, 5, 6);
     auto dyn2 = createDynamicInst(inst2, 35, 36, 37, true, true, 0x1004, 2);
 
-    EXPECT_TRUE(rs.issue_instruction(dyn1).success);
-    EXPECT_TRUE(rs.issue_instruction(dyn2).success);
+    EXPECT_TRUE(rs.dispatch_instruction(dyn1).success);
+    EXPECT_TRUE(rs.dispatch_instruction(dyn2).success);
 
-    const auto results = rs.dispatch_instructions(2);
+    const auto results = rs.issue_ready_instructions(2);
     ASSERT_EQ(results.size(), 2u) << "同拍应能挑出两条 ALU 指令";
     EXPECT_EQ(results[0].instruction->get_instruction_id(), dyn1->get_instruction_id());
     EXPECT_EQ(results[1].instruction->get_instruction_id(), dyn2->get_instruction_id());
     EXPECT_NE(results[0].unit_id, results[1].unit_id) << "两条 ALU 指令应占用不同 ALU 单元";
 }
 
-TEST_F(ReservationStationTest, BatchDispatchUsesIndependentAluAndFpSlots) {
+TEST_F(ReservationStationTest, BatchIssueUsesIndependentAluAndFpSlots) {
     auto alu_inst = createInstruction(InstructionType::R_TYPE, Opcode::OP, 1, 2, 3);
     auto alu_dyn = createDynamicInst(alu_inst, 32, 33, 34, true, true, 0x1000, 1);
 
@@ -387,41 +387,41 @@ TEST_F(ReservationStationTest, BatchDispatchUsesIndependentAluAndFpSlots) {
     fp_dyn->set_physical_src1_kind(RegisterFileKind::FloatingPoint);
     fp_dyn->set_physical_src2_kind(RegisterFileKind::FloatingPoint);
 
-    EXPECT_TRUE(rs.issue_instruction(alu_dyn).success);
-    EXPECT_TRUE(rs.issue_instruction(fp_dyn).success);
+    EXPECT_TRUE(rs.dispatch_instruction(alu_dyn).success);
+    EXPECT_TRUE(rs.dispatch_instruction(fp_dyn).success);
 
-    const auto results = rs.dispatch_instructions(2);
-    ASSERT_EQ(results.size(), 2u) << "同拍应能同时派发一条整数 ALU 和一条 FP 算术指令";
+    const auto results = rs.issue_ready_instructions(2);
+    ASSERT_EQ(results.size(), 2u) << "同拍应能同时发射一条整数 ALU 和一条 FP 算术指令";
     EXPECT_EQ(results[0].instruction->get_instruction_id(), alu_dyn->get_instruction_id());
     EXPECT_EQ(results[0].unit_type, ExecutionUnitType::ALU);
     EXPECT_EQ(results[1].instruction->get_instruction_id(), fp_dyn->get_instruction_id());
     EXPECT_EQ(results[1].unit_type, ExecutionUnitType::FP);
 }
 
-TEST_F(ReservationStationTest, BatchDispatchUsesTwoAvailableLoadSlots) {
+TEST_F(ReservationStationTest, BatchIssueUsesTwoAvailableLoadSlots) {
     auto load1 = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
     auto load_dyn1 = createDynamicInst(load1, 32, 0, 40, true, true, 0x1000, 1);
 
     auto load2 = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 3, 4, 0);
     auto load_dyn2 = createDynamicInst(load2, 41, 0, 42, true, true, 0x1004, 2);
 
-    EXPECT_TRUE(rs.issue_instruction(load_dyn1).success);
-    EXPECT_TRUE(rs.issue_instruction(load_dyn2).success);
+    EXPECT_TRUE(rs.dispatch_instruction(load_dyn1).success);
+    EXPECT_TRUE(rs.dispatch_instruction(load_dyn2).success);
 
-    const auto results = rs.dispatch_instructions(2);
-    ASSERT_EQ(results.size(), 2u) << "同拍应能派发两条加载指令";
+    const auto results = rs.issue_ready_instructions(2);
+    ASSERT_EQ(results.size(), 2u) << "同拍应能发射两条加载指令";
     EXPECT_EQ(results[0].unit_type, ExecutionUnitType::LOAD);
     EXPECT_EQ(results[1].unit_type, ExecutionUnitType::LOAD);
     EXPECT_NE(results[0].unit_id, results[1].unit_id) << "两条加载指令应占用不同 LOAD 单元";
 }
 
-TEST_F(ReservationStationTest, BatchDispatchSkipsBlockedOlderCandidateForSecondSlot) {
+TEST_F(ReservationStationTest, BatchIssueSkipsBlockedOlderCandidateForSecondSlot) {
     auto busy_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
     auto busy_load_inst = createDynamicInst(busy_load, 32, 0, 40, true, true, 0x1000, 1);
-    EXPECT_TRUE(rs.issue_instruction(busy_load_inst).success);
-    auto first_dispatch = rs.dispatch_instruction();
-    ASSERT_TRUE(first_dispatch.success);
-    ASSERT_EQ(first_dispatch.unit_type, ExecutionUnitType::LOAD);
+    EXPECT_TRUE(rs.dispatch_instruction(busy_load_inst).success);
+    auto first_issue = rs.issue_ready_instruction();
+    ASSERT_TRUE(first_issue.success);
+    ASSERT_EQ(first_issue.unit_type, ExecutionUnitType::LOAD);
 
     auto blocked_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 3, 4, 0);
     auto blocked_load_inst = createDynamicInst(blocked_load, 41, 0, 42, true, true, 0x1004, 2);
@@ -430,30 +430,30 @@ TEST_F(ReservationStationTest, BatchDispatchSkipsBlockedOlderCandidateForSecondS
     auto store_inst = createInstruction(InstructionType::S_TYPE, Opcode::STORE, 0, 8, 9);
     auto store_dyn = createDynamicInst(store_inst, 46, 47, 0, true, true, 0x100C, 4);
 
-    EXPECT_TRUE(rs.issue_instruction(blocked_load_inst).success);
-    EXPECT_TRUE(rs.issue_instruction(alu_dyn).success);
-    EXPECT_TRUE(rs.issue_instruction(store_dyn).success);
+    EXPECT_TRUE(rs.dispatch_instruction(blocked_load_inst).success);
+    EXPECT_TRUE(rs.dispatch_instruction(alu_dyn).success);
+    EXPECT_TRUE(rs.dispatch_instruction(store_dyn).success);
 
-    const auto results = rs.dispatch_instructions(2);
-    ASSERT_EQ(results.size(), 2u) << "第二个 LOAD 单元可用时，应先调度更老 LOAD，再调度后续 ALU";
+    const auto results = rs.issue_ready_instructions(2);
+    ASSERT_EQ(results.size(), 2u) << "第二个 LOAD 单元可用时，应先发射更老 LOAD，再发射后续 ALU";
     EXPECT_EQ(results[0].instruction->get_instruction_id(), blocked_load_inst->get_instruction_id());
     EXPECT_EQ(results[1].instruction->get_instruction_id(), alu_dyn->get_instruction_id());
     EXPECT_EQ(results[0].unit_type, ExecutionUnitType::LOAD);
     EXPECT_EQ(results[1].unit_type, ExecutionUnitType::ALU);
-    EXPECT_NE(results[0].unit_id, first_dispatch.unit_id)
+    EXPECT_NE(results[0].unit_id, first_issue.unit_id)
         << "更老的 LOAD 应分配到另一个 LOAD 单元";
 }
 
-TEST_F(ReservationStationTest, BatchDispatchSkipsPredicateRejectedOlderCandidate) {
+TEST_F(ReservationStationTest, BatchIssueSkipsPredicateRejectedOlderCandidate) {
     auto older_load = createInstruction(InstructionType::I_TYPE, Opcode::LOAD, 1, 2, 0);
     auto older_load_inst = createDynamicInst(older_load, 32, 0, 40, true, true, 0x1000, 1);
     auto younger_alu = createInstruction(InstructionType::R_TYPE, Opcode::OP, 3, 4, 5);
     auto younger_alu_inst = createDynamicInst(younger_alu, 41, 42, 43, true, true, 0x1004, 2);
 
-    EXPECT_TRUE(rs.issue_instruction(older_load_inst).success);
-    EXPECT_TRUE(rs.issue_instruction(younger_alu_inst).success);
+    EXPECT_TRUE(rs.dispatch_instruction(older_load_inst).success);
+    EXPECT_TRUE(rs.dispatch_instruction(younger_alu_inst).success);
 
-    const auto results = rs.dispatch_instructions(
+    const auto results = rs.issue_ready_instructions(
         2,
         [&](const DynamicInstPtr& inst) {
             return inst->get_instruction_id() != older_load_inst->get_instruction_id();

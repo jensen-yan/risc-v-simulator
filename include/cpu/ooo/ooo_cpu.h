@@ -24,7 +24,7 @@ bool isOutOfOrderL1DNextLinePrefetchEnabled();
 class SyscallHandler;
 class FetchStage;
 class DecodeStage;
-class IssueStage;
+class DispatchStage;
 class ExecuteStage;
 class WritebackStage;
 class CommitStage;
@@ -120,7 +120,7 @@ private:
     CPUState cpu_state_;                            // CPU共享状态
     std::unique_ptr<FetchStage> fetch_stage_;       // 取指阶段
     std::unique_ptr<DecodeStage> decode_stage_;     // 译码阶段
-    std::unique_ptr<IssueStage> issue_stage_;       // 发射阶段
+    std::unique_ptr<DispatchStage> dispatch_stage_;     // 派发阶段
     std::unique_ptr<ExecuteStage> execute_stage_;   // 执行阶段
     std::unique_ptr<WritebackStage> writeback_stage_; // 写回阶段
     std::unique_ptr<CommitStage> commit_stage_;     // 提交阶段

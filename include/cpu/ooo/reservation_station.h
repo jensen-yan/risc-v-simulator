@@ -15,7 +15,7 @@ class StoreBuffer;
 using ReservationStationEntry = DynamicInst;
 
 /**
- * 保留站调度单元
+ * 保留站 / 简化 Issue Queue 发射选择单元
  * 
  * 功能：
  * 1. 管理等待执行的指令
@@ -45,22 +45,22 @@ private:
     std::vector<bool> store_units_busy;
     
     // 统计信息
-    uint64_t issued_count;
     uint64_t dispatched_count;
+    uint64_t issued_count;
     uint64_t stall_count;
     
 public:
     ReservationStation();
     
-    // 发射操作结果
-    struct IssueResult {
+    // 派发到保留站的结果
+    struct DispatchResult {
         bool success;
         RSEntry rs_entry;
         std::string error_message;
     };
     
-    // 调度操作结果
-    struct DispatchResult {
+    // 从保留站发射到执行单元的结果
+    struct ReadyIssueResult {
         bool success;
         RSEntry rs_entry;
         ExecutionUnitType unit_type;
@@ -69,16 +69,16 @@ public:
         std::string error_message;
     };
     
-    // 发射指令到保留站（使用DynamicInst）
-    IssueResult issue_instruction(DynamicInstPtr dynamic_inst);
+    // 派发指令到保留站（使用DynamicInst）
+    DispatchResult dispatch_instruction(DynamicInstPtr dynamic_inst);
     
-    // 尝试调度一条准备好的指令
-    DispatchResult dispatch_instruction();
+    // 尝试发射一条准备好的指令
+    ReadyIssueResult issue_ready_instruction();
 
-    // 同拍批量调度多条准备好的指令，保持程序顺序并跳过资源冲突候选
-    std::vector<DispatchResult> dispatch_instructions(
+    // 同拍批量发射多条准备好的指令，保持程序顺序并跳过资源冲突候选
+    std::vector<ReadyIssueResult> issue_ready_instructions(
         size_t limit,
-        const std::function<bool(const DynamicInstPtr&)>& can_dispatch = {});
+        const std::function<bool(const DynamicInstPtr&)>& can_issue = {});
     
     // 更新操作数（来自完成事件）
     void update_operands(const CompletionEvent& completion_event, StoreBuffer* store_buffer);
@@ -106,7 +106,7 @@ public:
     void release_execution_unit(ExecutionUnitType unit_type, int unit_id);
     
     // 获取统计信息
-    void get_statistics(uint64_t& issued, uint64_t& dispatched, uint64_t& stalls) const;
+    void get_statistics(uint64_t& dispatched, uint64_t& issued, uint64_t& stalls) const;
     
     // 调试输出
     void dump_reservation_station() const;

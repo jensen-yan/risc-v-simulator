@@ -29,7 +29,7 @@ protected:
         debugManager.enableCategory("RS");
         debugManager.enableCategory("SYSTEM");
         debugManager.enableCategory("COMMIT");
-        debugManager.enableCategory("ISSUE");
+        debugManager.enableCategory("DISPATCH");
         debugManager.enableCategory("WRITEBACK");
         debugManager.enableCategory("RENAME");
         debugManager.enableCategory("ROB");
@@ -323,8 +323,8 @@ TEST_F(OutOfOrderCPUTest, DecodeStageUsesConfiguredWidthWhenResourcesAllow) {
     EXPECT_EQ(findStat("cpu.decode.slots"), OOOPipelineConfig::DECODE_WIDTH * 2);
 }
 
-TEST_F(OutOfOrderCPUTest, IssueStageUsesConfiguredWidthWhenResourcesAllow) {
-    for (size_t i = 0; i < OOOPipelineConfig::ISSUE_WIDTH; ++i) {
+TEST_F(OutOfOrderCPUTest, DispatchStageUsesConfiguredWidthWhenResourcesAllow) {
+    for (size_t i = 0; i < OOOPipelineConfig::DISPATCH_WIDTH; ++i) {
         writeInstruction(static_cast<uint32_t>(i * 4),
                          createITypeInstruction(static_cast<int16_t>(i + 1),
                                                 0,
@@ -332,7 +332,7 @@ TEST_F(OutOfOrderCPUTest, IssueStageUsesConfiguredWidthWhenResourcesAllow) {
                                                 static_cast<uint8_t>(i + 1),
                                                 0x13));
     }
-    writeInstruction(static_cast<uint32_t>(OOOPipelineConfig::ISSUE_WIDTH * 4),
+    writeInstruction(static_cast<uint32_t>(OOOPipelineConfig::DISPATCH_WIDTH * 4),
                      createECallInstruction());
 
     auto& state = const_cast<CPUState&>(cpu->getCPUState());
@@ -346,8 +346,8 @@ TEST_F(OutOfOrderCPUTest, IssueStageUsesConfiguredWidthWhenResourcesAllow) {
 
     ASSERT_NE(state.reservation_station, nullptr);
     EXPECT_EQ(state.reservation_station->get_occupied_entry_count(),
-              OOOPipelineConfig::ISSUE_WIDTH)
-        << "第三拍应按当前发射宽度将最老指令送入保留站";
+              OOOPipelineConfig::DISPATCH_WIDTH)
+        << "第三拍应按当前派发宽度将最老指令送入保留站";
 
     auto findStat = [&](const std::string& name) -> uint64_t {
         for (const auto& entry : cpu->getStats()) {
@@ -358,12 +358,12 @@ TEST_F(OutOfOrderCPUTest, IssueStageUsesConfiguredWidthWhenResourcesAllow) {
         return 0;
     };
 
-    EXPECT_EQ(findStat("cpu.issue.issued"), OOOPipelineConfig::ISSUE_WIDTH);
-    EXPECT_EQ(findStat("cpu.issue.utilized_slots"), OOOPipelineConfig::ISSUE_WIDTH);
-    EXPECT_EQ(findStat("cpu.issue.slots"), OOOPipelineConfig::ISSUE_WIDTH * 3);
+    EXPECT_EQ(findStat("cpu.dispatch.dispatched"), OOOPipelineConfig::DISPATCH_WIDTH);
+    EXPECT_EQ(findStat("cpu.dispatch.utilized_slots"), OOOPipelineConfig::DISPATCH_WIDTH);
+    EXPECT_EQ(findStat("cpu.dispatch.slots"), OOOPipelineConfig::DISPATCH_WIDTH * 3);
 }
 
-TEST_F(OutOfOrderCPUTest, SameCycleIssueRenameTracksYoungerRawDependency) {
+TEST_F(OutOfOrderCPUTest, SameCycleDispatchRenameTracksYoungerRawDependency) {
     writeInstruction(0x0, createITypeInstruction(1, 0, 0x0, 1, 0x13));
     writeInstruction(0x4, createRTypeInstruction(0x00, 0, 1, 0x0, 2, 0x33));
     writeInstruction(0x8, createECallInstruction());
@@ -381,8 +381,8 @@ TEST_F(OutOfOrderCPUTest, SameCycleIssueRenameTracksYoungerRawDependency) {
     auto second = state.reorder_buffer->get_entry(1);
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
-    ASSERT_EQ(first->get_status(), DynamicInst::Status::ISSUED);
-    ASSERT_EQ(second->get_status(), DynamicInst::Status::ISSUED);
+    ASSERT_EQ(first->get_status(), DynamicInst::Status::DISPATCHED);
+    ASSERT_EQ(second->get_status(), DynamicInst::Status::DISPATCHED);
     EXPECT_NE(first->get_physical_dest(), 0u);
     EXPECT_EQ(second->get_physical_src1(), first->get_physical_dest())
         << "同周期 younger 指令应观察到 older 指令更新后的 rename 映射";
@@ -390,7 +390,7 @@ TEST_F(OutOfOrderCPUTest, SameCycleIssueRenameTracksYoungerRawDependency) {
         << "older 指令尚未执行完成时，younger RAW 源操作数应保持未就绪";
 }
 
-TEST_F(OutOfOrderCPUTest, FloatingPointHeadDoesNotBlockYoungerIntegerIssue) {
+TEST_F(OutOfOrderCPUTest, FloatingPointHeadDoesNotBlockYoungerIntegerDispatch) {
     cpu->setFPRegister(1, 0xFFFFFFFF3FC00000ULL); // 1.5f
     cpu->setFPRegister(2, 0xFFFFFFFF40000000ULL); // 2.0f
 
@@ -413,8 +413,8 @@ TEST_F(OutOfOrderCPUTest, FloatingPointHeadDoesNotBlockYoungerIntegerIssue) {
     auto second = state.reorder_buffer->get_entry(1);
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
-    EXPECT_EQ(first->get_status(), DynamicInst::Status::ISSUED);
-    EXPECT_EQ(second->get_status(), DynamicInst::Status::ISSUED)
+    EXPECT_EQ(first->get_status(), DynamicInst::Status::DISPATCHED);
+    EXPECT_EQ(second->get_status(), DynamicInst::Status::DISPATCHED)
         << "更老 FP 指令不应再阻塞年轻整数指令进入保留站";
     EXPECT_EQ(first->get_physical_dest_kind(), RegisterFileKind::FloatingPoint);
     EXPECT_EQ(second->get_physical_dest_kind(), RegisterFileKind::Integer);
@@ -443,8 +443,8 @@ TEST_F(OutOfOrderCPUTest, FloatingPointRenameTracksYoungerDependency) {
     auto second = state.reorder_buffer->get_entry(1);
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
-    ASSERT_EQ(first->get_status(), DynamicInst::Status::ISSUED);
-    ASSERT_EQ(second->get_status(), DynamicInst::Status::ISSUED);
+    ASSERT_EQ(first->get_status(), DynamicInst::Status::DISPATCHED);
+    ASSERT_EQ(second->get_status(), DynamicInst::Status::DISPATCHED);
     EXPECT_EQ(first->get_physical_dest_kind(), RegisterFileKind::FloatingPoint);
     EXPECT_EQ(second->get_physical_src1_kind(), RegisterFileKind::FloatingPoint);
     EXPECT_EQ(second->get_physical_src1(), first->get_physical_dest())
@@ -461,7 +461,7 @@ TEST_F(OutOfOrderCPUTest, FloatingPointRenameTracksYoungerDependency) {
     EXPECT_EQ(cpu->getFPRegister(4), 0xFFFFFFFF40B00000ULL); // 5.5f
 }
 
-TEST_F(OutOfOrderCPUTest, SerializingSystemInstructionBlocksYoungerIssue) {
+TEST_F(OutOfOrderCPUTest, SerializingSystemInstructionBlocksYoungerDispatch) {
     // ADDI  x1, x0, 6
     // ADDI  x2, x0, 7
     // MUL   x3, x1, x2
@@ -506,18 +506,18 @@ TEST_F(OutOfOrderCPUTest, SerializingSystemInstructionBlocksYoungerIssue) {
         }
 
         saw_ebreak_and_younger = true;
-        EXPECT_FALSE(younger_inst->is_issued() || younger_inst->is_executing() || younger_inst->is_completed())
-            << "EBREAK 之后的 younger 指令不应越过序列化边界发射";
+        EXPECT_FALSE(younger_inst->is_dispatched() || younger_inst->is_executing() || younger_inst->is_completed())
+            << "EBREAK 之后的 younger 指令不应越过序列化边界派发";
         verified_younger_blocked = true;
         break;
     }
 
     EXPECT_TRUE(saw_ebreak_and_younger) << "测试应观察到 EBREAK 与其后的 younger 指令同时在 ROB 中";
-    EXPECT_TRUE(verified_younger_blocked) << "需要验证 younger 指令在 issue 阶段被阻塞";
+    EXPECT_TRUE(verified_younger_blocked) << "需要验证 younger 指令在 dispatch 阶段被阻塞";
 }
 
-TEST_F(OutOfOrderCPUTest, ExecuteStageUsesConfiguredDispatchWidthWhenUnitsAllow) {
-    for (size_t i = 0; i < OOOPipelineConfig::DISPATCH_WIDTH; ++i) {
+TEST_F(OutOfOrderCPUTest, ExecuteStageUsesConfiguredIssueWidthWhenUnitsAllow) {
+    for (size_t i = 0; i < OOOPipelineConfig::ISSUE_WIDTH; ++i) {
         writeInstruction(static_cast<uint32_t>(i * 4),
                          createITypeInstruction(static_cast<int16_t>(i + 1),
                                                 0,
@@ -525,7 +525,7 @@ TEST_F(OutOfOrderCPUTest, ExecuteStageUsesConfiguredDispatchWidthWhenUnitsAllow)
                                                 static_cast<uint8_t>(i + 1),
                                                 0x13));
     }
-    writeInstruction(static_cast<uint32_t>(OOOPipelineConfig::DISPATCH_WIDTH * 4),
+    writeInstruction(static_cast<uint32_t>(OOOPipelineConfig::ISSUE_WIDTH * 4),
                      createECallInstruction());
 
     auto& state = const_cast<CPUState&>(cpu->getCPUState());
@@ -544,8 +544,8 @@ TEST_F(OutOfOrderCPUTest, ExecuteStageUsesConfiguredDispatchWidthWhenUnitsAllow)
             ++busy_alu;
         }
     }
-    EXPECT_EQ(busy_alu, OOOPipelineConfig::DISPATCH_WIDTH)
-        << "第四拍应按当前 dispatch 宽度把 ready ALU 指令送入执行单元";
+    EXPECT_EQ(busy_alu, OOOPipelineConfig::ISSUE_WIDTH)
+        << "第四拍应按当前 issue 宽度把 ready ALU 指令送入执行单元";
 
     auto findStat = [&](const std::string& name) -> uint64_t {
         for (const auto& entry : cpu->getStats()) {
@@ -556,11 +556,11 @@ TEST_F(OutOfOrderCPUTest, ExecuteStageUsesConfiguredDispatchWidthWhenUnitsAllow)
         return 0;
     };
 
-    EXPECT_EQ(findStat("cpu.execute.dispatched"), OOOPipelineConfig::DISPATCH_WIDTH);
-    EXPECT_EQ(findStat("cpu.execute.dispatch_utilized_slots"), OOOPipelineConfig::DISPATCH_WIDTH);
-    EXPECT_EQ(findStat("cpu.execute.dispatch_slots"), OOOPipelineConfig::DISPATCH_WIDTH * 4);
-    EXPECT_EQ(findStat("cpu.topdown.slots.executed"), OOOPipelineConfig::DISPATCH_WIDTH);
-    EXPECT_EQ(findStat("cpu.topdown.slots.total"), OOOPipelineConfig::DISPATCH_WIDTH * 4);
+    EXPECT_EQ(findStat("cpu.issue.issued"), OOOPipelineConfig::ISSUE_WIDTH);
+    EXPECT_EQ(findStat("cpu.issue.utilized_slots"), OOOPipelineConfig::ISSUE_WIDTH);
+    EXPECT_EQ(findStat("cpu.issue.slots"), OOOPipelineConfig::ISSUE_WIDTH * 4);
+    EXPECT_EQ(findStat("cpu.topdown.slots.executed"), OOOPipelineConfig::ISSUE_WIDTH);
+    EXPECT_EQ(findStat("cpu.topdown.slots.total"), OOOPipelineConfig::ISSUE_WIDTH * 4);
 }
 
 TEST_F(OutOfOrderCPUTest, MExtensionMulInstruction) {

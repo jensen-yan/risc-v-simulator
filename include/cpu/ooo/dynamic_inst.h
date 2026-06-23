@@ -30,8 +30,8 @@ class DynamicInst {
 public:
     // 指令状态枚举
     enum class Status {
-        ALLOCATED,      // 已分配到ROB，等待发射
-        ISSUED,         // 已发射到保留站，等待调度  
+        ALLOCATED,      // 已分配到 ROB，等待派发
+        DISPATCHED,     // 已派发到保留站，等待发射
         EXECUTING,      // 正在执行单元中执行
         COMPLETED,      // 执行完成，等待写回
         RETIRED         // 已退休提交
@@ -198,7 +198,7 @@ private:
     // ========== 调试和统计信息 ==========
     uint64_t fetch_cycle_;                    // 取指周期
     uint64_t decode_cycle_;                   // 译码周期
-    uint64_t issue_cycle_;                    // 发射周期
+    uint64_t dispatch_cycle_;                 // 派发周期
     uint64_t execute_cycle_;                  // 执行开始周期
     uint64_t complete_cycle_;                 // 完成周期
     uint64_t retire_cycle_;                   // 退休周期
@@ -400,21 +400,21 @@ public:
     // ========== 周期跟踪接口 ==========
     void set_fetch_cycle(uint64_t cycle) { fetch_cycle_ = cycle; }
     void set_decode_cycle(uint64_t cycle) { decode_cycle_ = cycle; }
-    void set_issue_cycle(uint64_t cycle) { issue_cycle_ = cycle; }
+    void set_dispatch_cycle(uint64_t cycle) { dispatch_cycle_ = cycle; }
     void set_execute_cycle(uint64_t cycle) { execute_cycle_ = cycle; }
     void set_complete_cycle(uint64_t cycle) { complete_cycle_ = cycle; }
     void set_retire_cycle(uint64_t cycle) { retire_cycle_ = cycle; }
 
     uint64_t get_fetch_cycle() const { return fetch_cycle_; }
     uint64_t get_decode_cycle() const { return decode_cycle_; }
-    uint64_t get_issue_cycle() const { return issue_cycle_; }
+    uint64_t get_dispatch_cycle() const { return dispatch_cycle_; }
     uint64_t get_execute_cycle() const { return execute_cycle_; }
     uint64_t get_complete_cycle() const { return complete_cycle_; }
     uint64_t get_retire_cycle() const { return retire_cycle_; }
 
     // ========== 状态查询接口 ==========
     bool is_allocated() const { return status_ == Status::ALLOCATED; }
-    bool is_issued() const { return status_ == Status::ISSUED; }
+    bool is_dispatched() const { return status_ == Status::DISPATCHED; }
     bool is_executing() const { return status_ == Status::EXECUTING; }
     bool is_completed() const { return status_ == Status::COMPLETED; }
     bool is_retired() const { return status_ == Status::RETIRED; }

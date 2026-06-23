@@ -88,10 +88,10 @@ public:
                               const std::string& exception_msg = "", bool is_jump = false, 
                               uint64_t jump_target = 0);
     
-    // 获取可以发射的指令
+    // 获取可以派发到 Reservation Station 的指令
     DynamicInstPtr get_dispatchable_entry() const;
     
-    // 标记指令为已发射到保留站
+    // 标记指令为已派发到 Reservation Station
     void mark_as_dispatched(DynamicInstPtr inst);
     
     // 尝试提交一条指令

@@ -63,7 +63,7 @@ private:
 
         uint64_t fetch_cycle;
         uint64_t decode_cycle;
-        uint64_t issue_cycle;
+        uint64_t dispatch_cycle;
         uint64_t execute_cycle;
         uint64_t complete_cycle;
         uint64_t retire_cycle;

@@ -13,8 +13,8 @@ ReservationStation::ReservationStation()
       branch_units_busy(MAX_BRANCH_UNITS, false),
       load_units_busy(MAX_LOAD_UNITS, false),
       store_units_busy(MAX_STORE_UNITS, false),
-      issued_count(0),
       dispatched_count(0),
+      issued_count(0),
       stall_count(0) {
     
     initialize_free_list();
@@ -35,8 +35,8 @@ void ReservationStation::initialize_execution_units() {
     std::fill(store_units_busy.begin(), store_units_busy.end(), false);
 }
 
-ReservationStation::IssueResult ReservationStation::issue_instruction(DynamicInstPtr dynamic_inst) {
-    IssueResult result;
+ReservationStation::DispatchResult ReservationStation::dispatch_instruction(DynamicInstPtr dynamic_inst) {
+    DispatchResult result;
     result.success = false;
     
     if (!dynamic_inst) {
@@ -56,33 +56,33 @@ ReservationStation::IssueResult ReservationStation::issue_instruction(DynamicIns
     
     // 设置RS表项编号并更新状态
     dynamic_inst->set_rs_entry(rs_id);
-    dynamic_inst->set_status(DynamicInst::Status::ISSUED);
+    dynamic_inst->set_status(DynamicInst::Status::DISPATCHED);
     
     result.success = true;
     result.rs_entry = rs_id;
-    issued_count++;
+    dispatched_count++;
     
-    LOGT(RS, "issue to rs[%d], pc=0x%" PRIx64 ", inst=%" PRId64,
+    LOGT(RS, "dispatch to rs[%d], pc=0x%" PRIx64 ", inst=%" PRId64,
            (int)rs_id, dynamic_inst->get_pc(), dynamic_inst->get_instruction_id());
     
     return result;
 }
 
-ReservationStation::DispatchResult ReservationStation::dispatch_instruction() {
-    auto results = dispatch_instructions(1);
+ReservationStation::ReadyIssueResult ReservationStation::issue_ready_instruction() {
+    auto results = issue_ready_instructions(1);
     if (!results.empty()) {
         return results.front();
     }
 
-    DispatchResult result;
+    ReadyIssueResult result;
     result.success = false;
-    result.error_message = "no ready instruction to dispatch";
+    result.error_message = "no ready instruction to issue";
     return result;
 }
 
-std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_instructions(
-    size_t limit, const std::function<bool(const DynamicInstPtr&)>& can_dispatch) {
-    std::vector<DispatchResult> results;
+std::vector<ReservationStation::ReadyIssueResult> ReservationStation::issue_ready_instructions(
+    size_t limit, const std::function<bool(const DynamicInstPtr&)>& can_issue) {
+    std::vector<ReadyIssueResult> results;
     if (limit == 0) {
         return results;
     }
@@ -122,7 +122,7 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
             break;
         }
 
-        if (can_dispatch && !can_dispatch(instruction)) {
+        if (can_issue && !can_issue(instruction)) {
             selected_entries[ready_rs] = true;
             continue;
         }
@@ -174,7 +174,7 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
         auto& exec_info = instruction->get_execution_info();
         exec_info.remaining_cycles = exec_info.execution_cycles;
 
-        DispatchResult result;
+        ReadyIssueResult result;
         result.success = true;
         result.rs_entry = ready_rs;
         result.unit_type = unit_type;
@@ -182,9 +182,9 @@ std::vector<ReservationStation::DispatchResult> ReservationStation::dispatch_ins
         result.instruction = instruction;
         results.push_back(result);
 
-        dispatched_count++;
+        issued_count++;
 
-        LOGT(RS, "dispatch to %s%d, pc=0x%" PRIx64 ", inst=%" PRId64,
+        LOGT(RS, "issue to %s%d, pc=0x%" PRIx64 ", inst=%" PRId64,
              (unit_type == ExecutionUnitType::ALU ? "ALU" :
               unit_type == ExecutionUnitType::FP ? "FP" :
               unit_type == ExecutionUnitType::BRANCH ? "BRANCH" :
@@ -384,9 +384,9 @@ void ReservationStation::release_execution_unit(ExecutionUnitType unit_type, int
     }
 }
 
-void ReservationStation::get_statistics(uint64_t& issued, uint64_t& dispatched, uint64_t& stalls) const {
-    issued = issued_count;
+void ReservationStation::get_statistics(uint64_t& dispatched, uint64_t& issued, uint64_t& stalls) const {
     dispatched = dispatched_count;
+    issued = issued_count;
     stalls = stall_count;
 }
 
@@ -519,7 +519,7 @@ RSEntry ReservationStation::select_ready_instruction_with_availability(
             bool ready = is_instruction_ready(rs_entries[i]);
             bool is_executing = (rs_entries[i]->get_status() == DynamicInst::Status::EXECUTING);
             
-            // 只调度准备好、未在执行、且对应执行单元当前可用的指令。
+            // 只发射准备好、未在执行、且对应执行单元当前可用的指令。
             // 否则会出现“最老 ready 指令因单元忙而卡住，导致后续可执行指令也无法发射”的活锁。
             if (ready && !is_executing) {
                 const auto unit_type = rs_entries[i]->get_required_execution_unit();

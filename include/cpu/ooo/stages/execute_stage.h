@@ -11,7 +11,7 @@ namespace riscv {
 
 /**
  * 执行阶段实现
- * 负责从保留站调度指令到执行单元，管理指令执行过程
+ * 负责从保留站发射 ready 指令到执行单元，并管理指令执行过程。
  */
 class ExecuteStage : public PipelineStage {
 public:
@@ -29,10 +29,10 @@ public:
             state_.recordPipelineStall(reason);
         }
 
-        std::vector<ReservationStation::DispatchResult> dispatchReadyInstructions(
+        std::vector<ReservationStation::ReadyIssueResult> issueReadyInstructions(
             size_t limit,
-            const std::function<bool(const DynamicInstPtr&)>& can_dispatch) {
-            return state_.reservation_station->dispatch_instructions(limit, can_dispatch);
+            const std::function<bool(const DynamicInstPtr&)>& can_issue) {
+            return state_.reservation_station->issue_ready_instructions(limit, can_issue);
         }
 
         bool hasInflightMemoryAccess() const;
@@ -74,7 +74,7 @@ private:
                                  ExecutionUnitType unit_type,
                                  size_t unit_index,
                                  CPUState& state,
-                                 bool release_dispatch_unit = true);
+                                 bool release_issue_unit = true);
 };
 
 } // namespace riscv 

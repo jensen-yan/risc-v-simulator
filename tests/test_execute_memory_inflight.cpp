@@ -16,10 +16,10 @@ DecodedInstruction makeInstruction(Opcode opcode = Opcode::LOAD) {
     return decoded;
 }
 
-DynamicInstPtr issueInstruction(CPUState& state, Opcode opcode = Opcode::LOAD) {
+DynamicInstPtr dispatchInstructionToRs(CPUState& state, Opcode opcode = Opcode::LOAD) {
     auto inst = create_dynamic_inst(makeInstruction(opcode), 0x100, 1);
-    const auto issue_result = state.reservation_station->issue_instruction(inst);
-    EXPECT_TRUE(issue_result.success);
+    const auto dispatch_result = state.reservation_station->dispatch_instruction(inst);
+    EXPECT_TRUE(dispatch_result.success);
     return inst;
 }
 
@@ -43,7 +43,7 @@ TEST(ExecuteMemoryInflightTest, HasAnyReflectsValidEntries) {
 
 TEST(ExecuteMemoryInflightTest, TryMoveReleasesReservationStationAndExecutionUnit) {
     auto state = makeStateWithReservationStation();
-    auto inst = issueInstruction(state);
+    auto inst = dispatchInstructionToRs(state);
     const int unit_id = state.reservation_station->allocate_execution_unit(ExecutionUnitType::LOAD);
     ASSERT_EQ(unit_id, 0);
 
@@ -75,7 +75,7 @@ TEST(ExecuteMemoryInflightTest, TryMoveFailsWhenQueueIsFull) {
     for (auto& entry : state.memory_access_inflight) {
         entry.valid = true;
     }
-    auto inst = issueInstruction(state);
+    auto inst = dispatchInstructionToRs(state);
     ExecutionUnit unit;
     unit.busy = true;
     unit.instruction = inst;

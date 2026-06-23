@@ -11,7 +11,7 @@ const std::unordered_map<std::string, std::vector<std::string>> LogPresets::pres
     
     // 乱序执行预设：专门用于乱序CPU调试
     {"ooo", {
-        "FETCH", "DECODE", "ISSUE", "EXECUTE", "WRITEBACK", "COMMIT", 
+        "FETCH", "DECODE", "DISPATCH", "EXECUTE", "WRITEBACK", "COMMIT",
         "ROB", "RENAME", "RS"
     }},
 
@@ -22,7 +22,7 @@ const std::unordered_map<std::string, std::vector<std::string>> LogPresets::pres
     
     // 流水线预设：完整的流水线阶段
     {"pipeline", {
-        "FETCH", "DECODE", "ISSUE", "EXECUTE", "WRITEBACK", "COMMIT"
+        "FETCH", "DECODE", "DISPATCH", "EXECUTE", "WRITEBACK", "COMMIT"
     }},
     
     // 性能预设：性能分析相关
@@ -32,7 +32,7 @@ const std::unordered_map<std::string, std::vector<std::string>> LogPresets::pres
     
     // 详细预设：所有调试信息
     {"detailed", {
-        "FETCH", "DECODE", "ISSUE", "EXECUTE", "WRITEBACK", "COMMIT",
+        "FETCH", "DECODE", "DISPATCH", "EXECUTE", "WRITEBACK", "COMMIT",
         "ROB", "RENAME", "RS", "BRANCH", "STALL", "MEMORY", "SYSCALL"
     }},
     

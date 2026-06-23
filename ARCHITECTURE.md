@@ -94,8 +94,10 @@ sequenceDiagram
 flowchart LR
   f["Fetch"] --> d["Decode"]
   d --> r["Rename"]
-  r --> rs["Reservation Station"]
-  rs --> e["Execute"]
+  r --> dis["Dispatch"]
+  dis --> rs["Reservation Station / Issue Queue"]
+  rs --> iss["Issue / Ready Select"]
+  iss --> e["Execute"]
   e --> w["Writeback"]
   w --> rob["ROB"]
   rob --> c["Commit"]
@@ -123,7 +125,7 @@ flowchart LR
 ```mermaid
 flowchart TD
   subgraph Execute["Execute path"]
-    ES["ExecuteStage\n调度 / execution-unit ticking / submit completion"]
+    ES["ExecuteStage\nissue-ready select / execution-unit ticking / submit completion"]
     CF["CompletionFabric\ncompletion arbitration / backpressure / fanout"]
     WS["WritebackStage\nwakeup / PRF write / ROB complete"]
     ELC["ExecuteLoadCompletion\nready load 完成状态机"]
@@ -194,7 +196,7 @@ flowchart TD
   优先看 `ExecuteMemoryOrder`。
 - 改执行阶段早恢复、branch/JALR younger cleanup、rename checkpoint restore：
   优先看 `ExecuteControlRecovery` 和 `OooRecovery`。
-- 改 dispatch 宽度、执行单元分配、AMO dispatch wait、load dispatch speculation：
+- 改 issue 宽度、执行单元分配、AMO issue wait、load issue speculation：
   优先看 `ExecuteStage`。这一块当前保留在 stage 内，避免为简单调度循环继续制造薄模块。
 
 #### Commit 路径落点

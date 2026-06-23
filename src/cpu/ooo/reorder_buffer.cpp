@@ -131,8 +131,8 @@ DynamicInstPtr ReorderBuffer::get_dispatchable_entry() const {
 void ReorderBuffer::mark_as_dispatched(DynamicInstPtr inst) {
     if (!inst) return;
     
-    inst->set_status(DynamicInst::Status::ISSUED);
-    LOGT(ROB, "mark inst=%" PRId64 " as issued", inst->get_instruction_id());
+    inst->set_status(DynamicInst::Status::DISPATCHED);
+    LOGT(ROB, "mark inst=%" PRId64 " as dispatched", inst->get_instruction_id());
 }
 
 ReorderBuffer::CommitResult ReorderBuffer::commit_instruction() {

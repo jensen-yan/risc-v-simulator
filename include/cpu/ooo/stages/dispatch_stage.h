@@ -6,13 +6,13 @@
 namespace riscv {
 
 /**
- * 发射阶段实现
- * 负责从ROB中获取待发射指令，进行寄存器重命名，并发射到保留站
+ * 派发阶段实现
+ * 负责从 ROB 中获取待派发指令，进行寄存器重命名，并派发到保留站。
  */
-class IssueStage : public PipelineStage {
+class DispatchStage : public PipelineStage {
 public:
-    IssueStage();
-    virtual ~IssueStage() = default;
+    DispatchStage();
+    virtual ~DispatchStage() = default;
 
     class Context {
     public:
@@ -35,8 +35,9 @@ public:
         bool reservationStationHasFreeEntry() const {
             return state_.reservation_station->has_free_entry();
         }
-        ReservationStation::IssueResult issueToReservationStation(const DynamicInstPtr& instruction) {
-            return state_.reservation_station->issue_instruction(instruction);
+        ReservationStation::DispatchResult dispatchToReservationStation(
+            const DynamicInstPtr& instruction) {
+            return state_.reservation_station->dispatch_instruction(instruction);
         }
 
         RegisterRenameUnit::SourceLookupResult lookupSource(RegisterFileKind kind,
@@ -71,7 +72,7 @@ public:
     };
 
     void execute(Context& context);
-    const char* get_stage_name() const override { return "ISSUE"; }
+    const char* get_stage_name() const override { return "DISPATCH"; }
 
 private:
 };

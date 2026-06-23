@@ -26,7 +26,7 @@ ExecuteLoadHazard::Decision ExecuteLoadHazard::handleEarlierStoreHazard(
              "inst=%" PRId64 " LOAD%zu speculates past older STORE with unresolved address",
              blocked_inst->get_instruction_id(), unit_index);
     } else {
-        blocked_inst->set_status(DynamicInst::Status::ISSUED);
+        blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
         state.reservation_station->release_execution_unit(
             ExecutionUnitType::LOAD, static_cast<int>(unit_index));
         resetExecutionUnitState(unit);

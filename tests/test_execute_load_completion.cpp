@@ -26,11 +26,11 @@ CPUState makeLoadState() {
     return state;
 }
 
-DynamicInstPtr issueLoad(CPUState& state, uint64_t pc = 0x100, uint64_t instruction_id = 1) {
+DynamicInstPtr dispatchLoadToRs(CPUState& state, uint64_t pc = 0x100, uint64_t instruction_id = 1) {
     auto load = state.reorder_buffer->allocate_entry(makeMemoryInstruction(), pc, instruction_id);
     EXPECT_NE(load, nullptr);
-    const auto issue_result = state.reservation_station->issue_instruction(load);
-    EXPECT_TRUE(issue_result.success);
+    const auto dispatch_result = state.reservation_station->dispatch_instruction(load);
+    EXPECT_TRUE(dispatch_result.success);
     return load;
 }
 
@@ -48,7 +48,7 @@ ExecutionUnit makeLoadUnit(const DynamicInstPtr& load) {
 TEST(ExecuteLoadCompletionTest, CompletesMemoryLoadWithoutCache) {
     auto state = makeLoadState();
     state.memory->writeWord(0x200, 0x12345678);
-    auto load = issueLoad(state);
+    auto load = dispatchLoadToRs(state);
     auto unit = makeLoadUnit(load);
 
     const auto result = ExecuteLoadCompletion::perform(unit, 0, state);
@@ -66,14 +66,14 @@ TEST(ExecuteLoadCompletionTest, ReplaysYoungerHostCommLoadUntilRobHead) {
     state.memory->setHostCommAddresses(0x200, 0x240);
     ASSERT_NE(state.reorder_buffer->allocate_entry(makeMemoryInstruction(Opcode::STORE), 0x100, 1),
               nullptr);
-    auto load = issueLoad(state, 0x104, 2);
+    auto load = dispatchLoadToRs(state, 0x104, 2);
     ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::LOAD), 0);
     auto unit = makeLoadUnit(load);
 
     const auto result = ExecuteLoadCompletion::perform(unit, 0, state);
 
     EXPECT_EQ(result, ExecuteLoadCompletion::Result::Deferred);
-    EXPECT_EQ(load->get_status(), DynamicInst::Status::ISSUED);
+    EXPECT_EQ(load->get_status(), DynamicInst::Status::DISPATCHED);
     EXPECT_FALSE(unit.busy);
     EXPECT_EQ(unit.instruction, nullptr);
     EXPECT_EQ(load->get_memory_info().replay_count, 1u);
@@ -92,7 +92,7 @@ TEST(ExecuteLoadCompletionTest, MovesIssuedCacheMissToInflightQueue) {
     config.miss_penalty = 4;
     config.max_outstanding_misses = 1;
     state.l1d_cache = std::make_unique<NonBlockingCache>(config);
-    auto load = issueLoad(state);
+    auto load = dispatchLoadToRs(state);
     ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::LOAD), 0);
     auto unit = makeLoadUnit(load);
 
@@ -109,7 +109,7 @@ TEST(ExecuteLoadCompletionTest, MovesIssuedCacheMissToInflightQueue) {
 
 TEST(ExecuteLoadCompletionTest, CompletesUnsupportedLoadSizeAsException) {
     auto state = makeLoadState();
-    auto load = issueLoad(state);
+    auto load = dispatchLoadToRs(state);
     auto unit = makeLoadUnit(load);
     unit.load_size = 3;
 

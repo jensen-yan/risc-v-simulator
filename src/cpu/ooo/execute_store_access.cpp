@@ -13,7 +13,7 @@ ExecuteStoreAccess::Result ExecuteStoreAccess::perform(ExecutionUnit& unit,
     if (ExecuteHostCommAccess::mustSerialize(
             state, unit.instruction, unit.load_address, unit.load_size)) {
         auto blocked_inst = unit.instruction;
-        blocked_inst->set_status(DynamicInst::Status::ISSUED);
+        blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
         state.reservation_station->release_execution_unit(
             ExecutionUnitType::STORE, static_cast<int>(unit_index));
         resetExecutionUnitState(unit);
@@ -33,7 +33,7 @@ ExecuteStoreAccess::Result ExecuteStoreAccess::perform(ExecutionUnit& unit,
 
         if (!unit.dcache.request_sent) {
             auto blocked_inst = unit.instruction;
-            blocked_inst->set_status(DynamicInst::Status::ISSUED);
+            blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
             state.reservation_station->release_execution_unit(
                 ExecutionUnitType::STORE, static_cast<int>(unit_index));
             resetExecutionUnitState(unit);

@@ -25,11 +25,11 @@ CPUState makeStoreState() {
     return state;
 }
 
-DynamicInstPtr issueStore(CPUState& state, uint64_t pc = 0x100, uint64_t instruction_id = 1) {
+DynamicInstPtr dispatchStoreToRs(CPUState& state, uint64_t pc = 0x100, uint64_t instruction_id = 1) {
     auto store = state.reorder_buffer->allocate_entry(makeStoreInstruction(), pc, instruction_id);
     EXPECT_NE(store, nullptr);
-    const auto issue_result = state.reservation_station->issue_instruction(store);
-    EXPECT_TRUE(issue_result.success);
+    const auto dispatch_result = state.reservation_station->dispatch_instruction(store);
+    EXPECT_TRUE(dispatch_result.success);
     return store;
 }
 
@@ -46,7 +46,7 @@ ExecutionUnit makeStoreUnit(const DynamicInstPtr& store) {
 
 TEST(ExecuteStoreAccessTest, CompletesImmediatelyWithoutCache) {
     auto state = makeStoreState();
-    auto store = issueStore(state);
+    auto store = dispatchStoreToRs(state);
     auto unit = makeStoreUnit(store);
 
     const auto result = ExecuteStoreAccess::perform(unit, 0, state);
@@ -61,14 +61,14 @@ TEST(ExecuteStoreAccessTest, ReplaysYoungerHostCommStoreUntilRobHead) {
     auto state = makeStoreState();
     state.memory->setHostCommAddresses(0x200, 0x240);
     ASSERT_NE(state.reorder_buffer->allocate_entry(makeStoreInstruction(), 0x100, 1), nullptr);
-    auto store = issueStore(state, 0x104, 2);
+    auto store = dispatchStoreToRs(state, 0x104, 2);
     ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::STORE), 0);
     auto unit = makeStoreUnit(store);
 
     const auto result = ExecuteStoreAccess::perform(unit, 0, state);
 
     EXPECT_EQ(result, ExecuteStoreAccess::Result::ReplayedForHostComm);
-    EXPECT_EQ(store->get_status(), DynamicInst::Status::ISSUED);
+    EXPECT_EQ(store->get_status(), DynamicInst::Status::DISPATCHED);
     EXPECT_FALSE(unit.busy);
     EXPECT_EQ(unit.instruction, nullptr);
     EXPECT_TRUE(state.reservation_station->is_execution_unit_available(ExecutionUnitType::STORE));
@@ -84,7 +84,7 @@ TEST(ExecuteStoreAccessTest, MovesIssuedCacheMissToInflightQueue) {
     config.miss_penalty = 4;
     config.max_outstanding_misses = 1;
     state.l1d_cache = std::make_unique<NonBlockingCache>(config);
-    auto store = issueStore(state);
+    auto store = dispatchStoreToRs(state);
     ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::STORE), 0);
     auto unit = makeStoreUnit(store);
 
@@ -110,7 +110,7 @@ TEST(ExecuteStoreAccessTest, ReplaysWhenDCacheOutstandingLimitBlocksNewRequest) 
     config.max_outstanding_misses = 1;
     state.l1d_cache = std::make_unique<NonBlockingCache>(config);
     static_cast<void>(state.l1d_cache->access(state.memory, 0x100, 4, CacheAccessType::Read));
-    auto store = issueStore(state);
+    auto store = dispatchStoreToRs(state);
     ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::STORE), 0);
     auto unit = makeStoreUnit(store);
     unit.load_address = 0x300;
@@ -118,7 +118,7 @@ TEST(ExecuteStoreAccessTest, ReplaysWhenDCacheOutstandingLimitBlocksNewRequest) 
     const auto result = ExecuteStoreAccess::perform(unit, 0, state);
 
     EXPECT_EQ(result, ExecuteStoreAccess::Result::BlockedByDCacheOutstanding);
-    EXPECT_EQ(store->get_status(), DynamicInst::Status::ISSUED);
+    EXPECT_EQ(store->get_status(), DynamicInst::Status::DISPATCHED);
     EXPECT_FALSE(unit.busy);
     EXPECT_EQ(unit.instruction, nullptr);
     EXPECT_TRUE(state.reservation_station->is_execution_unit_available(ExecutionUnitType::STORE));

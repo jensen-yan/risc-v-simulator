@@ -56,7 +56,7 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 
 `--pipeline-view=FILE` 会在模拟结束后生成 HTML 流水线时序图（同时生成同名 `.txt` 文本版）。
 
-- 每条已提交指令一行，横轴为周期，用色块标注 F(Fetch)/D(Decode)/I(Issue)/E(Execute)/W(Writeback)/C(Commit) 各阶段
+- 每条已提交指令一行，横轴为周期，用色块标注 F(Fetch)/D(Decode)/Q(IQ/RS wait)/E(Execute)/W(Writeback)/C(Commit) 各阶段
 - 分支误预测指令标红，可从 instruction ID gap 看出 flush 规模
 - HTML 支持鼠标滚轮横滚、中键/Alt+左键拖拽平移
 - 文本版适合终端查看和程序化分析

@@ -24,7 +24,7 @@ DynamicInst::DynamicInst()
       has_branch_predict_meta_(false), branch_predict_meta_{},
       has_ras_checkpoint_(false), ras_checkpoint_{},
       control_recovered_early_(false),
-      fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
+      fetch_cycle_(0), decode_cycle_(0), dispatch_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
 }
 
@@ -47,7 +47,7 @@ DynamicInst::DynamicInst(const DecodedInstruction& decoded_info, uint64_t pc, ui
       has_branch_predict_meta_(false), branch_predict_meta_{},
       has_ras_checkpoint_(false), ras_checkpoint_{},
       control_recovered_early_(false),
-      fetch_cycle_(0), decode_cycle_(0), issue_cycle_(0), 
+      fetch_cycle_(0), decode_cycle_(0), dispatch_cycle_(0), 
       execute_cycle_(0), complete_cycle_(0), retire_cycle_(0) {
     
     initialize_from_decoded_instruction();
@@ -123,7 +123,7 @@ ExecutionUnitType DynamicInst::get_required_execution_unit() const {
 const char* DynamicInst::status_to_string(Status status) {
     switch (status) {
         case Status::ALLOCATED:  return "ALLOCATED";
-        case Status::ISSUED:     return "ISSUED";
+        case Status::DISPATCHED: return "DISPATCHED";
         case Status::EXECUTING:  return "EXECUTING";
         case Status::COMPLETED:  return "COMPLETED";
         case Status::RETIRED:    return "RETIRED";
@@ -253,7 +253,7 @@ void DynamicInst::dump_state() const {
     std::cout << "Timing Info:" << std::endl;
     std::cout << "  Fetch: " << fetch_cycle_ << std::endl;
     std::cout << "  Decode: " << decode_cycle_ << std::endl;
-    std::cout << "  Issue: " << issue_cycle_ << std::endl;
+    std::cout << "  Dispatch: " << dispatch_cycle_ << std::endl;
     std::cout << "  Execute: " << execute_cycle_ << std::endl;
     std::cout << "  Complete: " << complete_cycle_ << std::endl;
     std::cout << "  Retire: " << retire_cycle_ << std::endl;

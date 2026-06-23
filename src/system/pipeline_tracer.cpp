@@ -28,7 +28,7 @@ void PipelineTracer::recordCommittedInstruction(const DynamicInstPtr& inst,
     rec.disassembly = disassemble(decoded, inst->get_pc());
     rec.fetch_cycle = fetch_cycle;
     rec.decode_cycle = inst->get_decode_cycle();
-    rec.issue_cycle = inst->get_issue_cycle();
+    rec.dispatch_cycle = inst->get_dispatch_cycle();
     rec.execute_cycle = inst->get_execute_cycle();
     rec.complete_cycle = inst->get_complete_cycle();
     rec.retire_cycle = inst->get_retire_cycle();
@@ -186,7 +186,7 @@ bool PipelineTracer::generateText(const std::string& output_path) const {
 
     // 表头
     out << fmt::format("{:>6} {:>10} {:<30} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5}  {}\n",
-                       "ID", "PC", "Instruction", "F", "D", "I", "E", "W", "C", "Flags");
+                       "ID", "PC", "Instruction", "F", "D", "Q", "E", "W", "C", "Flags");
     out << std::string(110, '-') << "\n";
 
     for (const auto& r : records_) {
@@ -200,7 +200,7 @@ bool PipelineTracer::generateText(const std::string& output_path) const {
         // 显示各阶段周期和持续时间
         out << fmt::format("{:>6} {:>08x}   {:<30} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5}  {}\n",
                            r.instruction_id, r.pc, r.disassembly,
-                           r.fetch_cycle, r.decode_cycle, r.issue_cycle,
+                           r.fetch_cycle, r.decode_cycle, r.dispatch_cycle,
                            r.execute_cycle, r.complete_cycle, r.retire_cycle,
                            flags);
         if (r.caused_flush) {
@@ -266,7 +266,7 @@ td.label-col:hover { background: #313244; }
 .cell { width: 26px; height: 22px; }
 .F { background: #89b4fa; color: #1e1e2e; font-weight: bold; }
 .D { background: #a6e3a1; color: #1e1e2e; font-weight: bold; }
-.I { background: #f9e2af; color: #1e1e2e; font-weight: bold; }
+.Q { background: #f9e2af; color: #1e1e2e; font-weight: bold; }
 .E { background: #fab387; color: #1e1e2e; font-weight: bold; }
 .W { background: #cba6f7; color: #1e1e2e; font-weight: bold; }
 .C { background: #f38ba8; color: #1e1e2e; font-weight: bold; }
@@ -291,7 +291,7 @@ tr:hover td.label-col { background: #313244 !important; }
   <div class="legend">
     <span><div class="box F"></div>Fetch</span>
     <span><div class="box D"></div>Decode</span>
-    <span><div class="box I"></div>Issue</span>
+    <span><div class="box Q"></div>IQ/RS wait</span>
     <span><div class="box E"></div>Execute</span>
     <span><div class="box W"></div>Writeback</span>
     <span><div class="box C"></div>Commit</span>
@@ -350,8 +350,8 @@ tr:hover td.label-col { background: #313244 !important; }
         struct StageRange { uint64_t start; uint64_t end; const char* label; const char* cls; };
         std::vector<StageRange> stages;
         stages.push_back({rec.fetch_cycle, rec.decode_cycle, "F", "F"});
-        stages.push_back({rec.decode_cycle, rec.issue_cycle, "D", "D"});
-        stages.push_back({rec.issue_cycle, rec.execute_cycle, "I", "I"});
+        stages.push_back({rec.decode_cycle, rec.dispatch_cycle, "D", "D"});
+        stages.push_back({rec.dispatch_cycle, rec.execute_cycle, "Q", "Q"});
         stages.push_back({rec.execute_cycle, rec.complete_cycle, "E", "E"});
         stages.push_back({rec.complete_cycle, rec.retire_cycle, "W", "W"});
         stages.push_back({rec.retire_cycle, rec.retire_cycle + 1, "C", "C"});

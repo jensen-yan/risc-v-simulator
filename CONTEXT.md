@@ -61,6 +61,10 @@ _避免使用_：把原始 `CPUState` 当作阶段接口传入
 指令完成重命名后进入 Reservation Station / Issue Queue 的后端边界；当前代码中这部分主要由 `DispatchStage` 完成。
 _避免使用_：把 Dispatch 用来指代从 Issue Queue 选择 ready 指令并送入执行单元
 
+**Operand Binding（操作数绑定）**：
+将动态指令的逻辑源操作数解析为后端可跟踪的源操作数描述，包括物理寄存器标签、寄存器文件类型、就绪状态，以及已就绪时的操作数值。
+_避免使用_：把操作数绑定混同为完整的 Rename、Issue 或 issue 后寄存器文件读取
+
 **Issue / Ready Select（发射 / 就绪选择）**：
 从 Reservation Station / Issue Queue 中选择操作数已就绪且资源可用的指令，并让它开始占用对应执行单元的边界；当前代码中这部分主要由 `ReservationStation::issue_ready_instructions` 和 `ExecuteStage` 完成。
 _避免使用_：把进入 Reservation Station / Issue Queue 也叫 Issue
@@ -144,5 +148,6 @@ _避免使用_：blacklist entry
 - 用 **Structural Constraint Simulator** 表示预期的 OOO 建模精度；不要描述成完整 RTL 复刻或纯功能模拟器。
 - 用 **Completion Fabric** 表示结果完成边界；Common Data Bus 只用于指代遗留实现或迁移细节。
 - 用 **Completion Backpressure** 表示完成带宽导致已完成执行单元停住；不要把它建模成永远可用的结果队列。
+- 用 **Operand Binding** 表示逻辑源操作数变成物理 tag、ready 状态和值的后端边界；不要把它描述成 issue 后读取寄存器文件。
 - 用 **Address Translation** 表示 fetch/load/store 的地址翻译边界；**SV39 Page Walker** 只表示边界内部的 Sv39 页表遍历。
 - 用 **DiffTest** 表示提交时参考比较，不用于普通单元测试或 benchmark 结果检查。

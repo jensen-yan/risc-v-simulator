@@ -17,6 +17,14 @@ enum class RegisterFileKind : uint8_t {
     FloatingPoint,
 };
 
+// 源操作数绑定：逻辑源寄存器在后端被解析后的 tag/ready/value 描述。
+struct OperandBinding {
+    RegisterFileKind kind = RegisterFileKind::None;
+    PhysRegNum physical_reg = 0;
+    bool ready = true;
+    uint64_t value = 0;
+};
+
 // 重排序缓冲表项编号
 using ROBEntry = uint16_t;
 

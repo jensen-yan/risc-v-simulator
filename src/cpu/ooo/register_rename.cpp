@@ -1,9 +1,82 @@
 #include "cpu/ooo/register_rename.h"
 #include "common/debug_types.h"
+#include "core/instruction_executor.h"
 #include <cassert>
 #include <set>
 
 namespace riscv {
+
+namespace {
+
+constexpr uint8_t kFpFunct5Shift = 2;
+
+uint8_t fpFunct5(const DecodedInstruction& decoded_info) {
+    return static_cast<uint8_t>(static_cast<uint8_t>(decoded_info.funct7) >> kFpFunct5Shift);
+}
+
+bool isFusedFpInstruction(const DecodedInstruction& decoded_info) {
+    return decoded_info.opcode == Opcode::FMADD ||
+           decoded_info.opcode == Opcode::FMSUB ||
+           decoded_info.opcode == Opcode::FNMSUB ||
+           decoded_info.opcode == Opcode::FNMADD;
+}
+
+RegisterFileKind fpSource1Kind(const DecodedInstruction& decoded_info) {
+    if (decoded_info.opcode == Opcode::LOAD_FP || decoded_info.opcode == Opcode::STORE_FP) {
+        return RegisterFileKind::Integer;
+    }
+    if (isFusedFpInstruction(decoded_info)) {
+        return RegisterFileKind::FloatingPoint;
+    }
+    if (decoded_info.opcode != Opcode::OP_FP) {
+        return RegisterFileKind::None;
+    }
+    switch (fpFunct5(decoded_info)) {
+        case 0x1A:
+        case 0x1E:
+            return RegisterFileKind::Integer;
+        default:
+            return RegisterFileKind::FloatingPoint;
+    }
+}
+
+RegisterFileKind fpSource2Kind(const DecodedInstruction& decoded_info) {
+    if (decoded_info.opcode == Opcode::STORE_FP || isFusedFpInstruction(decoded_info)) {
+        return RegisterFileKind::FloatingPoint;
+    }
+    if (decoded_info.opcode != Opcode::OP_FP) {
+        return RegisterFileKind::None;
+    }
+    switch (fpFunct5(decoded_info)) {
+        case 0x00:
+        case 0x01:
+        case 0x02:
+        case 0x03:
+        case 0x04:
+        case 0x05:
+        case 0x14:
+            return RegisterFileKind::FloatingPoint;
+        default:
+            return RegisterFileKind::None;
+    }
+}
+
+RegisterFileKind fpSource3Kind(const DecodedInstruction& decoded_info) {
+    return isFusedFpInstruction(decoded_info)
+               ? RegisterFileKind::FloatingPoint
+               : RegisterFileKind::None;
+}
+
+RegisterFileKind fpDestinationKind(const DecodedInstruction& decoded_info) {
+    if (decoded_info.opcode == Opcode::STORE_FP) {
+        return RegisterFileKind::None;
+    }
+    return InstructionExecutor::isFPIntegerDestination(decoded_info)
+               ? RegisterFileKind::Integer
+               : RegisterFileKind::FloatingPoint;
+}
+
+}  // namespace
 
 RegisterRenameUnit::RegisterRenameUnit()
     : rename_table(NUM_LOGICAL_REGS),
@@ -114,9 +187,10 @@ RegisterRenameUnit::SourceLookupResult RegisterRenameUnit::lookup_source(Registe
         return result;
     }
 
-    result.reg = rename_ref[logical_reg].physical_reg;
-    result.ready = physical_ref[result.reg].ready;
-    result.value = physical_ref[result.reg].value;
+    result.kind = kind;
+    result.physical_reg = rename_ref[logical_reg].physical_reg;
+    result.ready = physical_ref[result.physical_reg].ready;
+    result.value = physical_ref[result.physical_reg].value;
     return result;
 }
 
@@ -156,10 +230,25 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
     RenameResult result{};
     result.success = false;
 
+    if (InstructionExecutor::isFloatingPointInstruction(instruction)) {
+        result.src1 = lookup_source(fpSource1Kind(instruction), instruction.rs1);
+        result.src2 = lookup_source(fpSource2Kind(instruction), instruction.rs2);
+        result.src3 = lookup_source(fpSource3Kind(instruction), instruction.rs3);
+        result.dest_kind = fpDestinationKind(instruction);
+
+        const auto dest = allocate_destination(result.dest_kind, instruction.rd);
+        if (!dest.success) {
+            LOGT(RENAME, "rename failed for fp instruction: no free destination register");
+            return result;
+        }
+        result.dest_reg = dest.dest_reg;
+        result.success = true;
+        rename_count++;
+        return result;
+    }
+
     const auto src1 = lookup_source(RegisterFileKind::Integer, instruction.rs1);
-    result.src1_reg = src1.reg;
-    result.src1_ready = src1.ready;
-    result.src1_value = src1.value;
+    result.src1 = src1;
 
     bool needs_src2 = false;
     switch (instruction.type) {
@@ -182,17 +271,15 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
 
     if (needs_src2) {
         const auto src2 = lookup_source(RegisterFileKind::Integer, instruction.rs2);
-        result.src2_reg = src2.reg;
-        result.src2_ready = src2.ready;
-        result.src2_value = src2.value;
+        result.src2 = src2;
     } else {
-        result.src2_reg = 0;
-        result.src2_ready = true;
-        result.src2_value = 0;
+        result.src2 = OperandBinding{RegisterFileKind::Integer, 0, true, 0};
     }
+    result.src3 = OperandBinding{RegisterFileKind::None, 0, true, 0};
 
     const bool needs_dest_reg = (instruction.rd != 0);
     if (needs_dest_reg) {
+        result.dest_kind = RegisterFileKind::Integer;
         const PhysRegNum old_physical_reg = rename_table[instruction.rd].physical_reg;
         const auto dest = allocate_destination(RegisterFileKind::Integer, instruction.rd);
         if (!dest.success) {
@@ -202,18 +289,20 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
         result.dest_reg = dest.dest_reg;
 
         if (instruction.rs1 == instruction.rd && instruction.rs1 < NUM_LOGICAL_REGS) {
-            result.src1_reg = old_physical_reg;
-            result.src1_ready = physical_registers[old_physical_reg].ready;
-            result.src1_value = physical_registers[old_physical_reg].value;
+            result.src1.kind = RegisterFileKind::Integer;
+            result.src1.physical_reg = old_physical_reg;
+            result.src1.ready = physical_registers[old_physical_reg].ready;
+            result.src1.value = physical_registers[old_physical_reg].value;
             LOGT(RENAME, "self-dependency fix: x%d rs1 uses old p%d, dst uses new p%d",
                  static_cast<int>(instruction.rd),
                  static_cast<int>(old_physical_reg),
                  static_cast<int>(result.dest_reg));
         }
         if (instruction.rs2 == instruction.rd && instruction.rs2 < NUM_LOGICAL_REGS) {
-            result.src2_reg = old_physical_reg;
-            result.src2_ready = physical_registers[old_physical_reg].ready;
-            result.src2_value = physical_registers[old_physical_reg].value;
+            result.src2.kind = RegisterFileKind::Integer;
+            result.src2.physical_reg = old_physical_reg;
+            result.src2.ready = physical_registers[old_physical_reg].ready;
+            result.src2.value = physical_registers[old_physical_reg].value;
             LOGT(RENAME, "self-dependency fix: x%d rs2 uses old p%d, dst uses new p%d",
                  static_cast<int>(instruction.rd),
                  static_cast<int>(old_physical_reg),
@@ -225,6 +314,7 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
              static_cast<int>(old_physical_reg),
              static_cast<int>(result.dest_reg));
     } else {
+        result.dest_kind = RegisterFileKind::None;
         result.dest_reg = 0;
     }
 

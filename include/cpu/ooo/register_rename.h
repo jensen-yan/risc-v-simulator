@@ -66,21 +66,15 @@ public:
     
     // 重命名操作
     struct RenameResult {
-        PhysRegNum src1_reg;
-        PhysRegNum src2_reg;  
+        OperandBinding src1;
+        OperandBinding src2;
+        OperandBinding src3;
+        RegisterFileKind dest_kind = RegisterFileKind::None;
         PhysRegNum dest_reg;
         bool success;
-        bool src1_ready;
-        bool src2_ready;
-        uint64_t src1_value;
-        uint64_t src2_value;
     };
 
-    struct SourceLookupResult {
-        PhysRegNum reg = 0;
-        bool ready = true;
-        uint64_t value = 0;
-    };
+    using SourceLookupResult = OperandBinding;
 
     struct DestinationAllocateResult {
         PhysRegNum dest_reg = 0;

@@ -55,11 +55,11 @@ TEST_F(RegisterRenameTest, WAWHazardElimination) {
         << "两个写入x1的指令应该分配不同的物理寄存器";
     
     // 验证第3条指令读取的是第2条指令的结果
-    EXPECT_EQ(results[2].src1_reg, results[1].dest_reg)
+    EXPECT_EQ(results[2].src1.physical_reg, results[1].dest_reg)
         << "第3条指令应该读取第2条指令的物理寄存器";
     
     // 验证第3条指令的源寄存器1还没准备好（因为第2条指令还没执行完）
-    EXPECT_FALSE(results[2].src1_ready) 
+    EXPECT_FALSE(results[2].src1.ready)
         << "第3条指令的源寄存器1应该还没准备好";
 }
 
@@ -88,11 +88,11 @@ TEST_F(RegisterRenameTest, WARHazardElimination) {
     EXPECT_TRUE(result2.success);
     
     // 验证第2条指令能正确读取第1条指令的结果
-    EXPECT_EQ(result2.src1_reg, result1.dest_reg)
+    EXPECT_EQ(result2.src1.physical_reg, result1.dest_reg)
         << "第2条指令应该读取第1条指令的物理寄存器";
-    EXPECT_TRUE(result2.src1_ready)
+    EXPECT_TRUE(result2.src1.ready)
         << "第2条指令的源寄存器1应该准备好";
-    EXPECT_EQ(result2.src1_value, 0x12345678)
+    EXPECT_EQ(result2.src1.value, 0x12345678)
         << "第2条指令应该读取到正确的值";
     
     // 执行第3条指令
@@ -102,6 +102,39 @@ TEST_F(RegisterRenameTest, WARHazardElimination) {
     // 验证WAR冒险消除：第3条指令分配了新的物理寄存器
     EXPECT_NE(result3.dest_reg, result1.dest_reg)
         << "第3条指令应该分配新的物理寄存器给x1";
+}
+
+TEST_F(RegisterRenameTest, FloatingPointFmaBindsThreeFpSources) {
+    rename_unit.update_architecture_register(RegisterFileKind::FloatingPoint, 1, 0x11);
+    rename_unit.update_architecture_register(RegisterFileKind::FloatingPoint, 2, 0x22);
+    rename_unit.update_architecture_register(RegisterFileKind::FloatingPoint, 3, 0x33);
+
+    auto inst = createInstruction(InstructionType::R_TYPE, 4, 1, 2);
+    inst.opcode = Opcode::FMADD;
+    inst.rs3 = 3;
+
+    auto result = rename_unit.rename_instruction(inst);
+    ASSERT_TRUE(result.success);
+
+    EXPECT_EQ(result.src1.kind, RegisterFileKind::FloatingPoint);
+    EXPECT_EQ(result.src1.physical_reg, 1);
+    EXPECT_TRUE(result.src1.ready);
+    EXPECT_EQ(result.src1.value, 0x11);
+
+    EXPECT_EQ(result.src2.kind, RegisterFileKind::FloatingPoint);
+    EXPECT_EQ(result.src2.physical_reg, 2);
+    EXPECT_TRUE(result.src2.ready);
+    EXPECT_EQ(result.src2.value, 0x22);
+
+    EXPECT_EQ(result.src3.kind, RegisterFileKind::FloatingPoint);
+    EXPECT_EQ(result.src3.physical_reg, 3);
+    EXPECT_TRUE(result.src3.ready);
+    EXPECT_EQ(result.src3.value, 0x33);
+
+    EXPECT_EQ(result.dest_kind, RegisterFileKind::FloatingPoint);
+    EXPECT_NE(result.dest_reg, 4);
+    EXPECT_FALSE(rename_unit.is_physical_register_ready(RegisterFileKind::FloatingPoint,
+                                                        result.dest_reg));
 }
 
 // 测试3：物理寄存器分配
@@ -186,9 +219,9 @@ TEST_F(RegisterRenameTest, CheckpointRestoreRollsBackYoungerRenameState) {
     auto after_restore = createInstruction(InstructionType::R_TYPE, 3, 1, 2);
     auto after_restore_result = rename_unit.rename_instruction(after_restore);
     ASSERT_TRUE(after_restore_result.success);
-    EXPECT_EQ(after_restore_result.src1_reg, older_result.dest_reg)
+    EXPECT_EQ(after_restore_result.src1.physical_reg, older_result.dest_reg)
         << "older 指令的 rename 映射应在恢复后保留";
-    EXPECT_EQ(after_restore_result.src2_reg, 2)
+    EXPECT_EQ(after_restore_result.src2.physical_reg, 2)
         << "被回滚的 younger 映射不应残留在 rename table 中";
 }
 
@@ -212,7 +245,7 @@ TEST_F(RegisterRenameTest, CheckpointRestoreRecoversRenameMapAndFreeList) {
     auto consumer = createInstruction(InstructionType::R_TYPE, 6, 1, 7);
     auto consumer_result = rename_unit.rename_instruction(consumer);
     ASSERT_TRUE(consumer_result.success);
-    EXPECT_EQ(consumer_result.src1_reg, first_result.dest_reg)
+    EXPECT_EQ(consumer_result.src1.physical_reg, first_result.dest_reg)
         << "恢复 checkpoint 后，x1 应重新映射到较老路径的物理寄存器";
 }
 

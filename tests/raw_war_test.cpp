@@ -40,7 +40,7 @@ TEST_F(RAWWARTest, SelfDependencyTest) {
     // 验证自依赖处理
     // 源寄存器应该使用旧的物理寄存器
     // 目标寄存器应该使用新的物理寄存器
-    EXPECT_NE(result.dest_reg, result.src1_reg) 
+    EXPECT_NE(result.dest_reg, result.src1.physical_reg)
         << "自依赖指令中，源和目标应该使用不同的物理寄存器";
     
     // 模拟执行完成
@@ -64,11 +64,11 @@ TEST_F(RAWWARTest, LoopSelfDependencyTest) {
         EXPECT_TRUE(result.success);
         
         // 关键验证：每次循环都应该正确处理自依赖
-        EXPECT_NE(result.dest_reg, result.src1_reg) 
+        EXPECT_NE(result.dest_reg, result.src1.physical_reg)
             << "第" << (i + 1) << "次循环中自依赖处理失败";
         
         // 模拟执行：新值 = 旧值 + 1
-        uint32_t old_value = rename_unit.get_physical_register_value(result.src1_reg);
+        uint32_t old_value = rename_unit.get_physical_register_value(result.src1.physical_reg);
         rename_unit.update_physical_register(result.dest_reg, old_value + 1, 1);
         rename_unit.commit_instruction(4, result.dest_reg);
     }
@@ -76,7 +76,7 @@ TEST_F(RAWWARTest, LoopSelfDependencyTest) {
     // 验证最终结果
     // 经过两次加1操作，tp应该为2
     auto final_mapping = rename_unit.rename_instruction(createInstruction(InstructionType::I_TYPE, 4, 4, 0, 0));
-    EXPECT_EQ(rename_unit.get_physical_register_value(final_mapping.src1_reg), 2u);
+    EXPECT_EQ(rename_unit.get_physical_register_value(final_mapping.src1.physical_reg), 2u);
 }
 
 // 测试更复杂的RAW/WAR依赖链
@@ -101,7 +101,7 @@ TEST_F(RAWWARTest, ComplexDependencyChainTest) {
     DecodedInstruction addi1_inst = createInstruction(InstructionType::I_TYPE, 4, 14, 0, 3);
     auto result2 = rename_unit.rename_instruction(addi1_inst);
     EXPECT_TRUE(result2.success);
-    EXPECT_EQ(result2.src1_reg, result1.dest_reg);  // 应该使用第1条指令的结果
+    EXPECT_EQ(result2.src1.physical_reg, result1.dest_reg);  // 应该使用第1条指令的结果
     rename_unit.update_physical_register(result2.dest_reg, 18, 1);
     rename_unit.commit_instruction(4, result2.dest_reg);
     
@@ -111,11 +111,11 @@ TEST_F(RAWWARTest, ComplexDependencyChainTest) {
     EXPECT_TRUE(result3.success);
     
     // 关键验证：源寄存器应该使用第1条指令的结果，而不是新的寄存器
-    EXPECT_EQ(result3.src1_reg, result1.dest_reg) 
+    EXPECT_EQ(result3.src1.physical_reg, result1.dest_reg)
         << "自依赖指令的源寄存器应该使用正确的旧值";
     
     // 验证新的目标寄存器与源寄存器不同
-    EXPECT_NE(result3.dest_reg, result3.src1_reg);
+    EXPECT_NE(result3.dest_reg, result3.src1.physical_reg);
     
     // 模拟执行
     rename_unit.update_physical_register(result3.dest_reg, 17, 1);
@@ -125,8 +125,8 @@ TEST_F(RAWWARTest, ComplexDependencyChainTest) {
     auto a4_mapping = rename_unit.rename_instruction(createInstruction(InstructionType::I_TYPE, 14, 14, 0, 0));
     auto tp_mapping = rename_unit.rename_instruction(createInstruction(InstructionType::I_TYPE, 4, 4, 0, 0));
     
-    EXPECT_EQ(rename_unit.get_physical_register_value(a4_mapping.src1_reg), 17u);
-    EXPECT_EQ(rename_unit.get_physical_register_value(tp_mapping.src1_reg), 18u);
+    EXPECT_EQ(rename_unit.get_physical_register_value(a4_mapping.src1.physical_reg), 17u);
+    EXPECT_EQ(rename_unit.get_physical_register_value(tp_mapping.src1.physical_reg), 18u);
 }
 
 // 测试边界情况：寄存器0的自依赖
@@ -139,7 +139,7 @@ TEST_F(RAWWARTest, ZeroRegisterSelfDependencyTest) {
     
     // x0应该始终映射到物理寄存器0
     EXPECT_EQ(result.dest_reg, 0u);
-    EXPECT_EQ(result.src1_reg, 0u);
+    EXPECT_EQ(result.src1.physical_reg, 0u);
     
     // 值应该始终为0
     EXPECT_EQ(rename_unit.get_physical_register_value(0), 0u);

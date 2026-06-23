@@ -40,14 +40,6 @@ public:
             return state_.reservation_station->dispatch_instruction(instruction);
         }
 
-        RegisterRenameUnit::SourceLookupResult lookupSource(RegisterFileKind kind,
-                                                            RegNum reg) const {
-            return state_.register_rename->lookup_source(kind, reg);
-        }
-        RegisterRenameUnit::DestinationAllocateResult allocateDestination(RegisterFileKind kind,
-                                                                          RegNum reg) {
-            return state_.register_rename->allocate_destination(kind, reg);
-        }
         RegisterRenameUnit::RenameResult renameInstruction(const DecodedInstruction& decoded) {
             return state_.register_rename->rename_instruction(decoded);
         }

@@ -247,6 +247,22 @@ public:
     void set_physical_src2_kind(RegisterFileKind kind) { physical_src2_kind_ = kind; }
     void set_physical_src3_kind(RegisterFileKind kind) { physical_src3_kind_ = kind; }
 
+    void bind_src1_operand(const OperandBinding& operand) {
+        set_physical_src1_kind(operand.kind);
+        set_physical_src1(operand.physical_reg);
+        set_src1_ready(operand.ready, operand.value);
+    }
+    void bind_src2_operand(const OperandBinding& operand) {
+        set_physical_src2_kind(operand.kind);
+        set_physical_src2(operand.physical_reg);
+        set_src2_ready(operand.ready, operand.value);
+    }
+    void bind_src3_operand(const OperandBinding& operand) {
+        set_physical_src3_kind(operand.kind);
+        set_physical_src3(operand.physical_reg);
+        set_src3_ready(operand.ready, operand.value);
+    }
+
     // ========== 操作数状态接口 ==========
     bool is_src1_ready() const { return src1_ready_; }
     bool is_src2_ready() const { return src2_ready_; }

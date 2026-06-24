@@ -44,6 +44,12 @@ struct CacheAccessResult {
 };
 
 struct NonBlockingCacheStats {
+    uint64_t accesses = 0;
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+    uint64_t pending_fill_merges = 0;
+    uint64_t dirty_evictions = 0;
+    uint64_t blocked_by_outstanding_limit = 0;
     uint64_t prefetch_requests = 0;
     uint64_t prefetch_issued = 0;
     uint64_t prefetch_useful_hits = 0;
@@ -82,6 +88,7 @@ public:
     void reset();
     void resetStats();
 
+    void setLowerCache(NonBlockingCache* lower_cache) { lower_cache_ = lower_cache; }
     bool hasMissInFlight() const { return !mshr_entries_.empty(); }
     size_t outstandingMissCount() const { return demandMshrCount(); }
     int missServiceRemainingCycles() const;
@@ -108,6 +115,7 @@ private:
     uint64_t lru_clock_ = 0;
     NonBlockingCacheStats stats_{};
     std::shared_ptr<MemoryTimingBackend> timing_backend_;
+    NonBlockingCache* lower_cache_ = nullptr;
 
     struct DeferredWriteback {
         bool valid = false;
@@ -132,7 +140,8 @@ private:
                                      uint64_t address,
                                      uint8_t size,
                                      CacheAccessType access_type,
-                                     bool model_timing);
+                                     bool model_timing,
+                                     MemoryTimingRequestKind fill_kind = MemoryTimingRequestKind::DemandRead);
 
     std::vector<uint64_t> enumerateLineAddresses(uint64_t address, uint8_t size) const;
     size_t lineToSetIndex(uint64_t line_address) const;
@@ -161,8 +170,14 @@ private:
     bool startLineFill(const std::shared_ptr<Memory>& memory,
                        uint64_t line_address,
                        bool& dirty_eviction,
-                       int& fill_latency_cycles);
+                       int& fill_latency_cycles,
+                       MemoryTimingRequestKind fill_kind);
     bool startPrefetchFill(const std::shared_ptr<Memory>& memory, uint64_t line_address);
+    bool lowerAccessLatencyCycles(const std::shared_ptr<Memory>& memory,
+                                  MemoryTimingRequestKind kind,
+                                  uint64_t line_address,
+                                  int& latency_cycles,
+                                  bool& dirty_eviction);
     int memoryAccessLatencyCycles(MemoryTimingRequestKind kind, uint64_t line_address);
     void completeMshrFill(const MshrEntry& entry);
     void completePendingFills(const std::vector<uint64_t>& line_addresses);

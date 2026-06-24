@@ -17,6 +17,13 @@ void drainMiss(NonBlockingCache& cache) {
     }
 }
 
+void drainMisses(NonBlockingCache& upper_cache, NonBlockingCache& lower_cache) {
+    while (upper_cache.hasMissInFlight() || lower_cache.hasMissInFlight()) {
+        upper_cache.tick();
+        lower_cache.tick();
+    }
+}
+
 NonBlockingCacheConfig makeDefaultConfig() {
     NonBlockingCacheConfig cfg;
     cfg.size_bytes = 32 * 1024;
@@ -65,6 +72,76 @@ TEST(NonBlockingCacheTest, InjectedTimingBackendSuppliesMissLatency) {
     const auto& stats = timing_backend->getStats();
     EXPECT_EQ(stats.read_requests, 1u);
     EXPECT_EQ(stats.total_latency_cycles, 7u);
+}
+
+TEST(NonBlockingCacheTest, LowerCacheHitSuppliesMissLatencyWithoutBackendAccess) {
+    auto memory = std::make_shared<Memory>(4096);
+    memory->writeWord(0x100, 0xDEADBEEF);
+
+    auto timing_backend = std::make_shared<FixedLatencyMemoryTimingBackend>(30);
+
+    auto l2_cfg = makeDefaultConfig();
+    l2_cfg.size_bytes = 256;
+    l2_cfg.associativity = 2;
+    l2_cfg.hit_latency = 8;
+    l2_cfg.max_outstanding_misses = 4;
+    NonBlockingCache l2_cache(l2_cfg, timing_backend);
+
+    const auto warm_l2 = l2_cache.access(memory, 0x100, 4, CacheAccessType::Read);
+    EXPECT_FALSE(warm_l2.blocked);
+    EXPECT_FALSE(warm_l2.hit);
+    drainMiss(l2_cache);
+    l2_cache.resetStats();
+
+    auto l1_cfg = makeDefaultConfig();
+    l1_cfg.hit_latency = 1;
+    NonBlockingCache l1_cache(l1_cfg, timing_backend);
+    l1_cache.setLowerCache(&l2_cache);
+
+    const auto l1_miss = l1_cache.access(memory, 0x100, 4, CacheAccessType::Read);
+
+    EXPECT_FALSE(l1_miss.blocked);
+    EXPECT_FALSE(l1_miss.hit);
+    EXPECT_EQ(l1_miss.latency_cycles, 9);
+    EXPECT_EQ(timing_backend->getStats().read_requests, 0u);
+    EXPECT_EQ(l2_cache.getStats().accesses, 1u);
+    EXPECT_EQ(l2_cache.getStats().hits, 1u);
+    EXPECT_EQ(l2_cache.getStats().misses, 0u);
+}
+
+TEST(NonBlockingCacheTest, LowerCacheMissFallsThroughToTimingBackend) {
+    auto memory = std::make_shared<Memory>(4096);
+    memory->writeWord(0x180, 0xAABBCCDD);
+
+    auto timing_backend = std::make_shared<FixedLatencyMemoryTimingBackend>(30);
+
+    auto l2_cfg = makeDefaultConfig();
+    l2_cfg.size_bytes = 256;
+    l2_cfg.associativity = 2;
+    l2_cfg.hit_latency = 8;
+    l2_cfg.max_outstanding_misses = 4;
+    NonBlockingCache l2_cache(l2_cfg, timing_backend);
+
+    auto l1_cfg = makeDefaultConfig();
+    l1_cfg.hit_latency = 1;
+    NonBlockingCache l1_cache(l1_cfg, timing_backend);
+    l1_cache.setLowerCache(&l2_cache);
+
+    const auto l1_miss = l1_cache.access(memory, 0x180, 4, CacheAccessType::Read);
+
+    EXPECT_FALSE(l1_miss.blocked);
+    EXPECT_FALSE(l1_miss.hit);
+    EXPECT_EQ(l1_miss.latency_cycles, 39);
+    EXPECT_EQ(timing_backend->getStats().read_requests, 1u);
+    EXPECT_EQ(timing_backend->getStats().total_latency_cycles, 30u);
+    EXPECT_EQ(l2_cache.getStats().accesses, 1u);
+    EXPECT_EQ(l2_cache.getStats().hits, 0u);
+    EXPECT_EQ(l2_cache.getStats().misses, 1u);
+
+    drainMisses(l1_cache, l2_cache);
+    const auto l1_hit = l1_cache.access(memory, 0x180, 4, CacheAccessType::Read);
+    EXPECT_TRUE(l1_hit.hit);
+    EXPECT_EQ(l1_hit.latency_cycles, 1);
 }
 
 TEST(NonBlockingCacheTest, DirtyEvictionAfterCommittedStore) {

@@ -54,7 +54,7 @@ cmake --build build-dramsim3 -j
 ./build/risc-v-sim --ooo --memory-backend=fixed --fixed-memory-latency=40 -e program.elf
 ```
 
-注意：DRAMSim3 在本仓库中只作为 OOO cache miss / prefetch / dirty writeback 的 timing backend；功能数据仍由 `Memory` 维护。第一版后端按请求同步 tick 到 DRAMSim3 callback 完成，用于获得 DDR ini 驱动的访问延迟；完整异步 MSHR completion 和 L2/L3 cache hierarchy 属于后续重构。
+注意：DRAMSim3 在本仓库中只作为 OOO shared L2 miss / prefetch / dirty writeback 的 timing backend；功能数据仍由 `Memory` 维护。当前 cache hierarchy 是 `L1I/L1D -> shared L2 -> MemoryTimingBackend`，L2 负责驻留与时序，不替代 `Memory` 做功能数据源。第一版 DRAMSim3 后端按请求同步 tick 到 callback 完成，用于获得 DDR ini 驱动的访问延迟；完整异步 MSHR completion 和 L3 cache hierarchy 属于后续重构。
 
 ## 使用方法
 
@@ -219,6 +219,7 @@ python3 ./tools/benchmarks/run_checkpoint_batch.py \
 - list 文件默认只消费前两列：`entry_name` 与 `workload/slice_id`
 - 每个切片独立输出到 `output_dir/<entry_name>/`
 - 每个切片额外保留 `command.txt`、`stdout.log`、`stderr.log`
+- 使用 `--extra-sim-arg=--memory-backend=dramsim3` 且未显式传 `--dramsim3-output-dir` 时，批跑器自动使用 `output_dir/<entry_name>/dramsim3/`
 - 批次根目录生成：
   - `batch_summary.csv`
   - `batch_summary.json`
@@ -254,8 +255,10 @@ python3 ./tools/benchmarks/run_checkpoint_batch.py \
   --output-dir /tmp/spec06-dramsim3 \
   --cpu-mode ooo \
   --jobs 8 \
-  --extra-sim-arg=--memory-backend=dramsim3 \
-  --extra-sim-arg=--dramsim3-output-dir=/tmp/spec06-dramsim3/ddr
+  --warmup-instructions 20000000 \
+  --measure-instructions 20000000 \
+  --cluster-config /nfs/home/share/gem5_ci/spec06_cpts/gcc15/gcc15-spec06-0.3.json \
+  --extra-sim-arg=--memory-backend=dramsim3
 ```
 
 ## RISCOF 架构测试（DUT vs Spike）

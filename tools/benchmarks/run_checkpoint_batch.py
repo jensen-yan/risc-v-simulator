@@ -123,6 +123,14 @@ def load_cluster_weights(cluster_path: Optional[Path]) -> Dict[Tuple[str, str], 
     return weights
 
 
+def uses_dramsim3_backend(extra_args: Sequence[str]) -> bool:
+    return any(arg in ("--memory-backend=dramsim3", "--mem-backend=dramsim3") for arg in extra_args)
+
+
+def has_dramsim3_output_dir(extra_args: Sequence[str]) -> bool:
+    return any(arg.startswith("--dramsim3-output-dir=") for arg in extra_args)
+
+
 def build_simulator_command(args: argparse.Namespace, checkpoint_path: Path, output_dir: Path) -> List[str]:
     command = [
         str(args.simulator),
@@ -141,7 +149,10 @@ def build_simulator_command(args: argparse.Namespace, checkpoint_path: Path, out
         command.append("--checkpoint-restorer=" + str(args.checkpoint_restorer))
     if args.checkpoint_recipe:
         command.append("--checkpoint-recipe=" + str(args.checkpoint_recipe))
-    for extra_arg in args.extra_sim_arg:
+    extra_args = list(args.extra_sim_arg)
+    if uses_dramsim3_backend(extra_args) and not has_dramsim3_output_dir(extra_args):
+        extra_args.append("--dramsim3-output-dir=" + str(output_dir / "dramsim3"))
+    for extra_arg in extra_args:
         command.append(extra_arg)
     return command
 

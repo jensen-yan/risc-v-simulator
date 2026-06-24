@@ -69,21 +69,22 @@ flowchart TB
 
 `Memory` 是功能存储：负责 ELF/checkpoint 恢复后的字节读写、越界检查和 tohost/fromhost 地址。DDR、排队、row/bank/channel 这些性能时序不放进 `Memory`。
 
-OOO 路径通过 `MemoryTimingBackend` 表达 core 外部的内存时序。默认后端是固定延迟；可选 DRAMSim3 后端只接在 L1I/L1D miss fill、prefetch 和 dirty writeback 下游，功能数据仍从 `Memory` 取。
+OOO 路径通过 `MemoryTimingBackend` 表达 core 外部的内存时序。L1I/L1D miss 会先访问一个 unified shared L2；L2 miss 再进入固定延迟或 DRAMSim3 后端。功能数据仍从 `Memory` 取，L2 目前只建模驻留与时序。
 
 ```mermaid
 flowchart LR
   OOO["OutOfOrderCPU"] --> L1I["L1I NonBlockingCache"]
   OOO --> L1D["L1D NonBlockingCache"]
-  L1I --> Timing["MemoryTimingBackend"]
-  L1D --> Timing
+  L1I --> L2["Shared L2 NonBlockingCache"]
+  L1D --> L2
+  L2 --> Timing["MemoryTimingBackend"]
   Timing --> Fixed["FixedLatency"]
   Timing --> DRAM["DRAMSim3 DDR timing"]
   L1I --> Mem["Memory functional bytes"]
   L1D --> Mem
 ```
 
-当前边界是 `L1 -> memory timing backend -> Memory`。如果目标继续逼近 gem5/SPEC06 分数，下一层应优先补最小 L2，再考虑 L3；不要把 L2/L3 行为混进 DRAMSim3 backend。
+当前边界是 `L1 -> L2 -> memory timing backend -> Memory`。如果目标继续逼近 gem5/SPEC06 分数，下一层再考虑 L3 和更完整的 cache writeback/coherence；不要把 L3 或 DDR 行为混进 `Memory`。
 
 ## 主执行路径
 

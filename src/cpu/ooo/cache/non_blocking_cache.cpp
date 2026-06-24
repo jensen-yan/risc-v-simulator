@@ -266,7 +266,8 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
                                                 uint64_t address,
                                                 uint8_t size,
                                                 CacheAccessType access_type,
-                                                bool model_timing) {
+                                                bool model_timing,
+                                                MemoryTimingRequestKind fill_kind) {
     (void)access_type;
     CacheAccessResult result{};
 
@@ -284,6 +285,9 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
     }
 
     const auto line_addresses = enumerateLineAddresses(address, size);
+    if (model_timing) {
+        stats_.accesses++;
+    }
     const bool all_lines_hit = wouldReadyHit(address, size);
     const int pending_fill_cycles = model_timing ? pendingFillRemainingCycles(line_addresses) : 0;
     if (pending_fill_cycles > 0) {
@@ -310,6 +314,7 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
                 if (reserved == nullptr) {
                     result.blocked = true;
                     result.blocked_by_outstanding_limit = true;
+                    stats_.blocked_by_outstanding_limit++;
                     return result;
                 }
                 touchLine(*reserved);
@@ -322,6 +327,11 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
         result.latency_cycles = pending_fill_cycles;
         result.merged_pending_fill = true;
         result.dirty_eviction = dirty_eviction;
+        stats_.misses++;
+        stats_.pending_fill_merges++;
+        if (dirty_eviction) {
+            stats_.dirty_evictions++;
+        }
         return result;
     }
 
@@ -340,6 +350,7 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
             if (model_timing && !hasAllocatableLine(line_address)) {
                 result.blocked = true;
                 result.blocked_by_outstanding_limit = true;
+                stats_.blocked_by_outstanding_limit++;
                 return result;
             }
         }
@@ -349,6 +360,7 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
                 result.blocked = true;
                 result.blocked_by_outstanding_limit = true;
                 result.blocked_hit = false;
+                stats_.blocked_by_outstanding_limit++;
                 return result;
             }
         }
@@ -372,9 +384,10 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
         overall_hit = false;
         if (model_timing) {
             int line_fill_latency = 0;
-            if (!startLineFill(memory, line_address, dirty_eviction, line_fill_latency)) {
+            if (!startLineFill(memory, line_address, dirty_eviction, line_fill_latency, fill_kind)) {
                 result.blocked = true;
                 result.blocked_by_outstanding_limit = true;
+                stats_.blocked_by_outstanding_limit++;
                 return result;
             }
             miss_latency_cycles = std::max(miss_latency_cycles, line_fill_latency);
@@ -395,10 +408,17 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
     result.dirty_eviction = dirty_eviction;
     if (overall_hit) {
         result.latency_cycles = config_.hit_latency;
+        if (model_timing) {
+            stats_.hits++;
+        }
     } else if (model_timing && miss_latency_cycles > 0) {
         result.latency_cycles = miss_latency_cycles;
+        stats_.misses++;
     } else {
         result.latency_cycles = config_.hit_latency + config_.miss_penalty;
+    }
+    if (model_timing && dirty_eviction) {
+        stats_.dirty_evictions++;
     }
 
     if (model_timing && !overall_hit) {
@@ -653,11 +673,19 @@ NonBlockingCache::CacheLine* NonBlockingCache::installLine(const std::shared_ptr
 bool NonBlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
                                   uint64_t line_address,
                                   bool& dirty_eviction,
-                                  int& fill_latency_cycles) {
+                                  int& fill_latency_cycles,
+                                  MemoryTimingRequestKind fill_kind) {
     if (findMshrEntry(line_address) != nullptr) {
         fill_latency_cycles = pendingFillRemainingCycles({line_address});
         return true;
     }
+
+    int lower_latency_cycles = 0;
+    bool lower_dirty_eviction = false;
+    if (!lowerAccessLatencyCycles(memory, fill_kind, line_address, lower_latency_cycles, lower_dirty_eviction)) {
+        return false;
+    }
+    dirty_eviction = dirty_eviction || lower_dirty_eviction;
 
     DeferredWriteback victim_writeback;
     CacheLine* reserved = installLine(
@@ -669,8 +697,7 @@ bool NonBlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
     touchLine(*reserved);
     MshrEntry entry{};
     entry.line_address = line_address;
-    fill_latency_cycles =
-        config_.hit_latency + memoryAccessLatencyCycles(MemoryTimingRequestKind::DemandRead, line_address);
+    fill_latency_cycles = config_.hit_latency + lower_latency_cycles;
     entry.remaining_cycles = fill_latency_cycles;
     entry.has_demand_waiter = true;
     entry.mark_prefetched_on_fill = false;
@@ -691,13 +718,44 @@ bool NonBlockingCache::startPrefetchFill(const std::shared_ptr<Memory>& memory, 
 
     MshrEntry entry{};
     entry.line_address = line_address;
-    entry.remaining_cycles =
-        config_.hit_latency + memoryAccessLatencyCycles(MemoryTimingRequestKind::PrefetchRead, line_address);
+    int lower_latency_cycles = 0;
+    bool lower_dirty_eviction = false;
+    if (!lowerAccessLatencyCycles(
+            memory, MemoryTimingRequestKind::PrefetchRead, line_address, lower_latency_cycles, lower_dirty_eviction)) {
+        return false;
+    }
+    entry.remaining_cycles = config_.hit_latency + lower_latency_cycles;
     entry.has_demand_waiter = false;
     entry.mark_prefetched_on_fill = true;
     entry.memory = memory;
     entry.fill_data = readLineDataFromMemory(memory, line_address);
     mshr_entries_.push_back(std::move(entry));
+    return true;
+}
+
+bool NonBlockingCache::lowerAccessLatencyCycles(const std::shared_ptr<Memory>& memory,
+                                                MemoryTimingRequestKind kind,
+                                                uint64_t line_address,
+                                                int& latency_cycles,
+                                                bool& dirty_eviction) {
+    if (!lower_cache_) {
+        latency_cycles = memoryAccessLatencyCycles(kind, line_address);
+        return true;
+    }
+
+    const auto result = lower_cache_->ensureResident(
+        memory,
+        lineToBaseAddress(line_address),
+        /*size=*/1,
+        CacheAccessType::Read,
+        /*model_timing=*/true,
+        kind);
+    if (result.blocked) {
+        return false;
+    }
+
+    latency_cycles = result.latency_cycles;
+    dirty_eviction = result.dirty_eviction;
     return true;
 }
 

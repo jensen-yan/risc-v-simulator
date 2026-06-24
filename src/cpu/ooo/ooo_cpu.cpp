@@ -46,6 +46,20 @@ NonBlockingCacheConfig createDefaultL1CacheConfig() {
     return cfg;
 }
 
+NonBlockingCacheConfig createDefaultL2CacheConfig() {
+    NonBlockingCacheConfig cfg;
+    cfg.size_bytes = 512 * 1024;
+    cfg.line_size_bytes = 64;
+    cfg.associativity = 8;
+    cfg.hit_latency = 8;
+    cfg.miss_penalty = 20;
+    cfg.max_outstanding_misses = 16;
+    cfg.max_outstanding_prefetches = 0;
+    cfg.write_policy = CacheWritePolicy::WriteBackWriteAllocate;
+    cfg.enable_next_line_prefetch = false;
+    return cfg;
+}
+
 std::shared_ptr<MemoryTimingBackend> createMemoryTimingBackend() {
     switch (g_memory_timing_config.backend_kind) {
         case OutOfOrderMemoryBackendKind::Fixed:
@@ -75,11 +89,15 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     state.branch_predictor = std::make_unique<BranchPredictor>();
     auto icache_cfg = createDefaultL1CacheConfig();
     auto dcache_cfg = createDefaultL1CacheConfig();
+    auto l2_cfg = createDefaultL2CacheConfig();
     dcache_cfg.max_outstanding_misses = 8;
     dcache_cfg.enable_next_line_prefetch = g_enable_l1d_next_line_prefetch;
     state.memory_timing_backend = createMemoryTimingBackend();
+    state.l2_cache = std::make_unique<NonBlockingCache>(l2_cfg, state.memory_timing_backend);
     state.l1i_cache = std::make_unique<NonBlockingCache>(icache_cfg, state.memory_timing_backend);
     state.l1d_cache = std::make_unique<NonBlockingCache>(dcache_cfg, state.memory_timing_backend);
+    state.l1i_cache->setLowerCache(state.l2_cache.get());
+    state.l1d_cache->setLowerCache(state.l2_cache.get());
 }
 
 void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memory) {
@@ -277,6 +295,9 @@ void OutOfOrderCPU::step() {
         if (cpu_state_.l1d_cache) {
             cpu_state_.l1d_cache->tick();
         }
+        if (cpu_state_.l2_cache) {
+            cpu_state_.l2_cache->tick();
+        }
 
         // 流水线阶段执行（反向顺序以维护依赖关系）
         CommitStage::Context commit_context(cpu_state_);
@@ -340,6 +361,9 @@ void OutOfOrderCPU::resetStats() {
     }
     if (cpu_state_.l1d_cache) {
         cpu_state_.l1d_cache->resetStats();
+    }
+    if (cpu_state_.l2_cache) {
+        cpu_state_.l2_cache->resetStats();
     }
 }
 
@@ -540,6 +564,26 @@ ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
                          "Prefetch requests dropped by set, MSHR, or victim eligibility throttles"});
     }
 
+    if (cpu_state_.l2_cache) {
+        const auto& l2_stats = cpu_state_.l2_cache->getStats();
+        stats.push_back({"cpu.cache.l2.accesses", l2_stats.accesses,
+                         "Shared L2 cache timing accesses from L1I/L1D misses and prefetches"});
+        stats.push_back({"cpu.cache.l2.hits", l2_stats.hits,
+                         "Shared L2 timing accesses served by resident L2 lines"});
+        stats.push_back({"cpu.cache.l2.misses", l2_stats.misses,
+                         "Shared L2 timing accesses that needed the memory timing backend"});
+        stats.push_back({"cpu.cache.l2.pending_fill_merges", l2_stats.pending_fill_merges,
+                         "Shared L2 accesses merged into an existing in-flight fill"});
+        stats.push_back({"cpu.cache.l2.dirty_evictions", l2_stats.dirty_evictions,
+                         "Shared L2 dirty line evictions observed by the timing model"});
+        stats.push_back({"cpu.cache.l2.blocked_by_outstanding_limit",
+                         l2_stats.blocked_by_outstanding_limit,
+                         "Shared L2 accesses blocked by MSHR or victim availability"});
+        stats.push_back({"cpu.cache.l2.outstanding_misses",
+                         static_cast<uint64_t>(cpu_state_.l2_cache->outstandingMissCount()),
+                         "Current shared L2 demand MSHR occupancy"});
+    }
+
     if (cpu_state_.memory_timing_backend) {
         const auto& memory_stats = cpu_state_.memory_timing_backend->getStats();
         stats.push_back({"cpu.memory.timing.read_requests", memory_stats.read_requests,
@@ -588,6 +632,31 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
         os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_dropped_set_throttle"
            << std::right << std::setw(16) << prefetch_stats.prefetch_dropped_set_throttle
            << " # Prefetch requests dropped by set, MSHR, or victim eligibility throttles\n";
+    }
+
+    if (cpu_state_.l2_cache) {
+        const auto& l2_stats = cpu_state_.l2_cache->getStats();
+        os << std::left << std::setw(40) << "cpu.cache.l2.accesses"
+           << std::right << std::setw(16) << l2_stats.accesses
+           << " # Shared L2 cache timing accesses from L1I/L1D misses and prefetches\n";
+        os << std::left << std::setw(40) << "cpu.cache.l2.hits"
+           << std::right << std::setw(16) << l2_stats.hits
+           << " # Shared L2 timing accesses served by resident L2 lines\n";
+        os << std::left << std::setw(40) << "cpu.cache.l2.misses"
+           << std::right << std::setw(16) << l2_stats.misses
+           << " # Shared L2 timing accesses that needed the memory timing backend\n";
+        os << std::left << std::setw(40) << "cpu.cache.l2.pending_fill_merges"
+           << std::right << std::setw(16) << l2_stats.pending_fill_merges
+           << " # Shared L2 accesses merged into an existing in-flight fill\n";
+        os << std::left << std::setw(40) << "cpu.cache.l2.dirty_evictions"
+           << std::right << std::setw(16) << l2_stats.dirty_evictions
+           << " # Shared L2 dirty line evictions observed by the timing model\n";
+        os << std::left << std::setw(40) << "cpu.cache.l2.blocked_by_outstanding_limit"
+           << std::right << std::setw(16) << l2_stats.blocked_by_outstanding_limit
+           << " # Shared L2 accesses blocked by MSHR or victim availability\n";
+        os << std::left << std::setw(40) << "cpu.cache.l2.outstanding_misses"
+           << std::right << std::setw(16) << cpu_state_.l2_cache->outstandingMissCount()
+           << " # Current shared L2 demand MSHR occupancy\n";
     }
 
     if (cpu_state_.memory_timing_backend) {

@@ -211,6 +211,57 @@ class CheckpointBatchRunnerTest(unittest.TestCase):
         self.assertEqual(args.warmup_instructions, 20_000_000)
         self.assertEqual(args.measure_instructions, 20_000_000)
 
+    def test_dramsim3_batch_uses_per_slice_output_dir_by_default(self):
+        module = load_batch_runner_module()
+        parser = module.build_parser()
+        args = parser.parse_args(
+            [
+                "--simulator",
+                str(self.temp_dir / "fake_sim"),
+                "--checkpoint-list",
+                str(self.temp_dir / "spec06_0.3c.lst"),
+                "--checkpoint-root",
+                str(self.checkpoint_root),
+                "--output-dir",
+                str(self.output_dir),
+                "--extra-sim-arg=--memory-backend=dramsim3",
+            ]
+        )
+
+        entry_output_dir = self.output_dir / "bzip2_source_555"
+        command = module.build_simulator_command(args, self.temp_dir / "checkpoint.zstd", entry_output_dir)
+
+        self.assertIn("--memory-backend=dramsim3", command)
+        self.assertIn("--dramsim3-output-dir=" + str(entry_output_dir / "dramsim3"), command)
+
+    def test_explicit_dramsim3_output_dir_is_preserved(self):
+        module = load_batch_runner_module()
+        parser = module.build_parser()
+        explicit_output = self.temp_dir / "shared_ddr"
+        args = parser.parse_args(
+            [
+                "--simulator",
+                str(self.temp_dir / "fake_sim"),
+                "--checkpoint-list",
+                str(self.temp_dir / "spec06_0.3c.lst"),
+                "--checkpoint-root",
+                str(self.checkpoint_root),
+                "--output-dir",
+                str(self.output_dir),
+                "--extra-sim-arg=--memory-backend=dramsim3",
+                "--extra-sim-arg=--dramsim3-output-dir=" + str(explicit_output),
+            ]
+        )
+
+        command = module.build_simulator_command(
+            args, self.temp_dir / "checkpoint.zstd", self.output_dir / "bzip2_source_555")
+
+        self.assertIn("--dramsim3-output-dir=" + str(explicit_output), command)
+        self.assertNotIn(
+            "--dramsim3-output-dir=" + str(self.output_dir / "bzip2_source_555" / "dramsim3"),
+            command,
+        )
+
     def test_batch_runner_emits_per_slice_logs_and_aggregate_summary(self):
         self.create_checkpoint("bzip2_source", "555", "0.026526")
         self.create_checkpoint("bzip2_html", "7052", "0.302542")

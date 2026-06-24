@@ -278,10 +278,11 @@ struct CPUState {
     // 分支预测器（Fetch使用；Commit更新；flush时保留状态）
     std::unique_ptr<BranchPredictor> branch_predictor;
 
-    // L1 cache（时序+功能模型）
+    // cache hierarchy（L1时序+功能模型，L2作为shared timing lower cache）
     std::shared_ptr<MemoryTimingBackend> memory_timing_backend;
     std::unique_ptr<NonBlockingCache> l1i_cache;
     std::unique_ptr<NonBlockingCache> l1d_cache;
+    std::unique_ptr<NonBlockingCache> l2_cache;
     ICacheFetchState icache;
     uint64_t redirect_stall_cycles;
     

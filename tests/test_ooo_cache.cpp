@@ -70,6 +70,8 @@ TEST(OutOfOrderCacheTest, ICacheMissIsObservable) {
     EXPECT_GE(statValueByName(stats, "cpu.cache.l1i.accesses"), 1u);
     EXPECT_GE(statValueByName(stats, "cpu.cache.l1i.misses"), 1u);
     EXPECT_GE(statValueByName(stats, "cpu.cache.l1i.stall_cycles"), 20u);
+    EXPECT_GE(statValueByName(stats, "cpu.cache.l2.accesses"), 1u);
+    EXPECT_GE(statValueByName(stats, "cpu.cache.l2.misses"), 1u);
 }
 
 TEST(OutOfOrderCacheTest, DCacheLoadMissThenHit) {

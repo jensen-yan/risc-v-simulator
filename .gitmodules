@@ -4,3 +4,6 @@
 [submodule "riscv-arch-test"]
 	path = riscv-arch-test
 	url = https://github.com/riscv-non-isa/riscv-arch-test.git
+[submodule "DRAMsim3"]
+	path = third_party/DRAMsim3
+	url = https://github.com/umd-memsys/DRAMsim3.git

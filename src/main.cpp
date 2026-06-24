@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <limits>
 #include <string>
 
 using namespace riscv;
@@ -67,6 +68,14 @@ uint32_t parseEnabledExtensions(const std::string& isa_string) {
     return extensions;
 }
 
+std::string defaultDRAMSim3ConfigPath() {
+#ifdef RISCV_SIM_DEFAULT_DRAMSIM3_CONFIG
+    return RISCV_SIM_DEFAULT_DRAMSIM3_CONFIG;
+#else
+    return "configs/dramsim3/xiangshan_DDR4_8Gb_x8_3200_2ch.ini";
+#endif
+}
+
 } // namespace
 
 void printUsage(const char* programName) {
@@ -91,6 +100,12 @@ void printUsage(const char* programName) {
     std::cout << "  --stats-file=FILE            Dump detailed OOO stats to FILE\n";
     std::cout << "  --stats-warmup-cycles=N      Print pre-warmup stats, then reset OOO stats at cycle N\n";
     std::cout << "  --l1d-next-line-prefetch=on|off  Toggle OOO L1D next-line prefetcher (default: on)\n";
+    std::cout << "  --memory-backend=fixed|dramsim3  Select OOO memory timing backend (default: fixed)\n";
+    std::cout << "  --mem-backend=fixed|dramsim3     Alias for --memory-backend\n";
+    std::cout << "  --fixed-memory-latency=N    Fixed backend latency in cycles (default: 20)\n";
+    std::cout << "  --dramsim3-ini=FILE         DRAMSim3 DDR config ini for the OOO memory backend\n";
+    std::cout << "                              default: configs/dramsim3/xiangshan_DDR4_8Gb_x8_3200_2ch.ini\n";
+    std::cout << "  --dramsim3-output-dir=DIR   DRAMSim3 output directory (default: dramsim3-output)\n";
     std::cout << "  --pipeline-view=FILE         Generate HTML pipeline visualization\n";
     std::cout << "  --pipeline-cycles=START-END  Limit pipeline view to cycle range\n";
     std::cout << "  --pipeline-max=N             Max instructions in pipeline view (default: 2000)\n";
@@ -174,6 +189,7 @@ int main(int argc, char* argv[]) {
     std::string statsFile;
     uint64_t statsWarmupCycles = 0;
     bool l1dNextLinePrefetchEnabled = true;
+    OutOfOrderMemoryTimingConfig memoryTimingConfig;
     std::string pipelineViewFile;
     uint64_t pipelineStartCycle = 0;
     uint64_t pipelineEndCycle = UINT64_MAX;
@@ -270,6 +286,34 @@ int main(int argc, char* argv[]) {
                           << "', expected on|off\n";
                 return 1;
             }
+        } else if (arg.find("--memory-backend=") == 0 || arg.find("--mem-backend=") == 0) {
+            const size_t equals_pos = arg.find('=');
+            const std::string value = arg.substr(equals_pos + 1);
+            if (value == "fixed") {
+                memoryTimingConfig.backend_kind = OutOfOrderMemoryBackendKind::Fixed;
+            } else if (value == "dramsim3") {
+                memoryTimingConfig.backend_kind = OutOfOrderMemoryBackendKind::DRAMSim3;
+            } else {
+                std::cerr << "Error: invalid memory backend '" << value
+                          << "', expected fixed|dramsim3\n";
+                return 1;
+            }
+        } else if (arg.find("--fixed-memory-latency=") == 0) {
+            static const std::string kFixedMemoryLatencyPrefix = "--fixed-memory-latency=";
+            const auto latency = std::stoll(arg.substr(kFixedMemoryLatencyPrefix.size()), nullptr, 0);
+            if (latency < 0) {
+                std::cerr << "Error: --fixed-memory-latency cannot be negative\n";
+                return 1;
+            }
+            if (latency > std::numeric_limits<int>::max()) {
+                std::cerr << "Error: --fixed-memory-latency is too large\n";
+                return 1;
+            }
+            memoryTimingConfig.fixed_latency_cycles = static_cast<int>(latency);
+        } else if (arg.find("--dramsim3-ini=") == 0) {
+            memoryTimingConfig.dramsim3_config_path = arg.substr(15);
+        } else if (arg.find("--dramsim3-output-dir=") == 0) {
+            memoryTimingConfig.dramsim3_output_dir = arg.substr(22);
         } else if (arg.find("--pipeline-view=") == 0) {
             pipelineViewFile = arg.substr(16);
         } else if (arg.find("--pipeline-cycles=") == 0) {
@@ -328,6 +372,11 @@ int main(int argc, char* argv[]) {
 
         if (cpuType == CpuType::OUT_OF_ORDER) {
             setOutOfOrderL1DNextLinePrefetchEnabled(l1dNextLinePrefetchEnabled);
+            if (memoryTimingConfig.backend_kind == OutOfOrderMemoryBackendKind::DRAMSim3 &&
+                memoryTimingConfig.dramsim3_config_path.empty()) {
+                memoryTimingConfig.dramsim3_config_path = defaultDRAMSim3ConfigPath();
+            }
+            setOutOfOrderMemoryTimingConfig(memoryTimingConfig);
         }
 
         // 创建模拟器

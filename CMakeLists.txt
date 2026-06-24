@@ -28,6 +28,39 @@ if(ENABLE_COVERAGE)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
 endif()
 
+option(RISCV_SIM_ENABLE_DRAMSIM3 "Enable optional DRAMSim3 memory timing backend" OFF)
+set(
+    DRAMSIM3_ROOT
+    "${PROJECT_SOURCE_DIR}/third_party/DRAMsim3"
+    CACHE PATH "Path to the DRAMSim3 source tree"
+)
+set(
+    RISCV_SIM_DEFAULT_DRAMSIM3_CONFIG
+    "${PROJECT_SOURCE_DIR}/configs/dramsim3/xiangshan_DDR4_8Gb_x8_3200_2ch.ini"
+    CACHE FILEPATH "Default DRAMSim3 DDR config used when --dramsim3-ini is omitted"
+)
+
+if(RISCV_SIM_ENABLE_DRAMSIM3)
+    if(NOT EXISTS "${DRAMSIM3_ROOT}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "DRAMSim3 submodule not found at ${DRAMSIM3_ROOT}. "
+            "Run: git submodule update --init third_party/DRAMsim3"
+        )
+    endif()
+    if(NOT EXISTS "${DRAMSIM3_ROOT}/src/dramsim3.h")
+        message(FATAL_ERROR "DRAMSim3 header not found: ${DRAMSIM3_ROOT}/src/dramsim3.h")
+    endif()
+
+    add_subdirectory("${DRAMSIM3_ROOT}" "${CMAKE_BINARY_DIR}/third_party/dramsim3" EXCLUDE_FROM_ALL)
+    set_target_properties(dramsim3 PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/third_party/dramsim3"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/third_party/dramsim3"
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/third_party/dramsim3"
+    )
+    add_library(DRAMSim3::dramsim3 ALIAS dramsim3)
+    find_library(GOMP_LIBRARY gomp)
+endif()
+
 # 可选的已安装 GTest 前缀；默认也会自动尝试 ~/.local 等用户目录
 set(
     RISCV_SIM_GTEST_ROOT
@@ -92,6 +125,9 @@ add_executable(risc-v-sim
 
 target_include_directories(risc-v-sim PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(risc-v-sim risc-v-sim-lib)
+if(RISCV_SIM_ENABLE_DRAMSIM3)
+    set_target_properties(risc-v-sim PROPERTIES BUILD_RPATH "$<TARGET_FILE_DIR:dramsim3>")
+endif()
 
 # 测试目标放在 tests/CMakeLists.txt
 add_subdirectory(tests)

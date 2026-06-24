@@ -26,6 +26,36 @@ cmake -DCMAKE_BUILD_TYPE=Debug .. && make -j
 cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON .. && make -j
 ```
 
+### 可选 DRAMSim3 内存时序后端
+
+默认构建不依赖 DRAMSim3，OOO L1 miss 继续使用固定延迟后端。若要使用 DRAMSim3 DDR 配置，先初始化 submodule，再单独启用 DRAMSim3 build：
+
+```bash
+git submodule update --init third_party/DRAMsim3
+cmake -S . -B build-dramsim3 -DRISCV_SIM_ENABLE_DRAMSIM3=ON
+cmake --build build-dramsim3 -j
+```
+
+运行时示例：
+
+```bash
+./build-dramsim3/risc-v-sim --ooo \
+  --memory-backend=dramsim3 \
+  --dramsim3-output-dir=/tmp/riscv-sim-dramsim3 \
+  --stats-file=stats.txt \
+  -e program.elf
+```
+
+未显式传 `--dramsim3-ini` 时，默认使用仓库内的 `configs/dramsim3/xiangshan_DDR4_8Gb_x8_3200_2ch.ini`。
+
+也可以在默认 build 中调整固定后端延迟：
+
+```bash
+./build/risc-v-sim --ooo --memory-backend=fixed --fixed-memory-latency=40 -e program.elf
+```
+
+注意：DRAMSim3 在本仓库中只作为 OOO cache miss / prefetch / dirty writeback 的 timing backend；功能数据仍由 `Memory` 维护。第一版后端按请求同步 tick 到 DRAMSim3 callback 完成，用于获得 DDR ini 驱动的访问延迟；完整异步 MSHR completion 和 L2/L3 cache hierarchy 属于后续重构。
+
 ## 使用方法
 
 ```bash
@@ -215,6 +245,17 @@ python3 ./tools/benchmarks/run_checkpoint_batch.py \
   --output-dir /tmp/spec06-debug \
   --extra-sim-arg=--debug \
   --extra-sim-arg=--debug-preset=memory
+
+# 用 DRAMSim3 DDR timing 跑 OOO checkpoint
+python3 ./tools/benchmarks/run_checkpoint_batch.py \
+  --simulator ./build-dramsim3/risc-v-sim \
+  --checkpoint-list /nfs/home/share/gem5_ci/spec06_cpts/gcc15/spec06_0.3c.lst \
+  --checkpoint-root /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0 \
+  --output-dir /tmp/spec06-dramsim3 \
+  --cpu-mode ooo \
+  --jobs 8 \
+  --extra-sim-arg=--memory-backend=dramsim3 \
+  --extra-sim-arg=--dramsim3-output-dir=/tmp/spec06-dramsim3/ddr
 ```
 
 ## RISCOF 架构测试（DUT vs Spike）

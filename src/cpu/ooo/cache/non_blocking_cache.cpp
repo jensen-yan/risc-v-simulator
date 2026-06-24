@@ -23,7 +23,13 @@ bool rangesOverlap(uint64_t lhs_addr, uint64_t lhs_size, uint64_t rhs_addr, uint
 
 } // namespace
 
-NonBlockingCache::NonBlockingCache(const NonBlockingCacheConfig& config) : config_(config) {
+NonBlockingCache::NonBlockingCache(const NonBlockingCacheConfig& config)
+    : NonBlockingCache(config, nullptr) {}
+
+NonBlockingCache::NonBlockingCache(const NonBlockingCacheConfig& config,
+                                   std::shared_ptr<MemoryTimingBackend> timing_backend)
+    : config_(config),
+      timing_backend_(std::move(timing_backend)) {
     if (config_.line_size_bytes == 0 || config_.associativity == 0 || config_.size_bytes == 0) {
         throw std::invalid_argument("cache config cannot contain zero values");
     }
@@ -33,6 +39,9 @@ NonBlockingCache::NonBlockingCache(const NonBlockingCacheConfig& config) : confi
     if (config_.hit_latency <= 0 || config_.miss_penalty < 0 ||
         config_.max_outstanding_misses == 0) {
         throw std::invalid_argument("cache latency config is invalid");
+    }
+    if (!timing_backend_) {
+        timing_backend_ = std::make_shared<FixedLatencyMemoryTimingBackend>(config_.miss_penalty);
     }
 
     set_count_ = config_.size_bytes / (config_.line_size_bytes * config_.associativity);
@@ -220,6 +229,7 @@ void NonBlockingCache::flushInFlight() {
 
 void NonBlockingCache::resetStats() {
     stats_ = NonBlockingCacheStats{};
+    timing_backend_->resetStats();
 }
 
 void NonBlockingCache::reset() {
@@ -346,6 +356,7 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
 
     bool overall_hit = true;
     bool dirty_eviction = false;
+    int miss_latency_cycles = 0;
 
     for (const auto line_address : line_addresses) {
         CacheLine* line = findLine(line_address);
@@ -360,11 +371,13 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
 
         overall_hit = false;
         if (model_timing) {
-            if (!startLineFill(memory, line_address, dirty_eviction)) {
+            int line_fill_latency = 0;
+            if (!startLineFill(memory, line_address, dirty_eviction, line_fill_latency)) {
                 result.blocked = true;
                 result.blocked_by_outstanding_limit = true;
                 return result;
             }
+            miss_latency_cycles = std::max(miss_latency_cycles, line_fill_latency);
             continue;
         }
 
@@ -380,7 +393,13 @@ CacheAccessResult NonBlockingCache::ensureResident(std::shared_ptr<Memory> memor
 
     result.hit = overall_hit;
     result.dirty_eviction = dirty_eviction;
-    result.latency_cycles = config_.hit_latency + (overall_hit ? 0 : config_.miss_penalty);
+    if (overall_hit) {
+        result.latency_cycles = config_.hit_latency;
+    } else if (model_timing && miss_latency_cycles > 0) {
+        result.latency_cycles = miss_latency_cycles;
+    } else {
+        result.latency_cycles = config_.hit_latency + config_.miss_penalty;
+    }
 
     if (model_timing && !overall_hit) {
         maybeIssueNextLinePrefetch(memory, line_addresses.back());
@@ -633,8 +652,10 @@ NonBlockingCache::CacheLine* NonBlockingCache::installLine(const std::shared_ptr
 
 bool NonBlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
                                   uint64_t line_address,
-                                  bool& dirty_eviction) {
+                                  bool& dirty_eviction,
+                                  int& fill_latency_cycles) {
     if (findMshrEntry(line_address) != nullptr) {
+        fill_latency_cycles = pendingFillRemainingCycles({line_address});
         return true;
     }
 
@@ -648,7 +669,9 @@ bool NonBlockingCache::startLineFill(const std::shared_ptr<Memory>& memory,
     touchLine(*reserved);
     MshrEntry entry{};
     entry.line_address = line_address;
-    entry.remaining_cycles = config_.hit_latency + config_.miss_penalty;
+    fill_latency_cycles =
+        config_.hit_latency + memoryAccessLatencyCycles(MemoryTimingRequestKind::DemandRead, line_address);
+    entry.remaining_cycles = fill_latency_cycles;
     entry.has_demand_waiter = true;
     entry.mark_prefetched_on_fill = false;
     entry.memory = memory;
@@ -668,13 +691,23 @@ bool NonBlockingCache::startPrefetchFill(const std::shared_ptr<Memory>& memory, 
 
     MshrEntry entry{};
     entry.line_address = line_address;
-    entry.remaining_cycles = config_.hit_latency + config_.miss_penalty;
+    entry.remaining_cycles =
+        config_.hit_latency + memoryAccessLatencyCycles(MemoryTimingRequestKind::PrefetchRead, line_address);
     entry.has_demand_waiter = false;
     entry.mark_prefetched_on_fill = true;
     entry.memory = memory;
     entry.fill_data = readLineDataFromMemory(memory, line_address);
     mshr_entries_.push_back(std::move(entry));
     return true;
+}
+
+int NonBlockingCache::memoryAccessLatencyCycles(MemoryTimingRequestKind kind, uint64_t line_address) {
+    const int latency = timing_backend_->accessLatencyCycles(
+        MemoryTimingRequest{kind, lineToBaseAddress(line_address), config_.line_size_bytes});
+    if (latency < 0) {
+        throw SimulatorException("memory timing backend returned negative latency");
+    }
+    return latency;
 }
 
 void NonBlockingCache::completeMshrFill(const MshrEntry& entry) {
@@ -890,6 +923,8 @@ void NonBlockingCache::fillLineFromMemory(const std::shared_ptr<Memory>& memory,
 void NonBlockingCache::writebackDataToMemory(const std::shared_ptr<Memory>& memory,
                                           uint64_t line_address,
                                           const std::vector<uint8_t>& data) {
+    static_cast<void>(memoryAccessLatencyCycles(MemoryTimingRequestKind::Writeback, line_address));
+
     const uint64_t line_base = lineToBaseAddress(line_address);
     const uint64_t memory_size = memory->getSize();
     const size_t write_size = std::min(config_.line_size_bytes, data.size());

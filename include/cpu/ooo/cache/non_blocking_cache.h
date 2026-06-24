@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/types.h"
+#include "cpu/ooo/memory_timing_backend.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -54,6 +55,8 @@ struct NonBlockingCacheStats {
 class NonBlockingCache {
 public:
     explicit NonBlockingCache(const NonBlockingCacheConfig& config);
+    NonBlockingCache(const NonBlockingCacheConfig& config,
+                     std::shared_ptr<MemoryTimingBackend> timing_backend);
 
     // 时序访问：用于仅需要命中/未命中延迟的路径（例如Store execute阶段）。
     CacheAccessResult access(std::shared_ptr<Memory> memory,
@@ -84,6 +87,7 @@ public:
     int missServiceRemainingCycles() const;
     const NonBlockingCacheConfig& getConfig() const { return config_; }
     const NonBlockingCacheStats& getStats() const { return stats_; }
+    const MemoryTimingStats& getMemoryTimingStats() const { return timing_backend_->getStats(); }
 
 private:
     struct CacheLine {
@@ -103,6 +107,7 @@ private:
     std::vector<CacheSet> sets_;
     uint64_t lru_clock_ = 0;
     NonBlockingCacheStats stats_{};
+    std::shared_ptr<MemoryTimingBackend> timing_backend_;
 
     struct DeferredWriteback {
         bool valid = false;
@@ -155,8 +160,10 @@ private:
                            DeferredWriteback* deferred_writeback = nullptr);
     bool startLineFill(const std::shared_ptr<Memory>& memory,
                        uint64_t line_address,
-                       bool& dirty_eviction);
+                       bool& dirty_eviction,
+                       int& fill_latency_cycles);
     bool startPrefetchFill(const std::shared_ptr<Memory>& memory, uint64_t line_address);
+    int memoryAccessLatencyCycles(MemoryTimingRequestKind kind, uint64_t line_address);
     void completeMshrFill(const MshrEntry& entry);
     void completePendingFills(const std::vector<uint64_t>& line_addresses);
     void completePendingFillsInSet(size_t set_index);

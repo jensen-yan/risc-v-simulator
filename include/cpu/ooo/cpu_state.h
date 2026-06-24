@@ -279,6 +279,7 @@ struct CPUState {
     std::unique_ptr<BranchPredictor> branch_predictor;
 
     // L1 cache（时序+功能模型）
+    std::shared_ptr<MemoryTimingBackend> memory_timing_backend;
     std::unique_ptr<NonBlockingCache> l1i_cache;
     std::unique_ptr<NonBlockingCache> l1d_cache;
     ICacheFetchState icache;

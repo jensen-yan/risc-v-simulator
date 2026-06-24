@@ -1,4 +1,5 @@
 #include "cpu/ooo/ooo_cpu.h"
+#include "cpu/ooo/memory_timing_backend.h"
 #include "cpu/ooo/stages/fetch_stage.h"
 #include "cpu/ooo/stages/decode_stage.h"
 #include "cpu/ooo/stages/dispatch_stage.h"
@@ -16,12 +17,14 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <stdexcept>
 
 namespace riscv {
 
 namespace {
 
 bool g_enable_l1d_next_line_prefetch = true;
+OutOfOrderMemoryTimingConfig g_memory_timing_config;
 constexpr uint32_t kSatpCsrAddress = 0x180;
 constexpr uint32_t kMstatusCsrAddress = 0x300;
 
@@ -43,6 +46,24 @@ NonBlockingCacheConfig createDefaultL1CacheConfig() {
     return cfg;
 }
 
+std::shared_ptr<MemoryTimingBackend> createMemoryTimingBackend() {
+    switch (g_memory_timing_config.backend_kind) {
+        case OutOfOrderMemoryBackendKind::Fixed:
+            return std::make_shared<FixedLatencyMemoryTimingBackend>(
+                g_memory_timing_config.fixed_latency_cycles);
+        case OutOfOrderMemoryBackendKind::DRAMSim3:
+#ifdef RISCV_SIM_ENABLE_DRAMSIM3
+            return createDRAMSim3MemoryTimingBackend(
+                g_memory_timing_config.dramsim3_config_path,
+                g_memory_timing_config.dramsim3_output_dir);
+#else
+            throw std::runtime_error(
+                "DRAMSim3 memory backend is not enabled in this build");
+#endif
+    }
+    throw std::runtime_error("unknown OOO memory timing backend");
+}
+
 void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& memory) {
     state.privilege_state = std::make_unique<PrivilegeState>();
     state.address_translation = std::make_unique<AddressTranslation>(memory, state.privilege_state.get());
@@ -56,8 +77,9 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     auto dcache_cfg = createDefaultL1CacheConfig();
     dcache_cfg.max_outstanding_misses = 8;
     dcache_cfg.enable_next_line_prefetch = g_enable_l1d_next_line_prefetch;
-    state.l1i_cache = std::make_unique<NonBlockingCache>(icache_cfg);
-    state.l1d_cache = std::make_unique<NonBlockingCache>(dcache_cfg);
+    state.memory_timing_backend = createMemoryTimingBackend();
+    state.l1i_cache = std::make_unique<NonBlockingCache>(icache_cfg, state.memory_timing_backend);
+    state.l1d_cache = std::make_unique<NonBlockingCache>(dcache_cfg, state.memory_timing_backend);
 }
 
 void resetCpuStateForReuse(CPUState& state, const std::shared_ptr<Memory>& memory) {
@@ -178,6 +200,17 @@ void setOutOfOrderL1DNextLinePrefetchEnabled(bool enabled) {
 
 bool isOutOfOrderL1DNextLinePrefetchEnabled() {
     return g_enable_l1d_next_line_prefetch;
+}
+
+void setOutOfOrderMemoryTimingConfig(const OutOfOrderMemoryTimingConfig& config) {
+    if (config.fixed_latency_cycles < 0) {
+        throw std::invalid_argument("fixed memory latency cannot be negative");
+    }
+    g_memory_timing_config = config;
+}
+
+OutOfOrderMemoryTimingConfig getOutOfOrderMemoryTimingConfig() {
+    return g_memory_timing_config;
 }
 
 OutOfOrderCPU::OutOfOrderCPU(std::shared_ptr<Memory> memory)
@@ -507,6 +540,20 @@ ICpuInterface::StatsList OutOfOrderCPU::getStats() const {
                          "Prefetch requests dropped by set, MSHR, or victim eligibility throttles"});
     }
 
+    if (cpu_state_.memory_timing_backend) {
+        const auto& memory_stats = cpu_state_.memory_timing_backend->getStats();
+        stats.push_back({"cpu.memory.timing.read_requests", memory_stats.read_requests,
+                         "Demand cache line reads sent to the memory timing backend"});
+        stats.push_back({"cpu.memory.timing.prefetch_requests", memory_stats.prefetch_requests,
+                         "Prefetch cache line reads sent to the memory timing backend"});
+        stats.push_back({"cpu.memory.timing.writeback_requests", memory_stats.writeback_requests,
+                         "Dirty cache line writebacks sent to the memory timing backend"});
+        stats.push_back({"cpu.memory.timing.total_latency_cycles", memory_stats.total_latency_cycles,
+                         "Accumulated backend latency cycles returned to cache fills/writebacks"});
+        stats.push_back({"cpu.memory.timing.max_latency_cycles", memory_stats.max_latency_cycles,
+                         "Maximum backend latency cycles returned for one memory timing access"});
+    }
+
     return stats;
 }
 
@@ -541,6 +588,25 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
         os << std::left << std::setw(40) << "cpu.cache.l1d.prefetch_dropped_set_throttle"
            << std::right << std::setw(16) << prefetch_stats.prefetch_dropped_set_throttle
            << " # Prefetch requests dropped by set, MSHR, or victim eligibility throttles\n";
+    }
+
+    if (cpu_state_.memory_timing_backend) {
+        const auto& memory_stats = cpu_state_.memory_timing_backend->getStats();
+        os << std::left << std::setw(40) << "cpu.memory.timing.read_requests"
+           << std::right << std::setw(16) << memory_stats.read_requests
+           << " # Demand cache line reads sent to the memory timing backend\n";
+        os << std::left << std::setw(40) << "cpu.memory.timing.prefetch_requests"
+           << std::right << std::setw(16) << memory_stats.prefetch_requests
+           << " # Prefetch cache line reads sent to the memory timing backend\n";
+        os << std::left << std::setw(40) << "cpu.memory.timing.writeback_requests"
+           << std::right << std::setw(16) << memory_stats.writeback_requests
+           << " # Dirty cache line writebacks sent to the memory timing backend\n";
+        os << std::left << std::setw(40) << "cpu.memory.timing.total_latency_cycles"
+           << std::right << std::setw(16) << memory_stats.total_latency_cycles
+           << " # Accumulated backend latency cycles returned to cache fills/writebacks\n";
+        os << std::left << std::setw(40) << "cpu.memory.timing.max_latency_cycles"
+           << std::right << std::setw(16) << memory_stats.max_latency_cycles
+           << " # Maximum backend latency cycles returned for one memory timing access\n";
     }
 
     const uint64_t cycles = cpu_state_.perf_counters.value(PerfCounterId::CYCLES);

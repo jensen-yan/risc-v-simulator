@@ -2,6 +2,7 @@
 
 #include "core/memory.h"
 #include "cpu/ooo/cache/non_blocking_cache.h"
+#include "cpu/ooo/memory_timing_backend.h"
 
 #include <limits>
 #include <memory>
@@ -45,6 +46,25 @@ TEST(NonBlockingCacheTest, ColdMissThenHit) {
     EXPECT_FALSE(second.blocked);
     EXPECT_TRUE(second.hit);
     EXPECT_EQ(second.latency_cycles, 1);
+}
+
+TEST(NonBlockingCacheTest, InjectedTimingBackendSuppliesMissLatency) {
+    auto memory = std::make_shared<Memory>(4096);
+    memory->writeWord(0x100, 0xDEADBEEF);
+
+    auto cfg = makeDefaultConfig();
+    cfg.miss_penalty = 20;
+    auto timing_backend = std::make_shared<FixedLatencyMemoryTimingBackend>(7);
+    NonBlockingCache cache(cfg, timing_backend);
+
+    const auto first = cache.access(memory, 0x100, 4, CacheAccessType::Read);
+    EXPECT_FALSE(first.blocked);
+    EXPECT_FALSE(first.hit);
+    EXPECT_EQ(first.latency_cycles, 8);
+
+    const auto& stats = timing_backend->getStats();
+    EXPECT_EQ(stats.read_requests, 1u);
+    EXPECT_EQ(stats.total_latency_cycles, 7u);
 }
 
 TEST(NonBlockingCacheTest, DirtyEvictionAfterCommittedStore) {

@@ -21,6 +21,7 @@ target_sources(risc-v-sim-lib PRIVATE
     execute_store_access.cpp
     execute_semantics.cpp
     issue_ready_select.cpp
+    memory_timing_backend.cpp
     ooo_recovery.cpp
     perf_counters.cpp
     register_rename.cpp
@@ -28,6 +29,12 @@ target_sources(risc-v-sim-lib PRIVATE
     reservation_station.cpp
     store_buffer.cpp
 )
+
+if(RISCV_SIM_ENABLE_DRAMSIM3)
+    target_sources(risc-v-sim-lib PRIVATE
+        dramsim3_memory_timing_backend.cpp
+    )
+endif()
 
 add_subdirectory(cache)
 add_subdirectory(stages)

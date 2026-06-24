@@ -18,8 +18,22 @@
 
 namespace riscv {
 
+enum class OutOfOrderMemoryBackendKind {
+    Fixed,
+    DRAMSim3
+};
+
+struct OutOfOrderMemoryTimingConfig {
+    OutOfOrderMemoryBackendKind backend_kind = OutOfOrderMemoryBackendKind::Fixed;
+    int fixed_latency_cycles = 20;
+    std::string dramsim3_config_path;
+    std::string dramsim3_output_dir = "dramsim3-output";
+};
+
 void setOutOfOrderL1DNextLinePrefetchEnabled(bool enabled);
 bool isOutOfOrderL1DNextLinePrefetchEnabled();
+void setOutOfOrderMemoryTimingConfig(const OutOfOrderMemoryTimingConfig& config);
+OutOfOrderMemoryTimingConfig getOutOfOrderMemoryTimingConfig();
 
 class SyscallHandler;
 class FetchStage;

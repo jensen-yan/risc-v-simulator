@@ -121,4 +121,20 @@ TEST(StoreQueueTest, RetireStoresBeforeClearsCommittedPrefix) {
     EXPECT_EQ(store_queue.getOccupiedEntryCount(), 1u);
 }
 
+TEST(StoreQueueTest, ReturnsResolvedAddressViewFromQueueEntry) {
+    StoreQueue store_queue;
+    auto store = makeStore(1, 0x100);
+
+    ASSERT_TRUE(store_queue.updateAddress(store, 0x2000, 4));
+
+    const auto resolved = store_queue.getResolvedAddress(store);
+
+    ASSERT_TRUE(resolved.has_value());
+    EXPECT_EQ(resolved->instruction, store);
+    EXPECT_EQ(resolved->instruction_id, store->get_instruction_id());
+    EXPECT_EQ(resolved->pc, store->get_pc());
+    EXPECT_EQ(resolved->address, 0x2000u);
+    EXPECT_EQ(resolved->size, 4u);
+}
+
 } // namespace riscv

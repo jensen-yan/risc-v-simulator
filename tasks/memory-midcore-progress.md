@@ -41,4 +41,5 @@
 - 已开始引入现代 LSU store 侧骨架：`StoreQueue` 显式记录地址 ready、数据 ready、完成和提交状态，`StoreForwardingBuffer` 专注 ready-store forwarding
 - 已开始 internal STA/STD split：缺 store data 时可先 issue `StoreAddress`，缺 store address 时也可先 issue `StoreData`；两者都 ready 后再执行完整 store，当前仍共享同一条 ROB/RS entry
 - 已开始引入现代 LSU load 侧骨架：`LoadQueue` 显式记录 load 分配、地址 ready、issue、replay、完成、提交和 flush 生命周期；当前还未替代 `ExecuteMemoryOrder` 的 violation/replay 策略
-- 下一步优先把 store address resolve 后的 younger executed load 检查迁到 LQ/SQ 边界，再考虑 MDP/StoreSet
+- 已把 store address resolve 后的 younger executed load 检查迁到 LQ/SQ 边界：`StoreQueue` 提供 resolved-store view，`LoadQueue` 查第一条 speculative overlapping executed load，`ExecuteMemoryOrder` 只保留训练和恢复入口
+- 下一步优先在这个边界上引入更像 StoreSet/MDP 的预测与 replay 策略

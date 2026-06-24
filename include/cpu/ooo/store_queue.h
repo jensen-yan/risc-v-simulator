@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 
 namespace riscv {
 
@@ -31,6 +32,14 @@ struct StoreQueueEntry {
 
 class StoreQueue {
 public:
+    struct ResolvedAddress {
+        DynamicInstPtr instruction = nullptr;
+        uint64_t instruction_id = 0;
+        uint64_t pc = 0;
+        uint64_t address = 0;
+        uint8_t size = 0;
+    };
+
     static constexpr int MAX_ENTRIES =
         static_cast<int>(OOOPipelineConfig::STORE_QUEUE_ENTRIES);
 
@@ -47,6 +56,8 @@ public:
     void flushAfter(uint64_t instruction_id);
     void flush();
 
+    std::optional<ResolvedAddress> getResolvedAddress(
+        const DynamicInstPtr& instruction) const;
     size_t getOccupiedEntryCount() const;
     const StoreQueueEntry* findEntryForInstruction(const DynamicInstPtr& instruction) const;
     bool isAddressReady(const DynamicInstPtr& instruction) const;

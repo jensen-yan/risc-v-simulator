@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "cpu/ooo/execute_memory_order.h"
+#include "cpu/ooo/load_queue.h"
 #include "cpu/ooo/register_rename.h"
 #include "cpu/ooo/reorder_buffer.h"
 #include "cpu/ooo/reservation_station.h"
@@ -87,6 +88,7 @@ TEST(ExecuteMemoryOrderTest, RecoversOverlappingAddrUnknownSpeculationViolation)
     state.reorder_buffer = std::make_unique<ReorderBuffer>();
     state.reservation_station = std::make_unique<ReservationStation>();
     state.register_rename = std::make_unique<RegisterRenameUnit>();
+    state.load_queue = std::make_unique<LoadQueue>();
     state.store_queue = std::make_unique<StoreQueue>();
     state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
     state.pc = 0xDEAD;
@@ -106,6 +108,8 @@ TEST(ExecuteMemoryOrderTest, RecoversOverlappingAddrUnknownSpeculationViolation)
     load_memory.memory_address = 0x2002;
     load_memory.memory_size = 4;
     load->set_status(DynamicInst::Status::EXECUTING);
+    ASSERT_TRUE(state.load_queue->updateAddress(load, 0x2002, 4));
+    ASSERT_TRUE(state.load_queue->markIssued(load));
 
     FetchedInstruction fetched;
     fetched.pc = 0x300;
@@ -118,10 +122,38 @@ TEST(ExecuteMemoryOrderTest, RecoversOverlappingAddrUnknownSpeculationViolation)
     EXPECT_TRUE(state.fetch_buffer.empty());
     EXPECT_TRUE(state.completion_fabric.empty());
     EXPECT_TRUE(state.reorder_buffer->is_empty());
+    EXPECT_EQ(state.load_queue->getOccupiedEntryCount(), 0u);
     EXPECT_TRUE(state.isBlockedAddrUnknownPair(load->get_pc(), store->get_pc()));
     EXPECT_EQ(state.load_profiles[load->get_pc()].speculated_addr_unknown_violation, 1u);
     EXPECT_EQ(state.store_profiles[store->get_pc()].caused_order_violation, 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_ORDER_VIOLATION_RECOVERIES), 1u);
+}
+
+TEST(ExecuteMemoryOrderTest, DoesNotRecoverWhenLqSqScanFindsNoOverlap) {
+    CPUState state;
+    state.reorder_buffer = std::make_unique<ReorderBuffer>();
+    state.reservation_station = std::make_unique<ReservationStation>();
+    state.register_rename = std::make_unique<RegisterRenameUnit>();
+    state.load_queue = std::make_unique<LoadQueue>();
+    state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
+    state.pc = 0xDEAD;
+
+    auto store = state.reorder_buffer->allocate_entry(makeMemoryInstruction(Opcode::STORE), 0x100, 1);
+    ASSERT_NE(store, nullptr);
+    ASSERT_TRUE(state.store_queue->updateAddress(store, 0x2000, 4));
+
+    auto load = state.reorder_buffer->allocate_entry(makeMemoryInstruction(Opcode::LOAD), 0x104, 2);
+    ASSERT_NE(load, nullptr);
+    load->get_memory_info().speculated_past_addr_unknown_store = true;
+    load->set_status(DynamicInst::Status::EXECUTING);
+    ASSERT_TRUE(state.load_queue->updateAddress(load, 0x3000, 4));
+    ASSERT_TRUE(state.load_queue->markIssued(load));
+
+    EXPECT_FALSE(ExecuteMemoryOrder::tryRecoverViolation(store, state));
+    EXPECT_EQ(state.pc, 0xDEADu);
+    EXPECT_FALSE(state.reorder_buffer->is_empty());
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::MEMORY_ORDER_VIOLATION_RECOVERIES), 0u);
 }
 
 } // namespace riscv

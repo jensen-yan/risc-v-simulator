@@ -42,6 +42,10 @@ public:
     void flushAfter(uint64_t instruction_id);
     void flush();
 
+    const LoadQueueEntry* findFirstViolatingLoadAfterStore(
+        uint64_t store_instruction_id,
+        uint64_t store_address,
+        uint8_t store_size) const;
     size_t getOccupiedEntryCount() const;
     const LoadQueueEntry* findEntryForInstruction(const DynamicInstPtr& instruction) const;
     bool isAddressReady(const DynamicInstPtr& instruction) const;

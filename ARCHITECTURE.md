@@ -141,8 +141,8 @@ flowchart LR
 - `OutOfOrderCPU::step()` 负责装配每个阶段的 `Stage::Context`，阶段执行入口只接收自己的 context，不直接暴露整份 `CPUState`。
 - 当某个阶段的 context 仍然需要承载跨领域能力时，优先把稳定规则下沉为更深模块，例如当前的 `DispatchAdmission`、`ExecuteMemoryOrder` 和 `OooRecovery`，而不是继续扩大 stage interface。
 - `DispatchAdmission` 集中维护一条 ROB entry 进入后端时的 rename 事务、operand binding、RS placement、ready-store publication 和 rename checkpoint 保存；`DispatchStage` 只保留每拍宽度、串行化阻塞和 stall/counter orchestration。
-- `LoadQueue` 保存 load 的分配、地址 ready、issue、replay、完成、提交和 flush 生命周期；当前先作为显式生命周期骨架，后续再承接 LQ/SQ violation scan、replay queue 和 MDP/StoreSet 策略。
-- `StoreQueue` 保存 store 的地址 ready、数据 ready、完成、提交和 flush 生命周期；`StoreForwardingBuffer` 只保存地址和值都 ready 的 forwarding view。
+- `LoadQueue` 保存 load 的分配、地址 ready、issue、replay、完成、提交和 flush 生命周期；store 地址解析后查 younger executed load 的 violation scan 已经落在 LQ/SQ 边界，后续再补 replay queue 和 MDP/StoreSet 策略。
+- `StoreQueue` 保存 store 的地址 ready、数据 ready、完成、提交和 flush 生命周期，并向 LQ/SQ violation scan 提供 resolved-store address view；`StoreForwardingBuffer` 只保存地址和值都 ready 的 forwarding view。
 - store 当前支持 internal STA/STD split：`ReservationStation::ReadyEntry` 会把同一条 store 暴露为 `StoreAddress`、`StoreData` 或完整 store work kind。`StoreAddress` 只计算/翻译地址并写 `StoreQueue`；`StoreData` 只捕获数据并写 `StoreQueue`；完整 store 只有地址和值都 ready 后才走 D$ 时序和 ROB completion。
 - 这还不是 true STA/STD uop split：ROB entry、RS entry 和 `DynamicInst` 仍是一条 store；当前每个 issue 选择周期同一条 store 最多选中一个 work kind，后续要进一步拆出独立 uop/子 entry 才接近现代高性能 LSU 的并行 STA/STD 调度。
 - `OooRecovery` 集中维护乱序流水线恢复时的资源清理规则；触发 recovery 的阶段只负责判断原因、restart PC 或 younger-than 范围。
@@ -182,7 +182,7 @@ flowchart TD
     CS["CommitStage\nROB head retirement loop / halt decision"]
     CME["CommitMemoryEffects\nstore / AMO architectural memory effects"]
     CRE["CommitRegisterEffects\nGPR/FPR/fflags/rename commit"]
-    CRT["CommitRetireEffects\nstore queue / forwarding view / checkpoint bookkeeping"]
+    CRT["CommitRetireEffects\nload/store queue / forwarding view / checkpoint bookkeeping"]
     CCF["CommitControlFlowEffects\nbranch/JAL/JALR retire redirect"]
     CSE["CommitSystemEffects\nCSR / trap / MRET / FENCE / FENCE.I"]
   end
@@ -211,6 +211,8 @@ flowchart TD
   ESA --> EDC
   ESA --> EMI
   ESA --> EMO
+  EMO --> LQ
+  EMO --> SQ
   ES --> ECR
   EMI --> CF
   CF --> WS
@@ -239,7 +241,7 @@ flowchart TD
 - 改 ready load 如何在 replay、cache wait、inflight、exception、complete 之间流转：
   优先看 `ExecuteLoadCompletion`；load 生命周期状态看 `LoadQueue`。
 - 改 store 执行完成、D$ write、store miss 入 inflight、store 触发 memory-order recovery：
-  优先看 `ExecuteStoreAccess`；store 地址/数据/完成/提交生命周期看 `StoreQueue`。当前地址源 ready 时可以先做 `StoreAddress`，数据源 ready 时可以先做 `StoreData`，完整 store 才提交 ROB completion。
+  优先看 `ExecuteStoreAccess`；store 地址/数据/完成/提交生命周期和 resolved-store view 看 `StoreQueue`。当前地址源 ready 时可以先做 `StoreAddress`，数据源 ready 时可以先做 `StoreData`，完整 store 才提交 ROB completion。
 - 改 D$ hit/miss/blocking/outstanding/stall counter：
   优先看 `ExecuteDCacheAccess`。
 - 改已发出的 load/store miss 如何等待并提交完成事件：
@@ -249,7 +251,7 @@ flowchart TD
 - 改 issue 宽度、执行单元分配、AMO issue wait、load issue speculation、issue/topdown slot 归因：
   优先看 `IssueReadySelect`。`ReservationStation` 只保存等待队列与操作数 wakeup，执行单元忙闲以 `CPUState::ExecutionUnit::busy` 为唯一事实来源。
 - 改 addr-unknown store speculation、Bad Addr-Unknown Pair、load-store violation recovery trigger：
-  优先看 `ExecuteMemoryOrder`。
+  策略、训练和 recovery 入口优先看 `ExecuteMemoryOrder`；store resolve 后查 violating load 的扫描规则看 `LoadQueue` / `StoreQueue`。
 - 改执行阶段早恢复、branch/JALR younger cleanup、rename checkpoint restore：
   优先看 `ExecuteControlRecovery` 和 `OooRecovery`。
 
@@ -294,6 +296,7 @@ flowchart TD
 | load 地址 ready、issue、replay、完成、提交生命周期 | `LoadQueue` / `DispatchAdmission` / `ExecuteLoadCompletion` / `ExecuteMemoryInflight` / `CommitRetireEffects` |
 | load 为什么 replay、replay 属于哪一类 | `ExecuteLoadCompletion` / `ExecuteLoadHazard` / `ExecuteMemoryOrder` |
 | load 是否应该绕过地址未知 store | `ExecuteMemoryOrder` |
+| store resolve 后是否发现 younger load 顺序违规 | `LoadQueue` / `StoreQueue` / `ExecuteMemoryOrder` |
 | store 地址/数据 ready、完成、提交生命周期 | `StoreQueue` / `ReservationStation` / `IssueReadySelect` / `ExecuteStoreAccess` / `CommitMemoryEffects` |
 | store-to-load forwarding 命中率、partial merge 行为 | `ExecuteLoadAccess` / `StoreForwardingBuffer` / `CommitRetireEffects` |
 | D$ miss、outstanding limit、stall 周期 | `ExecuteDCacheAccess` / `ExecuteMemoryInflight` |

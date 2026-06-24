@@ -95,4 +95,44 @@ TEST(LoadQueueTest, FlushAfterDropsOnlyYoungerLoads) {
     EXPECT_EQ(load_queue.getOccupiedEntryCount(), 2u);
 }
 
+TEST(LoadQueueTest, FindsFirstYoungerSpeculativeOverlappingExecutedLoad) {
+    LoadQueue load_queue;
+    auto later_load = makeLoad(5, 0x120);
+    auto first_load = makeLoad(3, 0x110);
+
+    later_load->get_memory_info().speculated_past_addr_unknown_store = true;
+    first_load->get_memory_info().speculated_past_addr_unknown_store = true;
+    ASSERT_TRUE(load_queue.updateAddress(later_load, 0x2008, 8));
+    ASSERT_TRUE(load_queue.updateAddress(first_load, 0x2002, 4));
+    ASSERT_TRUE(load_queue.markIssued(later_load));
+    ASSERT_TRUE(load_queue.markCompleted(first_load));
+
+    const auto* entry = load_queue.findFirstViolatingLoadAfterStore(2, 0x2000, 4);
+
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->instruction, first_load);
+}
+
+TEST(LoadQueueTest, IgnoresLoadsThatCannotViolateResolvedStore) {
+    LoadQueue load_queue;
+    auto older_load = makeLoad(1, 0x100);
+    auto non_speculative_load = makeLoad(3, 0x104);
+    auto not_executed_load = makeLoad(4, 0x108);
+    auto non_overlapping_load = makeLoad(5, 0x10c);
+
+    ASSERT_TRUE(load_queue.updateAddress(older_load, 0x2000, 4));
+    ASSERT_TRUE(load_queue.updateAddress(non_speculative_load, 0x2000, 4));
+    ASSERT_TRUE(load_queue.updateAddress(not_executed_load, 0x2000, 4));
+    ASSERT_TRUE(load_queue.updateAddress(non_overlapping_load, 0x3000, 4));
+
+    older_load->get_memory_info().speculated_past_addr_unknown_store = true;
+    not_executed_load->get_memory_info().speculated_past_addr_unknown_store = true;
+    non_overlapping_load->get_memory_info().speculated_past_addr_unknown_store = true;
+    ASSERT_TRUE(load_queue.markIssued(older_load));
+    ASSERT_TRUE(load_queue.markIssued(non_speculative_load));
+    ASSERT_TRUE(load_queue.markIssued(non_overlapping_load));
+
+    EXPECT_EQ(load_queue.findFirstViolatingLoadAfterStore(2, 0x2000, 4), nullptr);
+}
+
 } // namespace riscv

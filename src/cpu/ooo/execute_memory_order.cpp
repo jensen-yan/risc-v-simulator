@@ -5,16 +5,6 @@
 
 namespace riscv {
 
-namespace {
-
-bool rangesOverlap(uint64_t lhs_addr, uint64_t lhs_size, uint64_t rhs_addr, uint64_t rhs_size) {
-    const uint64_t lhs_end = lhs_addr + lhs_size - 1;
-    const uint64_t rhs_end = rhs_addr + rhs_size - 1;
-    return lhs_addr <= rhs_end && rhs_addr <= lhs_end;
-}
-
-} // namespace
-
 ExecuteMemoryOrder::AddrUnknownStoreSnapshot
 ExecuteMemoryOrder::captureAddrUnknownStoreSnapshot(const CPUState& state) {
     AddrUnknownStoreSnapshot snapshot;
@@ -94,51 +84,22 @@ bool ExecuteMemoryOrder::markBlockedAddrUnknownPairIfNeeded(
 
 bool ExecuteMemoryOrder::tryRecoverViolation(const DynamicInstPtr& store_instruction,
                                              CPUState& state) {
-    if (!store_instruction || !store_instruction->is_store_instruction() || !state.reorder_buffer) {
+    if (!store_instruction || !store_instruction->is_store_instruction() || !state.reorder_buffer ||
+        !state.store_queue || !state.load_queue) {
         return false;
     }
 
-    const auto& store_memory = store_instruction->get_memory_info();
-    if (!store_memory.address_ready || store_memory.memory_size == 0) {
+    const auto store_address = state.store_queue->getResolvedAddress(store_instruction);
+    if (!store_address.has_value()) {
         return false;
     }
 
-    DynamicInstPtr violating_load = nullptr;
-    for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
-        if (!state.reorder_buffer->is_entry_valid(static_cast<ROBEntry>(i))) {
-            continue;
-        }
-
-        auto candidate = state.reorder_buffer->get_entry(static_cast<ROBEntry>(i));
-        if (!candidate || candidate->get_instruction_id() <= store_instruction->get_instruction_id()) {
-            continue;
-        }
-        if (!candidate->is_load_instruction()) {
-            continue;
-        }
-
-        const auto& load_memory = candidate->get_memory_info();
-        if (!load_memory.speculated_past_addr_unknown_store || !load_memory.address_ready ||
-            load_memory.memory_size == 0) {
-            continue;
-        }
-        if (!candidate->is_executing() && !candidate->is_completed()) {
-            continue;
-        }
-        if (!rangesOverlap(store_memory.memory_address,
-                           store_memory.memory_size,
-                           load_memory.memory_address,
-                           load_memory.memory_size)) {
-            continue;
-        }
-
-        violating_load = std::move(candidate);
-        break;
-    }
-
-    if (!violating_load) {
+    const auto* violating_entry = state.load_queue->findFirstViolatingLoadAfterStore(
+        store_address->instruction_id, store_address->address, store_address->size);
+    if (!violating_entry || !violating_entry->instruction) {
         return false;
     }
+    const auto violating_load = violating_entry->instruction;
 
     state.load_profiles[violating_load->get_pc()].speculated_addr_unknown_violation++;
     state.store_profiles[store_instruction->get_pc()].caused_order_violation++;
@@ -165,9 +126,9 @@ bool ExecuteMemoryOrder::tryRecoverViolation(const DynamicInstPtr& store_instruc
          "memory order violation recovery: store inst=%" PRId64 " pc=0x%" PRIx64
          " addr=0x%" PRIx64 " load inst=%" PRId64 " pc=0x%" PRIx64 " addr=0x%" PRIx64
          " restart_pc=0x%" PRIx64,
-         store_instruction->get_instruction_id(),
-         store_instruction->get_pc(),
-         store_memory.memory_address,
+         store_address->instruction_id,
+         store_address->pc,
+         store_address->address,
          violating_load->get_instruction_id(),
          violating_load->get_pc(),
          violating_load->get_memory_info().memory_address,

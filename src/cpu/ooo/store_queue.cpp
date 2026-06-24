@@ -139,6 +139,31 @@ void StoreQueue::flush() {
     }
 }
 
+std::optional<StoreQueue::ResolvedAddress> StoreQueue::getResolvedAddress(
+    const DynamicInstPtr& instruction) const {
+    const auto* entry = findEntryForInstruction(instruction);
+    if (entry && entry->address_ready && entry->size != 0) {
+        return ResolvedAddress{entry->instruction,
+                               entry->instruction_id,
+                               entry->pc,
+                               entry->address,
+                               entry->size};
+    }
+    if (!instruction || !instruction->is_store_instruction()) {
+        return std::nullopt;
+    }
+
+    const auto& memory_info = instruction->get_memory_info();
+    if (!memory_info.address_ready || memory_info.memory_size == 0) {
+        return std::nullopt;
+    }
+    return ResolvedAddress{instruction,
+                           instruction->get_instruction_id(),
+                           instruction->get_pc(),
+                           memory_info.memory_address,
+                           memory_info.memory_size};
+}
+
 size_t StoreQueue::getOccupiedEntryCount() const {
     size_t occupied = 0;
     for (const auto& entry : entries_) {

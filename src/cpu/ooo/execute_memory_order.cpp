@@ -226,6 +226,9 @@ void ExecuteMemoryOrder::recordLoadReplayReason(const DynamicInstPtr& instructio
         default:
             break;
     }
+    if (state.load_queue) {
+        state.load_queue->markReplayed(instruction);
+    }
 }
 
 } // namespace riscv

@@ -31,6 +31,17 @@ DecodedInstruction makeStoreInstruction(RegNum rs1, RegNum rs2, uint8_t size) {
     return decoded;
 }
 
+DecodedInstruction makeLoadInstruction(RegNum rd, RegNum rs1, uint8_t size) {
+    DecodedInstruction decoded;
+    decoded.type = InstructionType::I_TYPE;
+    decoded.opcode = Opcode::LOAD;
+    decoded.rd = rd;
+    decoded.rs1 = rs1;
+    decoded.memory_access_size = size;
+    decoded.execution_cycles = 1;
+    return decoded;
+}
+
 DynamicInstPtr makeDynamicInst(const DecodedInstruction& decoded, uint64_t id) {
     return create_dynamic_inst(decoded, 0x80000000 + id * 4, id);
 }
@@ -41,6 +52,7 @@ class DispatchAdmissionTest : public ::testing::Test {
 protected:
     RegisterRenameUnit rename_unit;
     ReservationStation reservation_station;
+    LoadQueue load_queue;
     StoreQueue store_queue;
     StoreForwardingBuffer store_forwarding_buffer;
     std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint> rename_checkpoints;
@@ -48,6 +60,7 @@ protected:
     DispatchAdmission admission() {
         return DispatchAdmission(rename_unit,
                                  reservation_station,
+                                 load_queue,
                                  store_queue,
                                  store_forwarding_buffer,
                                  rename_checkpoints);
@@ -114,6 +127,23 @@ TEST_F(DispatchAdmissionTest, AllocatesReadyStoreButDefersForwardingUntilStoreDa
     EXPECT_EQ(memory_info.memory_size, 4);
     EXPECT_TRUE(inst->is_src2_ready());
     EXPECT_EQ(inst->get_src2_value(), 0xdeadbeefu);
+}
+
+TEST_F(DispatchAdmissionTest, AllocatesLoadQueueEntryForLoad) {
+    rename_unit.update_architecture_register(1, 0x1000);
+    auto inst = makeDynamicInst(makeLoadInstruction(2, 1, 0), 3);
+
+    auto result = admission().tryAdmit(inst, 84, false);
+
+    ASSERT_TRUE(result.admitted());
+    EXPECT_EQ(load_queue.getOccupiedEntryCount(), 1u);
+    const auto* entry = load_queue.findEntryForInstruction(inst);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->instruction_id, inst->get_instruction_id());
+    EXPECT_EQ(entry->pc, inst->get_pc());
+    EXPECT_EQ(entry->size, inst->get_decoded_info().memory_access_size);
+    EXPECT_FALSE(entry->address_ready);
+    EXPECT_TRUE(inst->get_memory_info().is_load);
 }
 
 TEST_F(DispatchAdmissionTest, SavesRenameCheckpointWhenRequested) {

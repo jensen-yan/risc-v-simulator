@@ -205,6 +205,10 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                     memory_info.memory_address = physical_addr;
                     memory_info.memory_size = inst.memory_access_size;
                     memory_info.address_ready = true;
+                    if (state.load_queue) {
+                        state.load_queue->updateAddress(
+                            instruction, physical_addr, inst.memory_access_size);
+                    }
                     LOGT(EXECUTE, "start LOAD: va=0x%" PRIx64 " pa=0x%" PRIx64 ", size=%d",
                          virtual_addr, physical_addr, inst.memory_access_size);
 

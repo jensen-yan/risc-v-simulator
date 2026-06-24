@@ -95,6 +95,9 @@ void ExecuteMemoryInflight::advance(CPUState& state, const CompletionCallback& c
                                                   entry.wait_latency_cycles - max_latency);
                 }
                 ExecuteMemoryOrder::recordLoadReplayBucket(inflight.instruction, state);
+                if (state.load_queue) {
+                    state.load_queue->markCompleted(inflight.instruction);
+                }
             }
             if (!complete(inflight, ExecutionUnitType::LOAD)) {
                 inflight.completion_pending = true;

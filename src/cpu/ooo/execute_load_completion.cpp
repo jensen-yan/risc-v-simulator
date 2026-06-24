@@ -75,6 +75,9 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
              unit.instruction->get_instruction_id(),
              unit_index,
              unit.exception_msg.c_str());
+        if (state.load_queue) {
+            state.load_queue->markCompleted(unit.instruction);
+        }
         ExecuteMemoryOrder::recordLoadReplayBucket(unit.instruction, state);
         return Result::Completed;
     }
@@ -87,6 +90,9 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
          unit.result);
 
     ExecuteMemoryOrder::recordLoadReplayBucket(unit.instruction, state);
+    if (state.load_queue) {
+        state.load_queue->markCompleted(unit.instruction);
+    }
 
     return Result::Completed;
 }

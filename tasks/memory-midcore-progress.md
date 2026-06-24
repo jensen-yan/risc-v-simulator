@@ -40,4 +40,5 @@
 - 已把坏 pair 阻断前移到 RS->execute 之间，避免明知不能越过的 load 先占一次 LOAD 单元和 dispatch 槽
 - 已开始引入现代 LSU store 侧骨架：`StoreQueue` 显式记录地址 ready、数据 ready、完成和提交状态，`StoreForwardingBuffer` 专注 ready-store forwarding
 - 已开始 internal STA/STD split：缺 store data 时可先 issue `StoreAddress`，缺 store address 时也可先 issue `StoreData`；两者都 ready 后再执行完整 store，当前仍共享同一条 ROB/RS entry
-- 下一步优先看 `rob_store_overlap` 是否已明显转成 forwarding；若边际收益变小，再切到 `L2 / prefetcher`
+- 已开始引入现代 LSU load 侧骨架：`LoadQueue` 显式记录 load 分配、地址 ready、issue、replay、完成、提交和 flush 生命周期；当前还未替代 `ExecuteMemoryOrder` 的 violation/replay 策略
+- 下一步优先把 store address resolve 后的 younger executed load 检查迁到 LQ/SQ 边界，再考虑 MDP/StoreSet

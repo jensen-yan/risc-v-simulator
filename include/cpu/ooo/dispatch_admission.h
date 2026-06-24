@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cpu/ooo/dynamic_inst.h"
+#include "cpu/ooo/load_queue.h"
 #include "cpu/ooo/register_rename.h"
 #include "cpu/ooo/reservation_station.h"
 #include "cpu/ooo/store_forwarding_buffer.h"
@@ -31,6 +32,7 @@ public:
     DispatchAdmission(
         RegisterRenameUnit& register_rename,
         ReservationStation& reservation_station,
+        LoadQueue& load_queue,
         StoreQueue& store_queue,
         StoreForwardingBuffer& store_forwarding_buffer,
         std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint>& rename_checkpoints);
@@ -45,6 +47,7 @@ private:
 
     RegisterRenameUnit& register_rename_;
     ReservationStation& reservation_station_;
+    LoadQueue& load_queue_;
     StoreQueue& store_queue_;
     StoreForwardingBuffer& store_forwarding_buffer_;
     std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint>& rename_checkpoints_;

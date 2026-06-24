@@ -5,11 +5,13 @@ namespace riscv {
 DispatchAdmission::DispatchAdmission(
     RegisterRenameUnit& register_rename,
     ReservationStation& reservation_station,
+    LoadQueue& load_queue,
     StoreQueue& store_queue,
     StoreForwardingBuffer& store_forwarding_buffer,
     std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint>& rename_checkpoints)
     : register_rename_(register_rename),
       reservation_station_(reservation_station),
+      load_queue_(load_queue),
       store_queue_(store_queue),
       store_forwarding_buffer_(store_forwarding_buffer),
       rename_checkpoints_(rename_checkpoints) {}
@@ -53,7 +55,9 @@ DispatchAdmission::Result DispatchAdmission::tryAdmit(
         result.rename_checkpoint_saved = true;
     }
 
-    if (instruction->is_store_instruction()) {
+    if (instruction->is_load_instruction()) {
+        load_queue_.syncFromInstruction(instruction);
+    } else if (instruction->is_store_instruction()) {
         store_queue_.syncFromInstruction(instruction);
         result.ready_store_published =
             store_queue_.publishReadyStore(instruction, store_forwarding_buffer_);

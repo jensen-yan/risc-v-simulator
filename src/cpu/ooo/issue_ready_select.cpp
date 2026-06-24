@@ -299,6 +299,9 @@ IssueReadySelect::Result IssueReadySelect::select(CPUState& state, size_t issue_
         }
 
         maybeMarkAddrUnknownSpeculation(state, entry.instruction, addr_unknown_store_snapshot);
+        if (state.load_queue && entry.instruction->is_load_instruction()) {
+            state.load_queue->markIssued(entry.instruction);
+        }
         entry.instruction->set_status(DynamicInst::Status::EXECUTING);
         auto& exec_info = entry.instruction->get_execution_info();
         exec_info.remaining_cycles = exec_info.execution_cycles;

@@ -44,6 +44,7 @@ protected:
         state.reorder_buffer = std::make_unique<ReorderBuffer>();
         state.register_rename = std::make_unique<RegisterRenameUnit>();
         state.reservation_station = std::make_unique<ReservationStation>();
+        state.load_queue = std::make_unique<LoadQueue>();
         state.store_queue = std::make_unique<StoreQueue>();
         state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
         state.cycle_count = 11;

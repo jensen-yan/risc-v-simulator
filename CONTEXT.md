@@ -95,6 +95,10 @@ _避免使用_：把地址未知推测和恢复规则分散写在 `ExecuteStage`
 执行侧的早期恢复路径，用于已经解析的 branch/JALR 预测错误。
 _避免使用_：把早期控制流恢复埋在通用执行单元完成逻辑里
 
+**Load Queue（加载队列）**：
+执行侧 load 生命周期状态，记录一条 load 的分配、地址 ready、issue、replay、完成、提交与推测清理边界；当前是显式生命周期骨架，后续再承接 LQ/SQ violation scan、replay queue 与 MDP/StoreSet 策略。
+_避免使用_：把当前 Load Queue 描述成已经完整实现的高性能乱序 LQ/LoadQueueRAW/LoadQueueReplay
+
 **Store Queue（存储队列）**：
 执行侧 store 生命周期状态，记录一条 store 的地址 ready、数据 ready、完成、提交与推测清理边界；当前支持 internal STA/STD split：store 地址源 ready 时可先执行地址解析，store 数据源 ready 时也可先捕获数据；两者都 ready 后才执行完整 store cache 访问并让 ROB completed。
 _避免使用_：把 ready-store forwarding 表误称为完整 store queue

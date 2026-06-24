@@ -160,6 +160,9 @@ OooRecovery::Result OooRecovery::recoverFullPipeline(CPUState& state,
     if (request.flush_store_forwarding_buffer && state.store_queue) {
         state.store_queue->flush();
     }
+    if (state.load_queue) {
+        state.load_queue->flush();
+    }
 
     if (state.l1i_cache) {
         if (request.reason == Reason::FenceI) {
@@ -311,6 +314,9 @@ OooRecovery::Result OooRecovery::recoverYoungerThan(CPUState& state,
     }
     if (state.store_queue) {
         state.store_queue->flushAfter(request.instruction_id);
+    }
+    if (state.load_queue) {
+        state.load_queue->flushAfter(request.instruction_id);
     }
     result.flushed_completion_events =
         flushYoungerCompletionEvents(state, request.instruction_id);

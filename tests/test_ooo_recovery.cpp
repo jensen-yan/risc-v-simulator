@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "cpu/ooo/ooo_recovery.h"
+#include "cpu/ooo/load_queue.h"
 #include "cpu/ooo/register_rename.h"
 #include "cpu/ooo/reorder_buffer.h"
 #include "cpu/ooo/reservation_station.h"
@@ -24,6 +25,17 @@ DecodedInstruction makeAddiInstruction(RegNum rd, RegNum rs1, int32_t imm) {
     return decoded;
 }
 
+DecodedInstruction makeLoadInstruction(RegNum rd, RegNum rs1) {
+    DecodedInstruction decoded;
+    decoded.type = InstructionType::I_TYPE;
+    decoded.opcode = Opcode::LOAD;
+    decoded.rd = rd;
+    decoded.rs1 = rs1;
+    decoded.memory_access_size = 8;
+    decoded.execution_cycles = 1;
+    return decoded;
+}
+
 FetchedInstruction makeFetched(uint64_t pc) {
     FetchedInstruction fetched;
     fetched.pc = pc;
@@ -42,16 +54,20 @@ protected:
         state.reorder_buffer = std::make_unique<ReorderBuffer>();
         state.register_rename = std::make_unique<RegisterRenameUnit>();
         state.reservation_station = std::make_unique<ReservationStation>();
+        state.load_queue = std::make_unique<LoadQueue>();
         state.store_queue = std::make_unique<StoreQueue>();
-    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
+        state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
     }
 };
 
 TEST_F(OooRecoveryTest, FullPipelineRecoveryClearsSpeculativeStructuresAndRecordsCounters) {
     auto older = state.reorder_buffer->allocate_entry(makeAddiInstruction(1, 0, 1), 0x100, 1);
     auto younger = state.reorder_buffer->allocate_entry(makeAddiInstruction(2, 0, 2), 0x104, 2);
+    auto load = create_dynamic_inst(makeLoadInstruction(3, 0), 0x108, 3);
     ASSERT_NE(older, nullptr);
     ASSERT_NE(younger, nullptr);
+    ASSERT_NE(load, nullptr);
+    ASSERT_TRUE(state.load_queue->allocateLoad(load));
     state.fetch_buffer.push(makeFetched(0x108));
     state.fetch_buffer.push(makeFetched(0x10c));
     ASSERT_TRUE(state.completion_fabric.trySubmit(CompletionEvent(younger)));
@@ -76,6 +92,7 @@ TEST_F(OooRecoveryTest, FullPipelineRecoveryClearsSpeculativeStructuresAndRecord
     EXPECT_EQ(result.fetch_buffer_dropped, 2u);
     EXPECT_EQ(result.flushed_completion_events, 1u);
     EXPECT_TRUE(state.reorder_buffer->is_empty());
+    EXPECT_EQ(state.load_queue->getOccupiedEntryCount(), 0u);
     EXPECT_TRUE(state.fetch_buffer.empty());
     EXPECT_TRUE(state.completion_fabric.empty());
     EXPECT_TRUE(state.rename_checkpoints.empty());
@@ -117,9 +134,15 @@ TEST_F(OooRecoveryTest, YoungerThanRecoveryFlushesOnlyYoungerWork) {
     auto older = state.reorder_buffer->allocate_entry(makeAddiInstruction(1, 0, 1), 0x100, 1);
     auto current = state.reorder_buffer->allocate_entry(makeAddiInstruction(2, 0, 2), 0x104, 2);
     auto younger = state.reorder_buffer->allocate_entry(makeAddiInstruction(3, 0, 3), 0x108, 3);
+    auto older_load = create_dynamic_inst(makeLoadInstruction(4, 0), 0x10c, 1);
+    auto younger_load = create_dynamic_inst(makeLoadInstruction(5, 0), 0x110, 5);
     ASSERT_NE(older, nullptr);
     ASSERT_NE(current, nullptr);
     ASSERT_NE(younger, nullptr);
+    ASSERT_NE(older_load, nullptr);
+    ASSERT_NE(younger_load, nullptr);
+    ASSERT_TRUE(state.load_queue->allocateLoad(older_load));
+    ASSERT_TRUE(state.load_queue->allocateLoad(younger_load));
 
     state.fetch_buffer.push(makeFetched(0x10c));
     ASSERT_TRUE(state.completion_fabric.trySubmit(CompletionEvent(older)));
@@ -156,6 +179,8 @@ TEST_F(OooRecoveryTest, YoungerThanRecoveryFlushesOnlyYoungerWork) {
     EXPECT_NE(state.reorder_buffer->get_entry(older->get_rob_entry()), nullptr);
     EXPECT_NE(state.reorder_buffer->get_entry(current->get_rob_entry()), nullptr);
     EXPECT_EQ(state.reorder_buffer->get_entry(younger->get_rob_entry()), nullptr);
+    EXPECT_NE(state.load_queue->findEntryForInstruction(older_load), nullptr);
+    EXPECT_EQ(state.load_queue->findEntryForInstruction(younger_load), nullptr);
     ASSERT_FALSE(state.completion_fabric.empty());
     EXPECT_EQ(state.completion_fabric.popReadyEvent().instruction, older);
     EXPECT_TRUE(state.completion_fabric.empty());

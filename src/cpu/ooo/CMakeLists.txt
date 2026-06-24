@@ -21,6 +21,7 @@ target_sources(risc-v-sim-lib PRIVATE
     execute_store_access.cpp
     execute_semantics.cpp
     issue_ready_select.cpp
+    load_queue.cpp
     memory_timing_backend.cpp
     ooo_recovery.cpp
     perf_counters.cpp

@@ -7,6 +7,7 @@
 #include "cpu/ooo/register_rename.h"
 #include "cpu/ooo/reservation_station.h"
 #include "cpu/ooo/reorder_buffer.h"
+#include "cpu/ooo/load_queue.h"
 #include "cpu/ooo/store_forwarding_buffer.h"
 #include "cpu/ooo/store_queue.h"
 #include "cpu/ooo/perf_counters.h"
@@ -275,6 +276,7 @@ struct CPUState {
     std::unique_ptr<RegisterRenameUnit> register_rename;
     std::unique_ptr<ReservationStation> reservation_station;
     std::unique_ptr<ReorderBuffer> reorder_buffer;
+    std::unique_ptr<LoadQueue> load_queue; // Load Queue记录load地址、replay、完成和提交生命周期
     std::unique_ptr<StoreQueue> store_queue; // Store Queue记录store生命周期状态
     std::unique_ptr<StoreForwardingBuffer> store_forwarding_buffer;  // Ready store forwarding view
     std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint> rename_checkpoints;

@@ -2,13 +2,19 @@
 
 namespace riscv {
 
-void CommitRetireEffects::retireStoreStructuresAndRenameCheckpoint(
+void CommitRetireEffects::retireMemoryStructuresAndRenameCheckpoint(
     CPUState& state,
     const DynamicInstPtr& instruction) {
     if (!instruction) {
         return;
     }
 
+    if (state.load_queue) {
+        if (instruction->is_load_instruction()) {
+            state.load_queue->markCommitted(instruction);
+        }
+        state.load_queue->retireLoadsBefore(instruction->get_instruction_id());
+    }
     if (state.store_queue) {
         state.store_queue->retireStoresBefore(instruction->get_instruction_id());
     }
@@ -78,7 +84,7 @@ void CommitRetireEffects::recordStoreProfile(CPUState& state,
 
 void CommitRetireEffects::afterInstructionRetired(CPUState& state,
                                                   const DynamicInstPtr& instruction) {
-    retireStoreStructuresAndRenameCheckpoint(state, instruction);
+    retireMemoryStructuresAndRenameCheckpoint(state, instruction);
     recordLoadProfile(state, instruction);
     recordStoreProfile(state, instruction);
 }

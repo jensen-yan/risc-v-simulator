@@ -130,6 +130,9 @@ flowchart LR
   sq["Store Queue"] --- dis
   sq --- e
   sq --- c
+  lq["Load Queue"] --- dis
+  lq --- e
+  lq --- c
   sfb["Store Forwarding Buffer"] --- e
   rob --- r
 ```
@@ -138,6 +141,7 @@ flowchart LR
 - `OutOfOrderCPU::step()` 负责装配每个阶段的 `Stage::Context`，阶段执行入口只接收自己的 context，不直接暴露整份 `CPUState`。
 - 当某个阶段的 context 仍然需要承载跨领域能力时，优先把稳定规则下沉为更深模块，例如当前的 `DispatchAdmission`、`ExecuteMemoryOrder` 和 `OooRecovery`，而不是继续扩大 stage interface。
 - `DispatchAdmission` 集中维护一条 ROB entry 进入后端时的 rename 事务、operand binding、RS placement、ready-store publication 和 rename checkpoint 保存；`DispatchStage` 只保留每拍宽度、串行化阻塞和 stall/counter orchestration。
+- `LoadQueue` 保存 load 的分配、地址 ready、issue、replay、完成、提交和 flush 生命周期；当前先作为显式生命周期骨架，后续再承接 LQ/SQ violation scan、replay queue 和 MDP/StoreSet 策略。
 - `StoreQueue` 保存 store 的地址 ready、数据 ready、完成、提交和 flush 生命周期；`StoreForwardingBuffer` 只保存地址和值都 ready 的 forwarding view。
 - store 当前支持 internal STA/STD split：`ReservationStation::ReadyEntry` 会把同一条 store 暴露为 `StoreAddress`、`StoreData` 或完整 store work kind。`StoreAddress` 只计算/翻译地址并写 `StoreQueue`；`StoreData` 只捕获数据并写 `StoreQueue`；完整 store 只有地址和值都 ready 后才走 D$ 时序和 ROB completion。
 - 这还不是 true STA/STD uop split：ROB entry、RS entry 和 `DynamicInst` 仍是一条 store；当前每个 issue 选择周期同一条 store 最多选中一个 work kind，后续要进一步拆出独立 uop/子 entry 才接近现代高性能 LSU 的并行 STA/STD 调度。
@@ -165,6 +169,7 @@ flowchart TD
     ESA["ExecuteStoreAccess\nstore D$ write / inflight / recovery trigger"]
     STA["internal STA\naddr-only issue"]
     STD["internal STD\ndata-only issue"]
+    LQ["LoadQueue\nload addr/replay/commit state"]
     SQ["StoreQueue\nstore addr/data/commit state"]
     SFB["StoreForwardingBuffer\nready-store forwarding view"]
     EDC["ExecuteDCacheAccess\nD$ timing handshake"]
@@ -186,14 +191,17 @@ flowchart TD
 
   IRS --> ES
   IRS --> EMO
+  IRS --> LQ
   ES --> ELC
   ES --> CF
   ELC --> ELH
   ELC --> ELA
+  ELC --> LQ
   ELA --> ELV
   ELA --> SFB
   ELA --> EDC
   ELC --> EMI
+  EMI --> LQ
   ES --> ESA
   ESA --> STA
   STA --> SQ
@@ -214,6 +222,8 @@ flowchart TD
   CME --> SQ
   CS --> CRE
   CS --> CRT
+  CRT --> LQ
+  CRT --> SQ
   CS --> CCF
   CS --> CSE
   CCF --> REC
@@ -227,7 +237,7 @@ flowchart TD
 - 改 store-to-load forwarding、partial merge、load 从内存或 D$ 得到最终值：
   优先看 `ExecuteLoadAccess` 和 `StoreForwardingBuffer`，值格式化规则看 `ExecuteLoadValue`。
 - 改 ready load 如何在 replay、cache wait、inflight、exception、complete 之间流转：
-  优先看 `ExecuteLoadCompletion`。
+  优先看 `ExecuteLoadCompletion`；load 生命周期状态看 `LoadQueue`。
 - 改 store 执行完成、D$ write、store miss 入 inflight、store 触发 memory-order recovery：
   优先看 `ExecuteStoreAccess`；store 地址/数据/完成/提交生命周期看 `StoreQueue`。当前地址源 ready 时可以先做 `StoreAddress`，数据源 ready 时可以先做 `StoreData`，完整 store 才提交 ROB completion。
 - 改 D$ hit/miss/blocking/outstanding/stall counter：
@@ -250,7 +260,7 @@ flowchart TD
 - 改整数/浮点寄存器、fflags、rename map 的提交：
   优先看 `CommitRegisterEffects`。
 - 改退休后的 store-forwarding-buffer、rename checkpoint、load/store profile bookkeeping：
-  优先看 `CommitRetireEffects`。
+  优先看 `CommitRetireEffects`；load/store queue 的退休清理也在这里归口。
 - 改 branch/JAL/JALR 退休时的 predictor/profile/redirect flush：
   优先看 `CommitControlFlowEffects`。
 - 改 CSR、ECALL、EBREAK、MRET、FENCE/FENCE.I、trap entry、serializing full flush：
@@ -281,6 +291,7 @@ flowchart TD
 | 想探索的问题 | 优先入口 |
 | --- | --- |
 | issue 宽度、执行单元选择、ready slot 为什么没发射 | `IssueReadySelect` |
+| load 地址 ready、issue、replay、完成、提交生命周期 | `LoadQueue` / `DispatchAdmission` / `ExecuteLoadCompletion` / `ExecuteMemoryInflight` / `CommitRetireEffects` |
 | load 为什么 replay、replay 属于哪一类 | `ExecuteLoadCompletion` / `ExecuteLoadHazard` / `ExecuteMemoryOrder` |
 | load 是否应该绕过地址未知 store | `ExecuteMemoryOrder` |
 | store 地址/数据 ready、完成、提交生命周期 | `StoreQueue` / `ReservationStation` / `IssueReadySelect` / `ExecuteStoreAccess` / `CommitMemoryEffects` |

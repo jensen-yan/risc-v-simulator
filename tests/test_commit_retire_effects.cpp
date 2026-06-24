@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "cpu/ooo/commit_retire_effects.h"
+#include "cpu/ooo/load_queue.h"
 #include "cpu/ooo/register_rename.h"
 #include "cpu/ooo/store_forwarding_buffer.h"
 
@@ -22,6 +23,7 @@ DecodedInstruction makeInstruction(Opcode opcode) {
 TEST(CommitRetireEffectsTest, RetiresOlderStoreForwardingBufferEntriesAndRenameCheckpoint) {
     CPUState state;
     state.register_rename = std::make_unique<RegisterRenameUnit>();
+    state.load_queue = std::make_unique<LoadQueue>();
     state.store_queue = std::make_unique<StoreQueue>();
     state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
 
@@ -44,6 +46,26 @@ TEST(CommitRetireEffectsTest, RetiresOlderStoreForwardingBufferEntriesAndRenameC
     EXPECT_EQ(state.store_forwarding_buffer->get_occupied_entry_count(), 1u);
     EXPECT_FALSE(older_store->get_memory_info().store_forwarding_buffer_published);
     EXPECT_TRUE(state.rename_checkpoints.empty());
+}
+
+TEST(CommitRetireEffectsTest, RetiresOlderLoadQueueEntries) {
+    CPUState state;
+    state.load_queue = std::make_unique<LoadQueue>();
+
+    auto older_load = create_dynamic_inst(makeInstruction(Opcode::LOAD), 0x100, 4);
+    auto current = create_dynamic_inst(makeInstruction(Opcode::OP_IMM), 0x104, 7);
+    auto younger_load = create_dynamic_inst(makeInstruction(Opcode::LOAD), 0x108, 9);
+    ASSERT_NE(older_load, nullptr);
+    ASSERT_NE(current, nullptr);
+    ASSERT_NE(younger_load, nullptr);
+
+    ASSERT_TRUE(state.load_queue->allocateLoad(older_load));
+    ASSERT_TRUE(state.load_queue->allocateLoad(younger_load));
+
+    CommitRetireEffects::afterInstructionRetired(state, current);
+
+    EXPECT_EQ(state.load_queue->findEntryForInstruction(older_load), nullptr);
+    EXPECT_NE(state.load_queue->findEntryForInstruction(younger_load), nullptr);
 }
 
 TEST(CommitRetireEffectsTest, RecordsLoadRetireProfileAndTrainsAddrUnknownSuccess) {

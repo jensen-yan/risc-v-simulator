@@ -9,8 +9,8 @@ public:
     static void afterInstructionRetired(CPUState& state, const DynamicInstPtr& instruction);
 
 private:
-    static void retireStoreStructuresAndRenameCheckpoint(CPUState& state,
-                                                         const DynamicInstPtr& instruction);
+    static void retireMemoryStructuresAndRenameCheckpoint(CPUState& state,
+                                                          const DynamicInstPtr& instruction);
     static void recordLoadProfile(CPUState& state, const DynamicInstPtr& instruction);
     static void recordStoreProfile(CPUState& state, const DynamicInstPtr& instruction);
 };

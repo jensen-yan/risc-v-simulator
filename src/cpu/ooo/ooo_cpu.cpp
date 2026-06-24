@@ -84,6 +84,7 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     state.register_rename = std::make_unique<RegisterRenameUnit>();
     state.reservation_station = std::make_unique<ReservationStation>();
     state.reorder_buffer = std::make_unique<ReorderBuffer>();
+    state.load_queue = std::make_unique<LoadQueue>();
     state.store_queue = std::make_unique<StoreQueue>();
     state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
     state.syscall_handler = std::make_unique<SyscallHandler>(memory);

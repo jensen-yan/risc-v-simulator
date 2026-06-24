@@ -96,8 +96,16 @@ _避免使用_：把地址未知推测和恢复规则分散写在 `ExecuteStage`
 _避免使用_：把早期控制流恢复埋在通用执行单元完成逻辑里
 
 **Store Queue（存储队列）**：
-执行侧 store 生命周期状态，记录一条 store 的地址 ready、数据 ready、完成、提交与推测清理边界；当前仍是一条 `STORE` 执行，不代表已经拆成独立 STA/STD uop。
+执行侧 store 生命周期状态，记录一条 store 的地址 ready、数据 ready、完成、提交与推测清理边界；当前支持 soft STA/STD split：store 地址源 ready 时可先执行地址解析，数据未 ready 时保留 RS entry 且不让 ROB completed，数据到达后再执行完整 store。
 _避免使用_：把 ready-store forwarding 表误称为完整 store queue
+
+**Store Address / STA（存储地址操作）**：
+store 的地址计算与翻译子路径，只依赖地址源寄存器和立即数；当前 STA 是同一条 store 指令的一次 address-only issue，不是独立 scheduler item。
+_避免使用_：把当前 STA 描述成已经完整拆分的 store-address uop
+
+**Store Data / STD（存储数据操作）**：
+store 数据值进入 Store Queue 的子路径，只依赖 store data 源寄存器；当前 STD 通过普通 operand wakeup 和后续完整 store issue 完成，不是独立 scheduler item。
+_避免使用_：把当前 STD 描述成已经完整拆分的 store-data uop
 
 **Store Forwarding Buffer（存储转发表）**：
 保存地址和值都 ready 的 store 视图，用于 younger load 的 store-to-load forwarding 和 overlap blocking；它不是 committed SBuffer，也不直接代表架构内存已更新。

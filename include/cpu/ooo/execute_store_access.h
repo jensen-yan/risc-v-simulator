@@ -12,6 +12,7 @@ public:
         MovedToInflight,
         BlockedByDCacheOutstanding,
         ReplayedForHostComm,
+        AddressOnlyCompleted,
         RecoveryTriggered,
     };
 

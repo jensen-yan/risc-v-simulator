@@ -102,6 +102,32 @@ TEST(ReservationStationTest, UpdateOperandsMakesWaitingEntryReady) {
     EXPECT_EQ(waiting->get_src1_value(), 0xAABBCCDDu);
 }
 
+TEST(ReservationStationTest, StoreCanIssueAddressBeforeStoreDataIsReady) {
+    ReservationStation rs;
+    auto store = makeDynamicInst(
+        makeInstruction(InstructionType::S_TYPE, Opcode::STORE),
+        0x1000,
+        1,
+        /*src1_ready=*/true,
+        /*src2_ready=*/false);
+    ASSERT_TRUE(rs.dispatch_instruction(store).success);
+
+    auto ready = rs.ready_entries();
+    ASSERT_EQ(ready.size(), 1u);
+    EXPECT_EQ(ready[0].instruction, store);
+
+    auto& memory_info = store->get_memory_info();
+    memory_info.address_ready = true;
+    memory_info.memory_address = 0x2000;
+    memory_info.memory_size = 4;
+    EXPECT_TRUE(rs.ready_entries().empty());
+
+    store->set_src2_ready(true, 0x12345678);
+    ready = rs.ready_entries();
+    ASSERT_EQ(ready.size(), 1u);
+    EXPECT_EQ(ready[0].instruction, store);
+}
+
 TEST(ReservationStationTest, ReadyEntriesReturnProgramOrderAndSkipExecuting) {
     ReservationStation rs;
     auto younger = makeDynamicInst(makeInstruction(), 0x1004, 2);

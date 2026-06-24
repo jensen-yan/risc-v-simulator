@@ -30,4 +30,5 @@
 - 新增 `benchmarks/manifest/memory_learning.json`，便于单独跑 LSU / memory 学习路线
 - 第一批 LSU 计数器已落地：load replay 根因、forwarding 细分、store forwarding buffer 占用
 - LSU 结构命名开始对齐现代 CPU：`StoreQueue` 记录 store 生命周期，`StoreForwardingBuffer` 只表示 ready-store forwarding view
+- 已开始 soft STA/STD split：store 地址源 ready 时可以先解析地址并写入 `StoreQueue`，数据未 ready 时不会完成 ROB，后续仍计划演进到 true STA/STD 双 uop
 - 下一步优先看 `lsu_store_forward / stream_copy / stream_triad` 的新统计，再决定先做 LSU 机制还是转向 L2 / prefetcher

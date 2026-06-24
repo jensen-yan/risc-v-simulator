@@ -10,6 +10,36 @@ namespace riscv {
 ExecuteStoreAccess::Result ExecuteStoreAccess::perform(ExecutionUnit& unit,
                                                        size_t unit_index,
                                                        CPUState& state) {
+    if (!unit.instruction) {
+        resetExecutionUnitState(unit);
+        return Result::Completed;
+    }
+
+    if (unit.has_exception || unit.instruction->has_exception() || unit.instruction->has_trap()) {
+        unit.result = 0;
+        LOGT(EXECUTE, "inst=%" PRId64 " STORE%zu completes with exception/trap",
+             unit.instruction->get_instruction_id(),
+             unit_index);
+        return Result::Completed;
+    }
+
+    const auto& memory_info = unit.instruction->get_memory_info();
+    if (memory_info.address_ready && memory_info.memory_size != 0 &&
+        !unit.instruction->is_src2_ready()) {
+        if (ExecuteMemoryOrder::tryRecoverViolation(unit.instruction, state)) {
+            return Result::RecoveryTriggered;
+        }
+
+        auto address_ready_inst = unit.instruction;
+        address_ready_inst->set_status(DynamicInst::Status::DISPATCHED);
+        resetExecutionUnitState(unit);
+        LOGT(EXECUTE,
+             "inst=%" PRId64 " STORE%zu address ready, wait for store data",
+             address_ready_inst->get_instruction_id(),
+             unit_index);
+        return Result::AddressOnlyCompleted;
+    }
+
     if (ExecuteHostCommAccess::mustSerialize(
             state, unit.instruction, unit.load_address, unit.load_size)) {
         auto blocked_inst = unit.instruction;

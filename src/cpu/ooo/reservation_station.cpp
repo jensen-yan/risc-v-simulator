@@ -236,6 +236,17 @@ RSEntry ReservationStation::allocate_entry() {
 
 bool ReservationStation::is_instruction_ready(DynamicInstPtr instruction) const {
     if (!instruction) return false;
+    if (instruction->is_store_instruction()) {
+        if (!instruction->is_src1_ready()) {
+            return false;
+        }
+
+        const auto& memory_info = instruction->get_memory_info();
+        if (!memory_info.address_ready) {
+            return true;
+        }
+        return instruction->is_src2_ready();
+    }
     return instruction->is_ready_to_execute();
 }
 

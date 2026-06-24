@@ -883,7 +883,7 @@
           </div>
           <div class="panel">
             <h4>StoreQueue / StoreForwardingBuffer</h4>
-            <p>StoreQueue 记录地址 ready、数据 ready、commit 和发布状态；StoreForwardingBuffer 保存已知地址和值的更老 store，服务 younger load 的 full forwarding、partial merge 或 overlap 阻塞。</p>
+            <p>StoreQueue 记录地址 ready、数据 ready、commit 和发布状态；当前 store 可以先做 soft STA 解析地址，数据到达后再完整执行并发布到 StoreForwardingBuffer。</p>
             <p class="mono shell">include/cpu/ooo/store_queue.h:15, include/cpu/ooo/store_forwarding_buffer.h:23</p>
           </div>
           <div class="panel">
@@ -907,7 +907,7 @@
             <h4>地址不是 Issue 算，而是 Execute semantics 算</h4>
             <p>
               Load 用 <code>rs1 + imm</code> 算虚拟地址，再走 <code>translateLoadAddress()</code> 得到物理地址，
-              写入 <code>unit.load_address</code> 和 <code>MemoryInfo</code>。Store 同理，但还记录 store value。
+              写入 <code>unit.load_address</code> 和 <code>MemoryInfo</code>。Store 地址源 ready 时也可以先算地址并写入 <code>StoreQueue</code>，即使 store data 还没 ready。
             </p>
             <p class="mono shell">src/cpu/ooo/execute_semantics.cpp:192, 313</p>
           </div>
@@ -1066,13 +1066,13 @@
         <div class="tab-pane" id="walk-store">
           <div class="timeline">
             <div class="cycle">1</div>
-            <div class="timeline-item"><b>Issue</b><p>store 本身没有普通整数目的寄存器，但依赖地址源和值源。</p></div>
+            <div class="timeline-item"><b>Issue</b><p>store 本身没有普通整数目的寄存器；地址源 ready 时可先 issue 一次 soft STA。</p></div>
             <div class="cycle">2</div>
-            <div class="timeline-item"><b>Execute semantics</b><p>地址和值 ready 后写入 <code>MemoryInfo</code> / <code>StoreQueue</code>，再发布到 StoreForwardingBuffer。</p></div>
+            <div class="timeline-item"><b>STA</b><p>先计算并翻译地址，写入 <code>MemoryInfo.address_ready</code> / <code>StoreQueue.address_ready</code>；数据未 ready 时保留 RS entry，不通知 ROB completed。</p></div>
             <div class="cycle">3</div>
-            <div class="timeline-item"><b>D$ 时序访问</b><p>store execute 可以用 <code>BlockingCache::access()</code> 建模 miss penalty，但不做真实架构写。</p></div>
+            <div class="timeline-item"><b>STD + publish</b><p>store data wakeup 后更新 <code>StoreQueue.data_ready</code>，地址和值都 ready 时发布到 StoreForwardingBuffer。</p></div>
             <div class="cycle">4</div>
-            <div class="timeline-item"><b>Memory order check</b><p>如果发现 younger load 曾错误越过地址未知 store，触发 memory-order violation recovery。</p></div>
+            <div class="timeline-item"><b>D$ / order check</b><p>完整 store 执行时走 D$ 时序；STA 地址解析后若发现 younger load 错误越过，也可触发 memory-order violation recovery。</p></div>
             <div class="cycle">5</div>
             <div class="timeline-item"><b>Commit</b><p>到 ROB head 后，<code>commitStore()</code> 写 L1D / Memory，并 retire StoreQueue / StoreForwardingBuffer entry。</p></div>
           </div>

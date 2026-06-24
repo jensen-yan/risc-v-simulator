@@ -139,6 +139,8 @@ flowchart LR
 - 当某个阶段的 context 仍然需要承载跨领域能力时，优先把稳定规则下沉为更深模块，例如当前的 `DispatchAdmission`、`ExecuteMemoryOrder` 和 `OooRecovery`，而不是继续扩大 stage interface。
 - `DispatchAdmission` 集中维护一条 ROB entry 进入后端时的 rename 事务、operand binding、RS placement、ready-store publication 和 rename checkpoint 保存；`DispatchStage` 只保留每拍宽度、串行化阻塞和 stall/counter orchestration。
 - `StoreQueue` 保存 store 的地址 ready、数据 ready、完成、提交和 flush 生命周期；`StoreForwardingBuffer` 只保存地址和值都 ready 的 forwarding view。
+- store 当前支持 soft STA/STD split：`src1` ready 且地址未解析时，store 可以先占用 STORE unit 完成地址计算和翻译；若 `src2` 尚未 ready，该指令会回到 `DISPATCHED` 并保留 RS entry，不向 Completion Fabric / ROB 报完成。
+- 这还不是 true STA/STD uop split：ROB entry 和 RS entry 仍是一条 store，后续要进一步拆成两个独立 scheduler item，才接近现代高性能 LSU 的 STA/STD 调度。
 - `OooRecovery` 集中维护乱序流水线恢复时的资源清理规则；触发 recovery 的阶段只负责判断原因、restart PC 或 younger-than 范围。
 - 判断一个改动该不该放进 `cpu/ooo/` 的标准：
   如果它解决的是调度、flush、提交一致性、资源竞争，通常属于 OOO。
@@ -161,6 +163,8 @@ flowchart TD
     ELA["ExecuteLoadAccess\nforwarding / memory read / D$ read / exception"]
     ELV["ExecuteLoadValue\nload value formatting"]
     ESA["ExecuteStoreAccess\nstore D$ write / inflight / recovery trigger"]
+    STA["soft STA\naddr-only issue"]
+    STD["soft STD\ndata wakeup / full store issue"]
     SQ["StoreQueue\nstore addr/data/commit state"]
     SFB["StoreForwardingBuffer\nready-store forwarding view"]
     EDC["ExecuteDCacheAccess\nD$ timing handshake"]
@@ -191,6 +195,9 @@ flowchart TD
   ELA --> EDC
   ELC --> EMI
   ES --> ESA
+  ESA --> STA
+  STA --> SQ
+  STD --> SQ
   ESA --> SQ
   SQ --> SFB
   ESA --> EDC
@@ -201,6 +208,7 @@ flowchart TD
   CF --> WS
   ECR --> REC
   EMO --> REC
+  WS --> STD
 
   CS --> CME
   CME --> SQ
@@ -221,7 +229,7 @@ flowchart TD
 - 改 ready load 如何在 replay、cache wait、inflight、exception、complete 之间流转：
   优先看 `ExecuteLoadCompletion`。
 - 改 store 执行完成、D$ write、store miss 入 inflight、store 触发 memory-order recovery：
-  优先看 `ExecuteStoreAccess`；store 地址/数据/完成/提交生命周期看 `StoreQueue`。
+  优先看 `ExecuteStoreAccess`；store 地址/数据/完成/提交生命周期看 `StoreQueue`。当前地址源 ready 时可以先做 soft STA，数据未 ready 时不释放 RS entry、不提交 ROB completion。
 - 改 D$ hit/miss/blocking/outstanding/stall counter：
   优先看 `ExecuteDCacheAccess`。
 - 改已发出的 load/store miss 如何等待并提交完成事件：
@@ -275,7 +283,7 @@ flowchart TD
 | issue 宽度、执行单元选择、ready slot 为什么没发射 | `IssueReadySelect` |
 | load 为什么 replay、replay 属于哪一类 | `ExecuteLoadCompletion` / `ExecuteLoadHazard` / `ExecuteMemoryOrder` |
 | load 是否应该绕过地址未知 store | `ExecuteMemoryOrder` |
-| store 地址/数据 ready、完成、提交生命周期 | `StoreQueue` / `DispatchAdmission` / `ExecuteStoreAccess` / `CommitMemoryEffects` |
+| store 地址/数据 ready、完成、提交生命周期 | `StoreQueue` / `ReservationStation` / `IssueReadySelect` / `ExecuteStoreAccess` / `CommitMemoryEffects` |
 | store-to-load forwarding 命中率、partial merge 行为 | `ExecuteLoadAccess` / `StoreForwardingBuffer` / `CommitRetireEffects` |
 | D$ miss、outstanding limit、stall 周期 | `ExecuteDCacheAccess` / `ExecuteMemoryInflight` |
 | store miss 是否阻塞执行单元或进入 inflight | `ExecuteStoreAccess` / `ExecuteMemoryInflight` |

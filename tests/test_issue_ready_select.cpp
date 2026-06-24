@@ -79,6 +79,18 @@ DynamicInstPtr allocateReady(CPUState& state,
     return inst;
 }
 
+DynamicInstPtr allocateStoreAddressReadyOnly(CPUState& state,
+                                             uint64_t pc,
+                                             uint64_t instruction_id) {
+    auto inst = state.reorder_buffer->allocate_entry(makeStoreInstruction(), pc, instruction_id);
+    EXPECT_NE(inst, nullptr);
+    inst->set_src1_ready(true, 0x100);
+    inst->set_src3_ready(true, 0);
+    const auto dispatch_result = state.reservation_station->dispatch_instruction(inst);
+    EXPECT_TRUE(dispatch_result.success);
+    return inst;
+}
+
 } // namespace
 
 TEST(IssueReadySelectTest, SelectsReadyWorkUsingCpuExecutionUnitAvailability) {
@@ -121,6 +133,21 @@ TEST(IssueReadySelectTest, ResourceBlockedWhenReadyWorkHasNoFreeUnit) {
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::STALL_EXECUTE_RESOURCE_BLOCKED), 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_RESOURCE_BLOCKED), 4u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_NO_UNIT), 0u);
+}
+
+TEST(IssueReadySelectTest, SelectsStoreAddressWhenOnlyAddressSourceIsReady) {
+    auto state = makeIssueState();
+    auto store = allocateStoreAddressReadyOnly(state, 0x100, 1);
+
+    const auto result = IssueReadySelect::select(state, 1);
+
+    ASSERT_EQ(result.selected.size(), 1u);
+    EXPECT_EQ(result.selected[0].instruction, store);
+    EXPECT_EQ(result.selected[0].unit_type, ExecutionUnitType::STORE);
+    EXPECT_EQ(result.selected[0].unit, &state.store_units[0]);
+    EXPECT_TRUE(state.store_units[0].busy);
+    EXPECT_EQ(state.store_units[0].instruction, store);
+    EXPECT_EQ(store->get_status(), DynamicInst::Status::EXECUTING);
 }
 
 TEST(IssueReadySelectTest, AmoWaitConsumesSlotWithoutStartingExecution) {

@@ -12,7 +12,10 @@ namespace {
 
 DecodedInstruction makeStoreInstruction() {
     DecodedInstruction decoded;
+    decoded.type = InstructionType::S_TYPE;
     decoded.opcode = Opcode::STORE;
+    decoded.rs1 = 1;
+    decoded.rs2 = 2;
     decoded.memory_access_size = 4;
     return decoded;
 }
@@ -55,6 +58,27 @@ TEST(ExecuteStoreAccessTest, CompletesImmediatelyWithoutCache) {
     EXPECT_EQ(unit.result, 0u);
     EXPECT_TRUE(unit.busy);
     EXPECT_EQ(unit.instruction, store);
+}
+
+TEST(ExecuteStoreAccessTest, AddressOnlyStoreWaitsForDataWithoutCompletingRob) {
+    auto state = makeStoreState();
+    auto store = dispatchStoreToRs(state);
+    store->set_status(DynamicInst::Status::EXECUTING);
+    auto& memory_info = store->get_memory_info();
+    memory_info.is_memory_op = true;
+    memory_info.is_store = true;
+    memory_info.address_ready = true;
+    memory_info.memory_address = 0x200;
+    memory_info.memory_size = 4;
+    auto unit = makeStoreUnit(store);
+
+    const auto result = ExecuteStoreAccess::perform(unit, 0, state);
+
+    EXPECT_EQ(result, ExecuteStoreAccess::Result::AddressOnlyCompleted);
+    EXPECT_EQ(store->get_status(), DynamicInst::Status::DISPATCHED);
+    EXPECT_FALSE(store->is_completed());
+    EXPECT_FALSE(unit.busy);
+    EXPECT_EQ(unit.instruction, nullptr);
 }
 
 TEST(ExecuteStoreAccessTest, ReplaysYoungerHostCommStoreUntilRobHead) {

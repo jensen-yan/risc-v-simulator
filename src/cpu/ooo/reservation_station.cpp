@@ -1,38 +1,22 @@
 #include "cpu/ooo/reservation_station.h"
 #include "cpu/ooo/store_buffer.h"
 #include "common/debug_types.h"
-#include <climits>
 #include <algorithm>
 
 namespace riscv {
 
 ReservationStation::ReservationStation() 
     : rs_entries(MAX_RS_ENTRIES),
-      alu_units_busy(MAX_ALU_UNITS, false),
-      fp_units_busy(MAX_FP_UNITS, false),
-      branch_units_busy(MAX_BRANCH_UNITS, false),
-      load_units_busy(MAX_LOAD_UNITS, false),
-      store_units_busy(MAX_STORE_UNITS, false),
       dispatched_count(0),
-      issued_count(0),
       stall_count(0) {
     
     initialize_free_list();
-    initialize_execution_units();
 }
 
 void ReservationStation::initialize_free_list() {
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
         rs_entries[i] = nullptr;  // 初始化为空指针
     }
-}
-
-void ReservationStation::initialize_execution_units() {
-    std::fill(alu_units_busy.begin(), alu_units_busy.end(), false);
-    std::fill(fp_units_busy.begin(), fp_units_busy.end(), false);
-    std::fill(branch_units_busy.begin(), branch_units_busy.end(), false);
-    std::fill(load_units_busy.begin(), load_units_busy.end(), false);
-    std::fill(store_units_busy.begin(), store_units_busy.end(), false);
 }
 
 ReservationStation::DispatchResult ReservationStation::dispatch_instruction(DynamicInstPtr dynamic_inst) {
@@ -66,133 +50,6 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction(Dyna
            (int)rs_id, dynamic_inst->get_pc(), dynamic_inst->get_instruction_id());
     
     return result;
-}
-
-ReservationStation::ReadyIssueResult ReservationStation::issue_ready_instruction() {
-    auto results = issue_ready_instructions(1);
-    if (!results.empty()) {
-        return results.front();
-    }
-
-    ReadyIssueResult result;
-    result.success = false;
-    result.error_message = "no ready instruction to issue";
-    return result;
-}
-
-std::vector<ReservationStation::ReadyIssueResult> ReservationStation::issue_ready_instructions(
-    size_t limit, const std::function<bool(const DynamicInstPtr&)>& can_issue) {
-    std::vector<ReadyIssueResult> results;
-    if (limit == 0) {
-        return results;
-    }
-
-    auto alu_available = std::vector<bool>(MAX_ALU_UNITS, false);
-    auto fp_available = std::vector<bool>(MAX_FP_UNITS, false);
-    auto branch_available = std::vector<bool>(MAX_BRANCH_UNITS, false);
-    auto load_available = std::vector<bool>(MAX_LOAD_UNITS, false);
-    auto store_available = std::vector<bool>(MAX_STORE_UNITS, false);
-    auto selected_entries = std::vector<bool>(MAX_RS_ENTRIES, false);
-
-    for (int i = 0; i < MAX_ALU_UNITS; ++i) {
-        alu_available[i] = !alu_units_busy[i];
-    }
-    for (int i = 0; i < MAX_FP_UNITS; ++i) {
-        fp_available[i] = !fp_units_busy[i];
-    }
-    for (int i = 0; i < MAX_BRANCH_UNITS; ++i) {
-        branch_available[i] = !branch_units_busy[i];
-    }
-    for (int i = 0; i < MAX_LOAD_UNITS; ++i) {
-        load_available[i] = !load_units_busy[i];
-    }
-    for (int i = 0; i < MAX_STORE_UNITS; ++i) {
-        store_available[i] = !store_units_busy[i];
-    }
-
-    while (results.size() < limit) {
-        const RSEntry ready_rs = select_ready_instruction_with_availability(
-            alu_available, fp_available, branch_available, load_available, store_available, selected_entries);
-        if (ready_rs >= MAX_RS_ENTRIES) {
-            break;
-        }
-
-        DynamicInstPtr instruction = rs_entries[ready_rs];
-        if (!instruction) {
-            break;
-        }
-
-        if (can_issue && !can_issue(instruction)) {
-            selected_entries[ready_rs] = true;
-            continue;
-        }
-
-        const ExecutionUnitType unit_type = instruction->get_required_execution_unit();
-        std::vector<bool>* unit_available = nullptr;
-        switch (unit_type) {
-            case ExecutionUnitType::ALU:
-                unit_available = &alu_available;
-                break;
-            case ExecutionUnitType::FP:
-                unit_available = &fp_available;
-                break;
-            case ExecutionUnitType::BRANCH:
-                unit_available = &branch_available;
-                break;
-            case ExecutionUnitType::LOAD:
-                unit_available = &load_available;
-                break;
-            case ExecutionUnitType::STORE:
-                unit_available = &store_available;
-                break;
-        }
-
-        if (!unit_available) {
-            break;
-        }
-
-        int unit_id = -1;
-        for (size_t i = 0; i < unit_available->size(); ++i) {
-            if ((*unit_available)[i]) {
-                unit_id = static_cast<int>(i);
-                (*unit_available)[i] = false;
-                break;
-            }
-        }
-        if (unit_id < 0) {
-            break;
-        }
-
-        selected_entries[ready_rs] = true;
-
-        const int allocated_unit_id = allocate_execution_unit(unit_type);
-        if (allocated_unit_id < 0) {
-            break;
-        }
-
-        instruction->set_status(DynamicInst::Status::EXECUTING);
-        auto& exec_info = instruction->get_execution_info();
-        exec_info.remaining_cycles = exec_info.execution_cycles;
-
-        ReadyIssueResult result;
-        result.success = true;
-        result.rs_entry = ready_rs;
-        result.unit_type = unit_type;
-        result.unit_id = allocated_unit_id;
-        result.instruction = instruction;
-        results.push_back(result);
-
-        issued_count++;
-
-        LOGT(RS, "issue to %s%d, pc=0x%" PRIx64 ", inst=%" PRId64,
-             (unit_type == ExecutionUnitType::ALU ? "ALU" :
-              unit_type == ExecutionUnitType::FP ? "FP" :
-              unit_type == ExecutionUnitType::BRANCH ? "BRANCH" :
-              unit_type == ExecutionUnitType::LOAD ? "LOAD" : "STORE"),
-             allocated_unit_id, instruction->get_pc(), instruction->get_instruction_id());
-    }
-
-    return results;
 }
 
 void ReservationStation::update_operands(const CompletionEvent& completion_event, StoreBuffer* store_buffer) {
@@ -257,9 +114,7 @@ void ReservationStation::flush_pipeline() {
         rs_entries[i] = nullptr;
     }
     
-    // 重新初始化
     initialize_free_list();
-    initialize_execution_units();
 }
 
 void ReservationStation::flush_younger_than(uint64_t instruction_id) {
@@ -291,102 +146,8 @@ size_t ReservationStation::get_free_entry_count() const {
     return count;
 }
 
-bool ReservationStation::is_execution_unit_available(ExecutionUnitType unit_type) const {
-    switch (unit_type) {
-        case ExecutionUnitType::ALU:
-            return std::find(alu_units_busy.begin(), alu_units_busy.end(), false) != alu_units_busy.end();
-        case ExecutionUnitType::FP:
-            return std::find(fp_units_busy.begin(), fp_units_busy.end(), false) != fp_units_busy.end();
-        case ExecutionUnitType::BRANCH:
-            return std::find(branch_units_busy.begin(), branch_units_busy.end(), false) != branch_units_busy.end();
-        case ExecutionUnitType::LOAD:
-            return std::find(load_units_busy.begin(), load_units_busy.end(), false) != load_units_busy.end();
-        case ExecutionUnitType::STORE:
-            return std::find(store_units_busy.begin(), store_units_busy.end(), false) != store_units_busy.end();
-        default:
-            return false;
-    }
-}
-
-int ReservationStation::allocate_execution_unit(ExecutionUnitType unit_type) {
-    switch (unit_type) {
-        case ExecutionUnitType::ALU:
-            for (int i = 0; i < MAX_ALU_UNITS; ++i) {
-                if (!alu_units_busy[i]) {
-                    alu_units_busy[i] = true;
-                    return i;
-                }
-            }
-            break;
-        case ExecutionUnitType::FP:
-            for (int i = 0; i < MAX_FP_UNITS; ++i) {
-                if (!fp_units_busy[i]) {
-                    fp_units_busy[i] = true;
-                    return i;
-                }
-            }
-            break;
-        case ExecutionUnitType::BRANCH:
-            for (int i = 0; i < MAX_BRANCH_UNITS; ++i) {
-                if (!branch_units_busy[i]) {
-                    branch_units_busy[i] = true;
-                    return i;
-                }
-            }
-            break;
-        case ExecutionUnitType::LOAD:
-            for (int i = 0; i < MAX_LOAD_UNITS; ++i) {
-                if (!load_units_busy[i]) {
-                    load_units_busy[i] = true;
-                    return i;
-                }
-            }
-            break;
-        case ExecutionUnitType::STORE:
-            for (int i = 0; i < MAX_STORE_UNITS; ++i) {
-                if (!store_units_busy[i]) {
-                    store_units_busy[i] = true;
-                    return i;
-                }
-            }
-            break;
-    }
-    return -1;  // 分配失败
-}
-
-void ReservationStation::release_execution_unit(ExecutionUnitType unit_type, int unit_id) {
-    switch (unit_type) {
-        case ExecutionUnitType::ALU:
-            if (unit_id >= 0 && unit_id < MAX_ALU_UNITS) {
-                alu_units_busy[unit_id] = false;
-            }
-            break;
-        case ExecutionUnitType::FP:
-            if (unit_id >= 0 && unit_id < MAX_FP_UNITS) {
-                fp_units_busy[unit_id] = false;
-            }
-            break;
-        case ExecutionUnitType::BRANCH:
-            if (unit_id >= 0 && unit_id < MAX_BRANCH_UNITS) {
-                branch_units_busy[unit_id] = false;
-            }
-            break;
-        case ExecutionUnitType::LOAD:
-            if (unit_id >= 0 && unit_id < MAX_LOAD_UNITS) {
-                load_units_busy[unit_id] = false;
-            }
-            break;
-        case ExecutionUnitType::STORE:
-            if (unit_id >= 0 && unit_id < MAX_STORE_UNITS) {
-                store_units_busy[unit_id] = false;
-            }
-            break;
-    }
-}
-
-void ReservationStation::get_statistics(uint64_t& dispatched, uint64_t& issued, uint64_t& stalls) const {
+void ReservationStation::get_statistics(uint64_t& dispatched, uint64_t& stalls) const {
     dispatched = dispatched_count;
-    issued = issued_count;
     stalls = stall_count;
 }
 
@@ -401,42 +162,6 @@ void ReservationStation::dump_reservation_station() const {
     // }
     
     std::cout << "==============================" << std::endl;
-}
-
-void ReservationStation::dump_execution_units() const {
-    std::cout << "=== Execution Unit State ===" << std::endl;
-    
-    std::cout << "ALU Units: ";
-    for (int i = 0; i < MAX_ALU_UNITS; ++i) {
-        std::cout << (alu_units_busy[i] ? "BUSY " : "FREE ");
-    }
-    std::cout << std::endl;
-
-    std::cout << "FP Units: ";
-    for (int i = 0; i < MAX_FP_UNITS; ++i) {
-        std::cout << (fp_units_busy[i] ? "BUSY " : "FREE ");
-    }
-    std::cout << std::endl;
-    
-    std::cout << "Branch Units: ";
-    for (int i = 0; i < MAX_BRANCH_UNITS; ++i) {
-        std::cout << (branch_units_busy[i] ? "BUSY " : "FREE ");
-    }
-    std::cout << std::endl;
-    
-    std::cout << "Load Units: ";
-    for (int i = 0; i < MAX_LOAD_UNITS; ++i) {
-        std::cout << (load_units_busy[i] ? "BUSY " : "FREE ");
-    }
-    std::cout << std::endl;
-    
-    std::cout << "Store Units: ";
-    for (int i = 0; i < MAX_STORE_UNITS; ++i) {
-        std::cout << (store_units_busy[i] ? "BUSY " : "FREE ");
-    }
-    std::cout << std::endl;
-    
-    std::cout << "============================" << std::endl;
 }
 
 DynamicInstPtr ReservationStation::get_entry(RSEntry rs_entry) const {
@@ -466,6 +191,22 @@ size_t ReservationStation::get_ready_entry_count() const {
     return ready;
 }
 
+std::vector<ReservationStation::ReadyEntry> ReservationStation::ready_entries() const {
+    std::vector<ReadyEntry> ready;
+    for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
+        const auto& entry = rs_entries[i];
+        if (!entry || entry->get_status() == DynamicInst::Status::EXECUTING ||
+            !is_instruction_ready(entry)) {
+            continue;
+        }
+        ready.push_back({static_cast<RSEntry>(i), entry});
+    }
+    std::sort(ready.begin(), ready.end(), [](const ReadyEntry& lhs, const ReadyEntry& rhs) {
+        return lhs.instruction->get_instruction_id() < rhs.instruction->get_instruction_id();
+    });
+    return ready;
+}
+
 bool ReservationStation::is_entry_ready(RSEntry rs_entry) const {
     if (rs_entry >= MAX_RS_ENTRIES) return false;
     DynamicInstPtr inst = rs_entries[rs_entry];
@@ -488,89 +229,6 @@ RSEntry ReservationStation::allocate_entry() {
 bool ReservationStation::is_instruction_ready(DynamicInstPtr instruction) const {
     if (!instruction) return false;
     return instruction->is_ready_to_execute();
-}
-
-RSEntry ReservationStation::select_ready_instruction() const {
-    const auto alu_available = std::vector<bool>(MAX_ALU_UNITS, true);
-    const auto fp_available = std::vector<bool>(MAX_FP_UNITS, true);
-    const auto branch_available = std::vector<bool>(MAX_BRANCH_UNITS, true);
-    const auto load_available = std::vector<bool>(MAX_LOAD_UNITS, true);
-    const auto store_available = std::vector<bool>(MAX_STORE_UNITS, true);
-    const auto selected_entries = std::vector<bool>(MAX_RS_ENTRIES, false);
-    return select_ready_instruction_with_availability(
-        alu_available, fp_available, branch_available, load_available, store_available, selected_entries);
-}
-
-RSEntry ReservationStation::select_ready_instruction_with_availability(
-    const std::vector<bool>& alu_available,
-    const std::vector<bool>& fp_available,
-    const std::vector<bool>& branch_available,
-    const std::vector<bool>& load_available,
-    const std::vector<bool>& store_available,
-    const std::vector<bool>& selected_entries) const {
-    RSEntry best_entry = MAX_RS_ENTRIES;  // 无效值
-    int best_priority = INT_MAX;
-    
-    for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
-        if (rs_entries[i]) {
-            if (selected_entries[i]) {
-                continue;
-            }
-            bool ready = is_instruction_ready(rs_entries[i]);
-            bool is_executing = (rs_entries[i]->get_status() == DynamicInst::Status::EXECUTING);
-            
-            // 只发射准备好、未在执行、且对应执行单元当前可用的指令。
-            // 否则会出现“最老 ready 指令因单元忙而卡住，导致后续可执行指令也无法发射”的活锁。
-            if (ready && !is_executing) {
-                const auto unit_type = rs_entries[i]->get_required_execution_unit();
-                bool unit_available = false;
-                switch (unit_type) {
-                    case ExecutionUnitType::ALU:
-                        unit_available =
-                            std::find(alu_available.begin(), alu_available.end(), true) != alu_available.end();
-                        break;
-                    case ExecutionUnitType::FP:
-                        unit_available =
-                            std::find(fp_available.begin(), fp_available.end(), true) != fp_available.end();
-                        break;
-                    case ExecutionUnitType::BRANCH:
-                        unit_available =
-                            std::find(branch_available.begin(), branch_available.end(), true) != branch_available.end();
-                        break;
-                    case ExecutionUnitType::LOAD:
-                        unit_available =
-                            std::find(load_available.begin(), load_available.end(), true) != load_available.end();
-                        break;
-                    case ExecutionUnitType::STORE:
-                        unit_available =
-                            std::find(store_available.begin(), store_available.end(), true) != store_available.end();
-                        break;
-                    default:
-                        unit_available = false;
-                        break;
-                }
-                if (!unit_available) {
-                    continue;
-                }
-                int priority = calculate_priority(rs_entries[i]);
-                if (priority < best_priority) {
-                    best_priority = priority;
-                    best_entry = i;
-                }
-            }
-        }
-    }
-    
-    LOGT(RS, "select_ready_instruction: rs[%d]", (int)best_entry);
-    return best_entry;
-}
-
-int ReservationStation::calculate_priority(DynamicInstPtr instruction) const {
-    if (!instruction) return INT_MAX;
-    
-    // 优先级计算：指令ID越小，优先级越高（程序顺序）
-    // 可以根据需要调整优先级策略
-    return static_cast<int>(instruction->get_instruction_id());
 }
 
 } // namespace riscv

@@ -66,8 +66,8 @@ _避免使用_：把 Dispatch 用来指代从 Issue Queue 选择 ready 指令并
 _避免使用_：把操作数绑定混同为完整的 Rename、Issue 或 issue 后寄存器文件读取
 
 **Issue / Ready Select（发射 / 就绪选择）**：
-从 Reservation Station / Issue Queue 中选择操作数已就绪且资源可用的指令，并让它开始占用对应执行单元的边界；当前代码中这部分主要由 `ReservationStation::issue_ready_instructions` 和 `ExecuteStage` 完成。
-_避免使用_：把进入 Reservation Station / Issue Queue 也叫 Issue
+从 Reservation Station / Issue Queue 中选择操作数已就绪且资源可用的指令，并让它开始占用对应执行单元的边界；当前代码中这部分由 `IssueReadySelect` 负责，`ReservationStation` 只保存等待队列与 wakeup 状态，执行单元忙闲以 `CPUState::ExecutionUnit::busy` 为唯一事实来源。
+_避免使用_：把进入 Reservation Station / Issue Queue 也叫 Issue；把执行单元 busy 状态再复制一份到 Reservation Station
 
 **Completion Fabric（完成网络）**：
 乱序流水线的结果完成边界，仲裁已执行工作何时对唤醒、物理寄存器写回和 ROB 完成可见。

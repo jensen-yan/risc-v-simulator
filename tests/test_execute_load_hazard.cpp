@@ -55,7 +55,6 @@ TEST(ExecuteLoadHazardTest, ReplaysOnOlderAddressUnknownStore) {
     store->get_memory_info().memory_size = 0;
     auto load = state.reorder_buffer->allocate_entry(makeMemoryInstruction(Opcode::LOAD), 0x104, 2);
     ASSERT_NE(load, nullptr);
-    ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::LOAD), 0);
     auto unit = makeLoadUnit(load);
 
     const auto decision = ExecuteLoadHazard::handleEarlierStoreHazard(unit, 0, state);
@@ -68,7 +67,6 @@ TEST(ExecuteLoadHazardTest, ReplaysOnOlderAddressUnknownStore) {
     EXPECT_EQ(load->get_memory_info().replay_rob_store_addr_unknown_count, 1u);
     EXPECT_EQ(store->get_memory_info().caused_rob_addr_unknown_block_count, 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::LOAD_REPLAYS_ROB_STORE_ADDR_UNKNOWN), 1u);
-    EXPECT_TRUE(state.reservation_station->is_execution_unit_available(ExecutionUnitType::LOAD));
 }
 
 TEST(ExecuteLoadHazardTest, AllowsSpeculatedAddressUnknownLoadToContinue) {

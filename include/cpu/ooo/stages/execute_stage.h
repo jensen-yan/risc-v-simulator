@@ -4,14 +4,13 @@
 #include "cpu/ooo/cpu_state.h"
 #include "cpu/ooo/ooo_types.h"
 
-#include <functional>
 #include <vector>
 
 namespace riscv {
 
 /**
  * 执行阶段实现
- * 负责从保留站发射 ready 指令到执行单元，并管理指令执行过程。
+ * 负责推进执行单元，并把完成结果提交到 Completion Fabric。
  */
 class ExecuteStage : public PipelineStage {
 public:
@@ -29,27 +28,6 @@ public:
             state_.recordPipelineStall(reason);
         }
 
-        std::vector<ReservationStation::ReadyIssueResult> issueReadyInstructions(
-            size_t limit,
-            const std::function<bool(const DynamicInstPtr&)>& can_issue) {
-            return state_.reservation_station->issue_ready_instructions(limit, can_issue);
-        }
-
-        bool hasInflightMemoryAccess() const;
-        size_t reservationStationOccupiedCount() const {
-            return state_.reservation_station->get_occupied_entry_count();
-        }
-        size_t reservationStationReadyCount() const {
-            return state_.reservation_station->get_ready_entry_count();
-        }
-
-        bool hasEarlierStoreUncommitted(uint64_t instruction_id) const {
-            return state_.reorder_buffer->has_earlier_store_uncommitted(instruction_id);
-        }
-        void releaseExecutionUnit(ExecutionUnitType unit_type, int unit_id) {
-            state_.reservation_station->release_execution_unit(unit_type, unit_id);
-        }
-        ExecutionUnit* executionUnit(ExecutionUnitType unit_type, int unit_id);
         uint64_t cycleCount() const { return state_.cycle_count; }
 
         // ExecuteStage still owns several legacy cross-cutting paths (LSU and
@@ -73,8 +51,7 @@ private:
     bool complete_execution_unit(ExecutionUnit& unit,
                                  ExecutionUnitType unit_type,
                                  size_t unit_index,
-                                 CPUState& state,
-                                 bool release_issue_unit = true);
+                                 CPUState& state);
 };
 
 } // namespace riscv 

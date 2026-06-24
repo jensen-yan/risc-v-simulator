@@ -32,7 +32,6 @@ bool ExecuteMemoryInflight::tryMove(ExecutionUnit& unit,
         const RSEntry rs_entry = unit.instruction->get_rs_entry();
         state.reservation_station->release_entry(rs_entry);
         unit.instruction->set_rs_entry(std::numeric_limits<RSEntry>::max());
-        state.reservation_station->release_execution_unit(unit_type, static_cast<int>(unit_index));
         LOGT(EXECUTE,
              "inst=%" PRId64 " move %s%zu request to inflight queue, remaining=%d",
              unit.instruction->get_instruction_id(),

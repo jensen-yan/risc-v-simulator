@@ -125,7 +125,8 @@ flowchart LR
 ```mermaid
 flowchart TD
   subgraph Execute["Execute path"]
-    ES["ExecuteStage\nissue-ready select / execution-unit ticking / submit completion"]
+    IRS["IssueReadySelect\nready select / unit arbitration / issue slot attribution"]
+    ES["ExecuteStage\nexecution-unit ticking / submit completion"]
     CF["CompletionFabric\ncompletion arbitration / backpressure / fanout"]
     WS["WritebackStage\nwakeup / PRF write / ROB complete"]
     ELC["ExecuteLoadCompletion\nready load 完成状态机"]
@@ -150,6 +151,8 @@ flowchart TD
 
   REC["OooRecovery\nshared flush / younger cleanup / restart"]
 
+  IRS --> ES
+  IRS --> EMO
   ES --> ELC
   ES --> CF
   ELC --> ELH
@@ -192,12 +195,12 @@ flowchart TD
   优先看 `ExecuteMemoryInflight` 和 `CompletionFabric`。
 - 改执行完成带宽、completion backpressure、写回 fanout：
   优先看 `CompletionFabric`、`ExecuteStage` 和 `WritebackStage`。
+- 改 issue 宽度、执行单元分配、AMO issue wait、load issue speculation、issue/topdown slot 归因：
+  优先看 `IssueReadySelect`。`ReservationStation` 只保存等待队列与操作数 wakeup，执行单元忙闲以 `CPUState::ExecutionUnit::busy` 为唯一事实来源。
 - 改 addr-unknown store speculation、Bad Addr-Unknown Pair、load-store violation recovery trigger：
   优先看 `ExecuteMemoryOrder`。
 - 改执行阶段早恢复、branch/JALR younger cleanup、rename checkpoint restore：
   优先看 `ExecuteControlRecovery` 和 `OooRecovery`。
-- 改 issue 宽度、执行单元分配、AMO issue wait、load issue speculation：
-  优先看 `ExecuteStage`。这一块当前保留在 stage 内，避免为简单调度循环继续制造薄模块。
 
 #### Commit 路径落点
 
@@ -230,12 +233,13 @@ flowchart TD
 - 一个性能实验需要替换或比较不同策略，现有模块没有合适落点。
 
 不满足这些条件时，优先把逻辑留在现有模块或补文档导航。
-例如 ALU/FP/BRANCH 的简单 ticking、Completion Fabric 之外的 dispatch loop 基本形状，暂时保留在 `ExecuteStage` 更直观。
+例如 ALU/FP/BRANCH 的简单 ticking 和 Completion Fabric 提交流程，暂时保留在 `ExecuteStage` 更直观。
 
 ### 性能探索入口索引
 
 | 想探索的问题 | 优先入口 |
 | --- | --- |
+| issue 宽度、执行单元选择、ready slot 为什么没发射 | `IssueReadySelect` |
 | load 为什么 replay、replay 属于哪一类 | `ExecuteLoadCompletion` / `ExecuteLoadHazard` / `ExecuteMemoryOrder` |
 | load 是否应该绕过地址未知 store | `ExecuteMemoryOrder` |
 | store-to-load forwarding 命中率、partial merge 行为 | `ExecuteLoadAccess` / `StoreBuffer` / `CommitRetireEffects` |

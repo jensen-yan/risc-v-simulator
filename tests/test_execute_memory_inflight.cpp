@@ -44,8 +44,6 @@ TEST(ExecuteMemoryInflightTest, HasAnyReflectsValidEntries) {
 TEST(ExecuteMemoryInflightTest, TryMoveReleasesReservationStationAndExecutionUnit) {
     auto state = makeStateWithReservationStation();
     auto inst = dispatchInstructionToRs(state);
-    const int unit_id = state.reservation_station->allocate_execution_unit(ExecutionUnitType::LOAD);
-    ASSERT_EQ(unit_id, 0);
 
     ExecutionUnit unit;
     unit.busy = true;
@@ -55,7 +53,7 @@ TEST(ExecuteMemoryInflightTest, TryMoveReleasesReservationStationAndExecutionUni
     unit.dcache.request_sent = true;
 
     const bool moved = ExecuteMemoryInflight::tryMove(
-        unit, ExecutionUnitType::LOAD, static_cast<size_t>(unit_id), state);
+        unit, ExecutionUnitType::LOAD, 0, state);
 
     EXPECT_TRUE(moved);
     EXPECT_FALSE(unit.busy);
@@ -67,7 +65,6 @@ TEST(ExecuteMemoryInflightTest, TryMoveReleasesReservationStationAndExecutionUni
     EXPECT_EQ(state.memory_access_inflight[0].wait_latency_cycles, 3u);
     EXPECT_EQ(inst->get_rs_entry(), std::numeric_limits<RSEntry>::max());
     EXPECT_EQ(state.reservation_station->get_occupied_entry_count(), 0u);
-    EXPECT_TRUE(state.reservation_station->is_execution_unit_available(ExecutionUnitType::LOAD));
 }
 
 TEST(ExecuteMemoryInflightTest, TryMoveFailsWhenQueueIsFull) {

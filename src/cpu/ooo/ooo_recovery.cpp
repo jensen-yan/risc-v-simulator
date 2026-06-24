@@ -212,9 +212,6 @@ bool OooRecovery::flushYoungerExecutionUnits(CPUState& state, const YoungerThanR
 
             LOGT(EXECUTE, "flush younger execution unit inst=%" PRId64,
                  other_unit.instruction->get_instruction_id());
-            if (state.reservation_station) {
-                state.reservation_station->release_execution_unit(unit_type, static_cast<int>(i));
-            }
             resetExecutionUnitState(other_unit);
         }
     };

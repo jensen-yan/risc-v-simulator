@@ -67,7 +67,6 @@ TEST(ExecuteLoadCompletionTest, ReplaysYoungerHostCommLoadUntilRobHead) {
     ASSERT_NE(state.reorder_buffer->allocate_entry(makeMemoryInstruction(Opcode::STORE), 0x100, 1),
               nullptr);
     auto load = dispatchLoadToRs(state, 0x104, 2);
-    ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::LOAD), 0);
     auto unit = makeLoadUnit(load);
 
     const auto result = ExecuteLoadCompletion::perform(unit, 0, state);
@@ -79,7 +78,6 @@ TEST(ExecuteLoadCompletionTest, ReplaysYoungerHostCommLoadUntilRobHead) {
     EXPECT_EQ(load->get_memory_info().replay_count, 1u);
     EXPECT_EQ(load->get_memory_info().replay_host_comm_count, 1u);
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::LOAD_REPLAYS_HOST_COMM), 1u);
-    EXPECT_TRUE(state.reservation_station->is_execution_unit_available(ExecutionUnitType::LOAD));
 }
 
 TEST(ExecuteLoadCompletionTest, MovesIssuedCacheMissToInflightQueue) {
@@ -93,7 +91,6 @@ TEST(ExecuteLoadCompletionTest, MovesIssuedCacheMissToInflightQueue) {
     config.max_outstanding_misses = 1;
     state.l1d_cache = std::make_unique<NonBlockingCache>(config);
     auto load = dispatchLoadToRs(state);
-    ASSERT_EQ(state.reservation_station->allocate_execution_unit(ExecutionUnitType::LOAD), 0);
     auto unit = makeLoadUnit(load);
 
     const auto result = ExecuteLoadCompletion::perform(unit, 0, state);
@@ -104,7 +101,6 @@ TEST(ExecuteLoadCompletionTest, MovesIssuedCacheMissToInflightQueue) {
     EXPECT_TRUE(state.memory_access_inflight[0].valid);
     EXPECT_EQ(state.memory_access_inflight[0].unit_type, ExecutionUnitType::LOAD);
     EXPECT_EQ(state.memory_access_inflight[0].state.instruction, load);
-    EXPECT_TRUE(state.reservation_station->is_execution_unit_available(ExecutionUnitType::LOAD));
 }
 
 TEST(ExecuteLoadCompletionTest, CompletesUnsupportedLoadSizeAsException) {

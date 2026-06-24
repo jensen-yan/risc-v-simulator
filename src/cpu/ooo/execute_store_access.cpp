@@ -14,8 +14,6 @@ ExecuteStoreAccess::Result ExecuteStoreAccess::perform(ExecutionUnit& unit,
             state, unit.instruction, unit.load_address, unit.load_size)) {
         auto blocked_inst = unit.instruction;
         blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
-        state.reservation_station->release_execution_unit(
-            ExecutionUnitType::STORE, static_cast<int>(unit_index));
         resetExecutionUnitState(unit);
         LOGT(EXECUTE,
              "inst=%" PRId64 " STORE%zu waits for ROB head before host-comm access",
@@ -34,8 +32,6 @@ ExecuteStoreAccess::Result ExecuteStoreAccess::perform(ExecutionUnit& unit,
         if (!unit.dcache.request_sent) {
             auto blocked_inst = unit.instruction;
             blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
-            state.reservation_station->release_execution_unit(
-                ExecutionUnitType::STORE, static_cast<int>(unit_index));
             resetExecutionUnitState(unit);
             LOGT(EXECUTE,
                  "inst=%" PRId64 " STORE%zu blocked by dcache outstanding limit, release and retry",

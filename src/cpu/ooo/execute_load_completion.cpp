@@ -15,8 +15,6 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
             state, unit.instruction, unit.load_address, unit.load_size)) {
         auto blocked_inst = unit.instruction;
         blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
-        state.reservation_station->release_execution_unit(
-            ExecutionUnitType::LOAD, static_cast<int>(unit_index));
         resetExecutionUnitState(unit);
         LOGT(EXECUTE,
              "inst=%" PRId64 " LOAD%zu waits for ROB head before host-comm access",
@@ -37,8 +35,6 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
     if (load_result == ExecuteLoadAccess::Result::BlockedByStore) {
         auto blocked_inst = unit.instruction;
         blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
-        state.reservation_station->release_execution_unit(
-            ExecutionUnitType::LOAD, static_cast<int>(unit_index));
         resetExecutionUnitState(unit);
         LOGT(EXECUTE,
              "inst=%" PRId64 " LOAD%zu blocked by older store overlap, replay and release load unit",
@@ -59,8 +55,6 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
         if (!unit.dcache.request_sent) {
             auto blocked_inst = unit.instruction;
             blocked_inst->set_status(DynamicInst::Status::DISPATCHED);
-            state.reservation_station->release_execution_unit(
-                ExecutionUnitType::LOAD, static_cast<int>(unit_index));
             resetExecutionUnitState(unit);
             LOGT(EXECUTE,
                  "inst=%" PRId64 " LOAD%zu blocked by dcache outstanding limit, release and retry",

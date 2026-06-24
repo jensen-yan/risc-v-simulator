@@ -2,7 +2,6 @@
 
 #include "cpu/ooo/ooo_types.h"
 #include "cpu/ooo/dynamic_inst.h"
-#include <functional>
 #include <vector>
 #include <string>
 
@@ -15,38 +14,22 @@ class StoreBuffer;
 using ReservationStationEntry = DynamicInst;
 
 /**
- * 保留站 / 简化 Issue Queue 发射选择单元
+ * 保留站 / 简化 Issue Queue
  * 
  * 功能：
- * 1. 管理等待执行的指令
+ * 1. 管理等待执行的动态指令
  * 2. 监听完成事件，更新操作数状态
- * 3. 选择准备好的指令发射到执行单元
- * 4. 支持不同类型的执行单元（ALU、分支、访存）
+ * 3. 暴露按程序顺序排列的 ready entries，供 IssueReadySelect 裁决
  */
 class ReservationStation {
 private:
     // 配置参数
     static const int MAX_RS_ENTRIES = static_cast<int>(OOOPipelineConfig::RS_ENTRIES);
-    static const int MAX_ALU_UNITS = static_cast<int>(OOOPipelineConfig::ALU_UNITS);
-    static const int MAX_FP_UNITS = static_cast<int>(OOOPipelineConfig::FP_UNITS);
-    static const int MAX_BRANCH_UNITS = static_cast<int>(OOOPipelineConfig::BRANCH_UNITS);
-    static const int MAX_LOAD_UNITS = static_cast<int>(OOOPipelineConfig::LOAD_UNITS);
-    static const int MAX_STORE_UNITS = static_cast<int>(OOOPipelineConfig::STORE_UNITS);
-    
     // 保留站表项
     std::vector<DynamicInstPtr> rs_entries;
-    
-    
-    // 执行单元忙碌状态
-    std::vector<bool> alu_units_busy;
-    std::vector<bool> fp_units_busy;
-    std::vector<bool> branch_units_busy;
-    std::vector<bool> load_units_busy;
-    std::vector<bool> store_units_busy;
-    
+
     // 统计信息
     uint64_t dispatched_count;
-    uint64_t issued_count;
     uint64_t stall_count;
     
 public:
@@ -59,26 +42,16 @@ public:
         std::string error_message;
     };
     
-    // 从保留站发射到执行单元的结果
-    struct ReadyIssueResult {
-        bool success;
+    struct ReadyEntry {
         RSEntry rs_entry;
-        ExecutionUnitType unit_type;
-        int unit_id;
         DynamicInstPtr instruction;
-        std::string error_message;
     };
     
     // 派发指令到保留站（使用DynamicInst）
     DispatchResult dispatch_instruction(DynamicInstPtr dynamic_inst);
     
-    // 尝试发射一条准备好的指令
-    ReadyIssueResult issue_ready_instruction();
-
-    // 同拍批量发射多条准备好的指令，保持程序顺序并跳过资源冲突候选
-    std::vector<ReadyIssueResult> issue_ready_instructions(
-        size_t limit,
-        const std::function<bool(const DynamicInstPtr&)>& can_issue = {});
+    // 获取当前可参与 Issue / Ready Select 的 ready 表项，按程序顺序返回。
+    std::vector<ReadyEntry> ready_entries() const;
     
     // 更新操作数（来自完成事件）
     void update_operands(const CompletionEvent& completion_event, StoreBuffer* store_buffer);
@@ -96,21 +69,11 @@ public:
     // 获取空闲表项数量
     size_t get_free_entry_count() const;
     
-    // 检查执行单元是否可用
-    bool is_execution_unit_available(ExecutionUnitType unit_type) const;
-    
-    // 分配执行单元
-    int allocate_execution_unit(ExecutionUnitType unit_type);
-    
-    // 释放执行单元
-    void release_execution_unit(ExecutionUnitType unit_type, int unit_id);
-    
     // 获取统计信息
-    void get_statistics(uint64_t& dispatched, uint64_t& issued, uint64_t& stalls) const;
+    void get_statistics(uint64_t& dispatched, uint64_t& stalls) const;
     
     // 调试输出
     void dump_reservation_station() const;
-    void dump_execution_units() const;
     
     // 获取指定表项的详细信息
     DynamicInstPtr get_entry(RSEntry rs_entry) const;
@@ -129,25 +92,8 @@ private:
     // 初始化空闲列表
     void initialize_free_list();
     
-    // 初始化执行单元
-    void initialize_execution_units();
-    
     // 检查指令是否准备好执行
     bool is_instruction_ready(DynamicInstPtr instruction) const;
-    
-    // 选择优先级最高的准备好的指令
-    RSEntry select_ready_instruction() const;
-
-    // 在给定可用执行单元快照下，选择一条准备好的指令
-    RSEntry select_ready_instruction_with_availability(const std::vector<bool>& alu_available,
-                                                       const std::vector<bool>& fp_available,
-                                                       const std::vector<bool>& branch_available,
-                                                       const std::vector<bool>& load_available,
-                                                       const std::vector<bool>& store_available,
-                                                       const std::vector<bool>& selected_entries) const;
-    
-    // 计算指令优先级（越小优先级越高）
-    int calculate_priority(DynamicInstPtr instruction) const;
 };
 
 } // namespace riscv

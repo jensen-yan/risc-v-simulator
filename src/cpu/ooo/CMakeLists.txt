@@ -19,6 +19,7 @@ target_sources(risc-v-sim-lib PRIVATE
     execute_memory_order.cpp
     execute_store_access.cpp
     execute_semantics.cpp
+    issue_ready_select.cpp
     ooo_recovery.cpp
     perf_counters.cpp
     register_rename.cpp

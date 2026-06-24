@@ -700,7 +700,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
     printUintStat("cpu.topdown.slots.resource_blocked", topdown_slots_resource_blocked,
                   "Issue slots empty because ready work could not acquire an issue resource");
     printUintStat("cpu.topdown.slots.no_unit", topdown_slots_no_unit,
-                  "Issue slots selected work but found no execution unit");
+                  "IssueReadySelect picked work but the CPUState unit was unavailable");
     printUintStat("cpu.topdown.slots.amo_wait", topdown_slots_amo_wait,
                   "Issue slots selected AMO work delayed by older store-like operations");
     printUintStat("cpu.topdown.slots.other", topdown_slots_other,
@@ -715,7 +715,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
     printDoubleStat("cpu.topdown.slots.resource_blocked_pct", slotPct(topdown_slots_resource_blocked),
                     "Resource-blocked slots / total issue slots (%)");
     printDoubleStat("cpu.topdown.slots.no_unit_pct", slotPct(topdown_slots_no_unit),
-                    "No-unit slots / total issue slots (%)");
+                    "No-unit contract-miss slots / total issue slots (%)");
     printDoubleStat("cpu.topdown.slots.amo_wait_pct", slotPct(topdown_slots_amo_wait),
                     "AMO-wait slots / total issue slots (%)");
     printDoubleStat("cpu.topdown.slots.other_pct", slotPct(topdown_slots_other),
@@ -930,7 +930,20 @@ void OutOfOrderCPU::dumpPipelineState() const {
     cpu_state_.register_rename->dump_rename_table();
     
     // 显示执行单元状态
-    cpu_state_.reservation_station->dump_execution_units();
+    auto dump_units = [](const char* name, const auto& units) {
+        std::cout << name << " Units: ";
+        for (const auto& unit : units) {
+            std::cout << (unit.busy ? "BUSY " : "FREE ");
+        }
+        std::cout << std::endl;
+    };
+    std::cout << "=== Execution Unit State ===" << std::endl;
+    dump_units("ALU", cpu_state_.alu_units);
+    dump_units("FP", cpu_state_.fp_units);
+    dump_units("Branch", cpu_state_.branch_units);
+    dump_units("Load", cpu_state_.load_units);
+    dump_units("Store", cpu_state_.store_units);
+    std::cout << "============================" << std::endl;
     
     std::cout << "Fetch Buffer Size: " << cpu_state_.fetch_buffer.size() << std::endl;
     std::cout << "Completion Fabric Size: " << cpu_state_.completion_fabric.size() << std::endl;

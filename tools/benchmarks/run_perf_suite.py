@@ -66,7 +66,7 @@ class RunRecord:
     commit_slots: Optional[int]
     commit_utilized_slots: Optional[int]
     rob_occupancy_avg: Optional[float]
-    store_buffer_occupancy_avg: Optional[float]
+    store_forwarding_buffer_occupancy_avg: Optional[float]
     l1i_hits: Optional[int]
     l1i_misses: Optional[int]
     l1i_stall_cycles: Optional[int]
@@ -83,7 +83,7 @@ class RunRecord:
     load_replays: Optional[int]
     load_replays_rob_store_addr_unknown: Optional[int]
     load_replays_rob_store_overlap: Optional[int]
-    load_replays_store_buffer_overlap: Optional[int]
+    load_replays_store_forwarding_buffer_overlap: Optional[int]
     loads_blocked_by_store: Optional[int]
     predictor_control_incorrect: Optional[int]
     predictor_jalr_mispredicts: Optional[int]
@@ -114,7 +114,7 @@ DETAIL_INT_FIELDS = {
     "load_replays": "cpu.memory.load_replays",
     "load_replays_rob_store_addr_unknown": "cpu.memory.load_replays.rob_store_addr_unknown",
     "load_replays_rob_store_overlap": "cpu.memory.load_replays.rob_store_overlap",
-    "load_replays_store_buffer_overlap": "cpu.memory.load_replays.store_buffer_overlap",
+    "load_replays_store_forwarding_buffer_overlap": "cpu.memory.load_replays.store_forwarding_buffer_overlap",
     "loads_blocked_by_store": "cpu.memory.loads_blocked_by_store",
     "predictor_control_incorrect": "cpu.predictor.control.incorrect",
     "predictor_jalr_mispredicts": "cpu.predictor.jalr.mispredicts",
@@ -125,7 +125,7 @@ DETAIL_FLOAT_FIELDS = {
     "topdown_frontend_bound_pct": "cpu.topdown.cycles.frontend_bound_pct",
     "topdown_backend_bound_pct": "cpu.topdown.cycles.backend_bound_pct",
     "rob_occupancy_avg": "cpu.rob.occupancy_avg",
-    "store_buffer_occupancy_avg": "cpu.store_buffer.occupancy_avg",
+    "store_forwarding_buffer_occupancy_avg": "cpu.store_forwarding_buffer.occupancy_avg",
 }
 
 DETAIL_PROFILE_FIELDS = {
@@ -380,7 +380,7 @@ def run_one(
             commit_slots=detail_stats["selected_metrics"]["commit_slots"],
             commit_utilized_slots=detail_stats["selected_metrics"]["commit_utilized_slots"],
             rob_occupancy_avg=detail_stats["selected_metrics"]["rob_occupancy_avg"],
-            store_buffer_occupancy_avg=detail_stats["selected_metrics"]["store_buffer_occupancy_avg"],
+            store_forwarding_buffer_occupancy_avg=detail_stats["selected_metrics"]["store_forwarding_buffer_occupancy_avg"],
             l1i_hits=detail_stats["selected_metrics"]["l1i_hits"],
             l1i_misses=detail_stats["selected_metrics"]["l1i_misses"],
             l1i_stall_cycles=detail_stats["selected_metrics"]["l1i_stall_cycles"],
@@ -405,8 +405,8 @@ def run_one(
             load_replays_rob_store_overlap=detail_stats["selected_metrics"][
                 "load_replays_rob_store_overlap"
             ],
-            load_replays_store_buffer_overlap=detail_stats["selected_metrics"][
-                "load_replays_store_buffer_overlap"
+            load_replays_store_forwarding_buffer_overlap=detail_stats["selected_metrics"][
+                "load_replays_store_forwarding_buffer_overlap"
             ],
             loads_blocked_by_store=detail_stats["selected_metrics"]["loads_blocked_by_store"],
             predictor_control_incorrect=detail_stats["selected_metrics"][
@@ -449,7 +449,7 @@ def run_one(
             commit_slots=None,
             commit_utilized_slots=None,
             rob_occupancy_avg=None,
-            store_buffer_occupancy_avg=None,
+            store_forwarding_buffer_occupancy_avg=None,
             l1i_hits=None,
             l1i_misses=None,
             l1i_stall_cycles=None,
@@ -466,7 +466,7 @@ def run_one(
             load_replays=None,
             load_replays_rob_store_addr_unknown=None,
             load_replays_rob_store_overlap=None,
-            load_replays_store_buffer_overlap=None,
+            load_replays_store_forwarding_buffer_overlap=None,
             loads_blocked_by_store=None,
             predictor_control_incorrect=None,
             predictor_jalr_mispredicts=None,
@@ -504,7 +504,7 @@ def write_csv(path: Path, records: List[RunRecord]) -> None:
         "commit_slots",
         "commit_utilized_slots",
         "rob_occupancy_avg",
-        "store_buffer_occupancy_avg",
+        "store_forwarding_buffer_occupancy_avg",
         "l1i_hits",
         "l1i_misses",
         "l1i_stall_cycles",
@@ -521,7 +521,7 @@ def write_csv(path: Path, records: List[RunRecord]) -> None:
         "load_replays",
         "load_replays_rob_store_addr_unknown",
         "load_replays_rob_store_overlap",
-        "load_replays_store_buffer_overlap",
+        "load_replays_store_forwarding_buffer_overlap",
         "loads_blocked_by_store",
         "predictor_control_incorrect",
         "predictor_jalr_mispredicts",

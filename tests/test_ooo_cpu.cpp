@@ -721,7 +721,7 @@ TEST_F(OutOfOrderCPUTest, DetailedStatsIncludeStoreForwardingAndBlockingProfile)
     const std::string stats_text = oss.str();
     EXPECT_NE(stats_text.find("cpu.store_profile.top.begin"), std::string::npos);
     EXPECT_NE(stats_text.find("forwarded_full="), std::string::npos);
-    EXPECT_NE(stats_text.find("blocked_store_buffer_overlap="), std::string::npos);
+    EXPECT_NE(stats_text.find("blocked_store_forwarding_buffer_overlap="), std::string::npos);
     EXPECT_NE(stats_text.find("caused_order_violation="), std::string::npos);
 }
 
@@ -753,7 +753,7 @@ TEST_F(OutOfOrderCPUTest, ReadyStoreAddressAvoidsUnknownStoreReplayForDependentL
     EXPECT_EQ(statValueByName(stats, "cpu.memory.load_replays.rob_store_addr_unknown"), 0u);
 }
 
-TEST_F(OutOfOrderCPUTest, PartialStoreMergeAvoidsStoreBufferOverlapReplay) {
+TEST_F(OutOfOrderCPUTest, PartialStoreMergeAvoidsStoreForwardingBufferOverlapReplay) {
     memory->writeWord(0x100, 0xAABBCCDDu);
 
     writeInstruction(0x0, createITypeInstruction(0x100, 0, 0x0, 1, 0x13));  // addi x1, x0, 0x100
@@ -781,7 +781,7 @@ TEST_F(OutOfOrderCPUTest, PartialStoreMergeAvoidsStoreBufferOverlapReplay) {
 
     const auto stats = cpu->getStats();
     EXPECT_EQ(statValueByName(stats, "cpu.memory.loads_blocked_by_store"), 0u);
-    EXPECT_EQ(statValueByName(stats, "cpu.memory.load_replays.store_buffer_overlap"), 0u);
+    EXPECT_EQ(statValueByName(stats, "cpu.memory.load_replays.store_forwarding_buffer_overlap"), 0u);
 }
 
 TEST_F(OutOfOrderCPUTest, ReadyStoreValueAvoidsRobOverlapReplayForDependentLoad) {

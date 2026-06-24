@@ -38,7 +38,8 @@ public:
             bool save_rename_checkpoint) {
             DispatchAdmission admission(*state_.register_rename,
                                         *state_.reservation_station,
-                                        *state_.store_buffer,
+                                        *state_.store_queue,
+                                        *state_.store_forwarding_buffer,
                                         state_.rename_checkpoints);
             return admission.tryAdmit(instruction,
                                       state_.cycle_count,

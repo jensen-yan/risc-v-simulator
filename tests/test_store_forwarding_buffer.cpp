@@ -1,18 +1,18 @@
 #include <gtest/gtest.h>
-#include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/store_forwarding_buffer.h"
 #include "cpu/ooo/dynamic_inst.h"
 #include "common/types.h"
 
 using namespace riscv;
 
-class StoreBufferTest : public ::testing::Test {
+class StoreForwardingBufferTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        store_buffer = std::make_unique<StoreBuffer>();
+        store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
     }
 
     void TearDown() override {
-        store_buffer.reset();
+        store_forwarding_buffer.reset();
     }
 
     // 创建测试用的DynamicInst对象
@@ -29,11 +29,11 @@ protected:
         return create_dynamic_inst(decoded_inst, pc, instruction_id);
     }
 
-    std::unique_ptr<StoreBuffer> store_buffer;
+    std::unique_ptr<StoreForwardingBuffer> store_forwarding_buffer;
 };
 
 // 测试基本的Store条目添加
-TEST_F(StoreBufferTest, AddStoreEntry) {
+TEST_F(StoreForwardingBufferTest, AddStoreEntry) {
     uint32_t address = 0x1000;
     uint32_t value = 0x12345678;
     uint8_t size = 4;
@@ -43,11 +43,11 @@ TEST_F(StoreBufferTest, AddStoreEntry) {
     auto instruction = createTestDynamicInst(instruction_id, pc);
     
     // 添加Store条目不应抛出异常
-    EXPECT_NO_THROW(store_buffer->add_store(instruction, address, value, size));
+    EXPECT_NO_THROW(store_forwarding_buffer->add_store(instruction, address, value, size));
 }
 
 // 测试Store-to-Load Forwarding - 完全匹配
-TEST_F(StoreBufferTest, ForwardingExactMatch) {
+TEST_F(StoreForwardingBufferTest, ForwardingExactMatch) {
     uint32_t address = 0x1000;
     uint32_t store_value = 0x12345678;
     uint8_t size = 4;
@@ -57,20 +57,20 @@ TEST_F(StoreBufferTest, ForwardingExactMatch) {
     auto instruction = createTestDynamicInst(instruction_id, pc);
     
     // 添加Store条目
-    store_buffer->add_store(instruction, address, store_value, size);
+    store_forwarding_buffer->add_store(instruction, address, store_value, size);
 
     // 尝试Load相同地址和大小
     uint64_t load_result;
-    bool forwarded = store_buffer->forward_load(address, size, load_result);
+    bool forwarded = store_forwarding_buffer->forward_load(address, size, load_result);
 
     EXPECT_TRUE(forwarded);
     EXPECT_EQ(load_result, store_value);
-    EXPECT_EQ(store_buffer->classify_load_forwarding(address, size, load_result, instruction_id + 1),
-              StoreBuffer::LoadForwardingKind::FullMatch);
+    EXPECT_EQ(store_forwarding_buffer->classify_load_forwarding(address, size, load_result, instruction_id + 1),
+              StoreForwardingBuffer::LoadForwardingKind::FullMatch);
 }
 
 // 测试Store-to-Load Forwarding - 字节访问
-TEST_F(StoreBufferTest, ForwardingByteAccess) {
+TEST_F(StoreForwardingBufferTest, ForwardingByteAccess) {
     uint32_t address = 0x1000;
     uint32_t store_value = 0x12345678;  // 存储字
     uint8_t store_size = 4;
@@ -80,36 +80,36 @@ TEST_F(StoreBufferTest, ForwardingByteAccess) {
     auto instruction = createTestDynamicInst(instruction_id, pc);
     
     // 添加Store条目（字存储）
-    store_buffer->add_store(instruction, address, store_value, store_size);
+    store_forwarding_buffer->add_store(instruction, address, store_value, store_size);
 
     // 尝试Load字节（地址+0）
     uint64_t load_result;
-    bool forwarded = store_buffer->forward_load(address, 1, load_result);
+    bool forwarded = store_forwarding_buffer->forward_load(address, 1, load_result);
 
     EXPECT_TRUE(forwarded);
     EXPECT_EQ(load_result, 0x78);  // 小端序，最低字节
 
     // 尝试Load字节（地址+1）
-    forwarded = store_buffer->forward_load(address + 1, 1, load_result);
+    forwarded = store_forwarding_buffer->forward_load(address + 1, 1, load_result);
     EXPECT_TRUE(forwarded);
     EXPECT_EQ(load_result, 0x56);  // 第二个字节
 
     // 尝试Load字节（地址+2）
-    forwarded = store_buffer->forward_load(address + 2, 1, load_result);
+    forwarded = store_forwarding_buffer->forward_load(address + 2, 1, load_result);
     EXPECT_TRUE(forwarded);
     EXPECT_EQ(load_result, 0x34);  // 第三个字节
 
     // 尝试Load字节（地址+3）
-    forwarded = store_buffer->forward_load(address + 3, 1, load_result);
+    forwarded = store_forwarding_buffer->forward_load(address + 3, 1, load_result);
     EXPECT_TRUE(forwarded);
     EXPECT_EQ(load_result, 0x12);  // 最高字节
 
-    EXPECT_EQ(store_buffer->classify_load_forwarding(address + 1, 1, load_result, instruction_id + 1),
-              StoreBuffer::LoadForwardingKind::PartialMatch);
+    EXPECT_EQ(store_forwarding_buffer->classify_load_forwarding(address + 1, 1, load_result, instruction_id + 1),
+              StoreForwardingBuffer::LoadForwardingKind::PartialMatch);
 }
 
 // 测试Store-to-Load Forwarding - 不匹配
-TEST_F(StoreBufferTest, ForwardingNoMatch) {
+TEST_F(StoreForwardingBufferTest, ForwardingNoMatch) {
     uint32_t store_address = 0x1000;
     uint32_t store_value = 0x12345678;
     uint8_t store_size = 4;
@@ -119,17 +119,17 @@ TEST_F(StoreBufferTest, ForwardingNoMatch) {
     auto instruction = createTestDynamicInst(instruction_id, pc);
     
     // 添加Store条目
-    store_buffer->add_store(instruction, store_address, store_value, store_size);
+    store_forwarding_buffer->add_store(instruction, store_address, store_value, store_size);
 
     // 尝试Load不同地址
     uint64_t load_result;
-    bool forwarded = store_buffer->forward_load(0x2000, 4, load_result);
+    bool forwarded = store_forwarding_buffer->forward_load(0x2000, 4, load_result);
 
     EXPECT_FALSE(forwarded);
 }
 
 // 测试Store条目退休
-TEST_F(StoreBufferTest, RetireStores) {
+TEST_F(StoreForwardingBufferTest, RetireStores) {
     uint32_t address1 = 0x1000;
     uint32_t address2 = 0x2000;
     uint32_t value = 0x12345678;
@@ -140,31 +140,31 @@ TEST_F(StoreBufferTest, RetireStores) {
     auto instruction2 = createTestDynamicInst(2, pc);
     
     // 添加两个Store条目
-    store_buffer->add_store(instruction1, address1, value, size);
-    store_buffer->add_store(instruction2, address2, value, size);
+    store_forwarding_buffer->add_store(instruction1, address1, value, size);
+    store_forwarding_buffer->add_store(instruction2, address2, value, size);
 
     // 两个Store都应该能转发
     uint64_t load_result;
-    EXPECT_TRUE(store_buffer->forward_load(address1, size, load_result));
-    EXPECT_TRUE(store_buffer->forward_load(address2, size, load_result));
+    EXPECT_TRUE(store_forwarding_buffer->forward_load(address1, size, load_result));
+    EXPECT_TRUE(store_forwarding_buffer->forward_load(address2, size, load_result));
 
     // 退休指令ID <= 1的Store
-    store_buffer->retire_stores_before(1);
+    store_forwarding_buffer->retire_stores_before(1);
 
     // 第一个Store应该被退休，第二个仍然存在
-    EXPECT_FALSE(store_buffer->forward_load(address1, size, load_result));
-    EXPECT_TRUE(store_buffer->forward_load(address2, size, load_result));
+    EXPECT_FALSE(store_forwarding_buffer->forward_load(address1, size, load_result));
+    EXPECT_TRUE(store_forwarding_buffer->forward_load(address2, size, load_result));
 
     // 退休所有Store
-    store_buffer->retire_stores_before(2);
+    store_forwarding_buffer->retire_stores_before(2);
 
     // 两个Store都应该被退休
-    EXPECT_FALSE(store_buffer->forward_load(address1, size, load_result));
-    EXPECT_FALSE(store_buffer->forward_load(address2, size, load_result));
+    EXPECT_FALSE(store_forwarding_buffer->forward_load(address1, size, load_result));
+    EXPECT_FALSE(store_forwarding_buffer->forward_load(address2, size, load_result));
 }
 
-// 测试Store Buffer在容量范围内保留全部live stores
-TEST_F(StoreBufferTest, KeepsAllLiveStoresWithinCapacity) {
+// 测试Store Forwarding Buffer在容量范围内保留全部live stores
+TEST_F(StoreForwardingBufferTest, KeepsAllLiveStoresWithinCapacity) {
     uint32_t base_address = 0x1000;
     uint32_t value = 0x12345678;
     uint8_t size = 4;
@@ -173,24 +173,24 @@ TEST_F(StoreBufferTest, KeepsAllLiveStoresWithinCapacity) {
     // 添加远小于Buffer容量的Store条目
     for (int i = 0; i < 10; ++i) {
         auto instruction = createTestDynamicInst(i + 1, pc);
-        store_buffer->add_store(instruction, base_address + i * 4, value + i, size);
+        store_forwarding_buffer->add_store(instruction, base_address + i * 4, value + i, size);
     }
 
     uint64_t load_result;
 
-    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 10u);
-    EXPECT_TRUE(store_buffer->forward_load(base_address, size, load_result));
+    EXPECT_EQ(store_forwarding_buffer->get_occupied_entry_count(), 10u);
+    EXPECT_TRUE(store_forwarding_buffer->forward_load(base_address, size, load_result));
     EXPECT_EQ(load_result, value);
 
-    EXPECT_TRUE(store_buffer->forward_load(base_address + 9 * 4, size, load_result));
+    EXPECT_TRUE(store_forwarding_buffer->forward_load(base_address + 9 * 4, size, load_result));
     EXPECT_EQ(load_result, value + 9);
 
-    EXPECT_TRUE(store_buffer->forward_load(base_address + 8 * 4, size, load_result));
+    EXPECT_TRUE(store_forwarding_buffer->forward_load(base_address + 8 * 4, size, load_result));
     EXPECT_EQ(load_result, value + 8);
 }
 
 // 测试刷新操作
-TEST_F(StoreBufferTest, FlushBuffer) {
+TEST_F(StoreForwardingBufferTest, FlushBuffer) {
     uint32_t address = 0x1000;
     uint32_t value = 0x12345678;
     uint8_t size = 4;
@@ -200,37 +200,37 @@ TEST_F(StoreBufferTest, FlushBuffer) {
     auto instruction = createTestDynamicInst(instruction_id, pc);
     
     // 添加Store条目
-    store_buffer->add_store(instruction, address, value, size);
+    store_forwarding_buffer->add_store(instruction, address, value, size);
 
     // 验证Store条目存在
     uint64_t load_result;
-    EXPECT_TRUE(store_buffer->forward_load(address, size, load_result));
+    EXPECT_TRUE(store_forwarding_buffer->forward_load(address, size, load_result));
 
     // 刷新Buffer
-    store_buffer->flush();
+    store_forwarding_buffer->flush();
 
     // Store条目应该被清除
-    EXPECT_FALSE(store_buffer->forward_load(address, size, load_result));
+    EXPECT_FALSE(store_forwarding_buffer->forward_load(address, size, load_result));
 }
 
-TEST_F(StoreBufferTest, FlushAfterDropsOnlyYoungerStores) {
+TEST_F(StoreForwardingBufferTest, FlushAfterDropsOnlyYoungerStores) {
     const uint32_t pc = 0x80000000;
     auto older = createTestDynamicInst(1, pc);
     auto younger = createTestDynamicInst(2, pc);
 
-    store_buffer->add_store(older, 0x1000, 0x11111111, 4);
-    store_buffer->add_store(younger, 0x1004, 0x22222222, 4);
+    store_forwarding_buffer->add_store(older, 0x1000, 0x11111111, 4);
+    store_forwarding_buffer->add_store(younger, 0x1004, 0x22222222, 4);
 
-    store_buffer->flush_after(1);
+    store_forwarding_buffer->flush_after(1);
 
     uint64_t load_result = 0;
-    EXPECT_TRUE(store_buffer->forward_load(0x1000, 4, load_result));
+    EXPECT_TRUE(store_forwarding_buffer->forward_load(0x1000, 4, load_result));
     EXPECT_EQ(load_result, 0x11111111u);
-    EXPECT_FALSE(store_buffer->forward_load(0x1004, 4, load_result));
+    EXPECT_FALSE(store_forwarding_buffer->forward_load(0x1004, 4, load_result));
 }
 
 // 测试多次写入同一地址
-TEST_F(StoreBufferTest, MultipleWritesToSameAddress) {
+TEST_F(StoreForwardingBufferTest, MultipleWritesToSameAddress) {
     uint32_t address = 0x1000;
     uint8_t size = 4;
     uint32_t pc = 0x80000000;
@@ -240,20 +240,20 @@ TEST_F(StoreBufferTest, MultipleWritesToSameAddress) {
     auto instruction3 = createTestDynamicInst(3, pc);
     
     // 添加多次写入到同一地址
-    store_buffer->add_store(instruction1, address, 0x11111111, size);
-    store_buffer->add_store(instruction2, address, 0x22222222, size);
-    store_buffer->add_store(instruction3, address, 0x33333333, size);
+    store_forwarding_buffer->add_store(instruction1, address, 0x11111111, size);
+    store_forwarding_buffer->add_store(instruction2, address, 0x22222222, size);
+    store_forwarding_buffer->add_store(instruction3, address, 0x33333333, size);
 
     // 应该转发最新的值
     uint64_t load_result;
-    bool forwarded = store_buffer->forward_load(address, size, load_result);
+    bool forwarded = store_forwarding_buffer->forward_load(address, size, load_result);
 
     EXPECT_TRUE(forwarded);
     EXPECT_EQ(load_result, 0x33333333);  // 最新的值
 }
 
 // 测试地址重叠但无法转发的情况
-TEST_F(StoreBufferTest, OverlapNoForwarding) {
+TEST_F(StoreForwardingBufferTest, OverlapNoForwarding) {
     uint32_t store_address = 0x1000;
     uint32_t store_value = 0x12345678;
     uint8_t store_size = 1;  // 只存储一个字节
@@ -263,61 +263,61 @@ TEST_F(StoreBufferTest, OverlapNoForwarding) {
     auto instruction = createTestDynamicInst(instruction_id, pc);
     
     // 添加字节Store
-    store_buffer->add_store(instruction, store_address, store_value, store_size);
+    store_forwarding_buffer->add_store(instruction, store_address, store_value, store_size);
 
     // 尝试Load字（覆盖更大范围）
     uint64_t load_result;
-    bool forwarded = store_buffer->forward_load(store_address, 4, load_result);
+    bool forwarded = store_forwarding_buffer->forward_load(store_address, 4, load_result);
 
     // 应该无法转发，因为Load需要的数据超出了Store的范围
     EXPECT_FALSE(forwarded);
-    EXPECT_EQ(store_buffer->classify_load_forwarding(store_address, 4, load_result, instruction_id + 1),
-              StoreBuffer::LoadForwardingKind::BlockedByOverlap);
+    EXPECT_EQ(store_forwarding_buffer->classify_load_forwarding(store_address, 4, load_result, instruction_id + 1),
+              StoreForwardingBuffer::LoadForwardingKind::BlockedByOverlap);
 } 
 
-TEST_F(StoreBufferTest, YoungerPartialStoreMergesIntoOlderFullWidthStoreForwarding) {
+TEST_F(StoreForwardingBufferTest, YoungerPartialStoreMergesIntoOlderFullWidthStoreForwarding) {
     const uint64_t base_address = 0x1000;
     const uint32_t pc = 0x80000000;
 
     auto older_full_store = createTestDynamicInst(1, pc);
     auto younger_byte_store = createTestDynamicInst(2, pc + 4);
 
-    store_buffer->add_store(older_full_store, base_address, 0xFFFF100000001005ULL, 8);
-    store_buffer->add_store(younger_byte_store, base_address + 4, 0x30, 1);
+    store_forwarding_buffer->add_store(older_full_store, base_address, 0xFFFF100000001005ULL, 8);
+    store_forwarding_buffer->add_store(younger_byte_store, base_address + 4, 0x30, 1);
 
     uint64_t load_result = 0;
     bool blocked = false;
-    const bool forwarded = store_buffer->forward_load(
+    const bool forwarded = store_forwarding_buffer->forward_load(
         base_address, 8, load_result, /*current_instruction_id=*/3, blocked);
 
     EXPECT_TRUE(forwarded);
     EXPECT_FALSE(blocked);
     EXPECT_EQ(load_result, 0xFFFF103000001005ULL);
     EXPECT_EQ(
-        store_buffer->classify_load_forwarding(
+        store_forwarding_buffer->classify_load_forwarding(
             base_address, 8, load_result, /*current_instruction_id=*/3),
-        StoreBuffer::LoadForwardingKind::PartialMatch);
+        StoreForwardingBuffer::LoadForwardingKind::PartialMatch);
 }
 
-TEST_F(StoreBufferTest, OccupiedEntryCountTracksValidStores) {
+TEST_F(StoreForwardingBufferTest, OccupiedEntryCountTracksValidStores) {
     const uint32_t pc = 0x80000000;
     auto older = createTestDynamicInst(1, pc);
     auto younger = createTestDynamicInst(2, pc);
 
-    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 0u);
+    EXPECT_EQ(store_forwarding_buffer->get_occupied_entry_count(), 0u);
 
-    store_buffer->add_store(older, 0x1000, 0x11111111, 4);
-    store_buffer->add_store(younger, 0x1004, 0x22222222, 4);
-    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 2u);
+    store_forwarding_buffer->add_store(older, 0x1000, 0x11111111, 4);
+    store_forwarding_buffer->add_store(younger, 0x1004, 0x22222222, 4);
+    EXPECT_EQ(store_forwarding_buffer->get_occupied_entry_count(), 2u);
 
-    store_buffer->flush_after(1);
-    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 1u);
+    store_forwarding_buffer->flush_after(1);
+    EXPECT_EQ(store_forwarding_buffer->get_occupied_entry_count(), 1u);
 
-    store_buffer->flush();
-    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 0u);
+    store_forwarding_buffer->flush();
+    EXPECT_EQ(store_forwarding_buffer->get_occupied_entry_count(), 0u);
 }
 
-TEST_F(StoreBufferTest, RepublishSameStoreUpdatesInPlaceWithoutGrowingOccupancy) {
+TEST_F(StoreForwardingBufferTest, RepublishSameStoreUpdatesInPlaceWithoutGrowingOccupancy) {
     const uint32_t pc = 0x80000000;
     auto store = createTestDynamicInst(1, pc);
 
@@ -330,16 +330,16 @@ TEST_F(StoreBufferTest, RepublishSameStoreUpdatesInPlaceWithoutGrowingOccupancy)
     memory_info.memory_value = 0x11111111;
     store->set_src2_ready(true, 0x11111111);
 
-    EXPECT_TRUE(store_buffer->publish_ready_store(store));
-    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 1u);
-    EXPECT_TRUE(memory_info.store_buffer_published);
+    EXPECT_TRUE(store_forwarding_buffer->publish_ready_store(store));
+    EXPECT_EQ(store_forwarding_buffer->get_occupied_entry_count(), 1u);
+    EXPECT_TRUE(memory_info.store_forwarding_buffer_published);
 
     memory_info.memory_value = 0x22222222;
     store->set_src2_ready(true, 0x22222222);
-    EXPECT_TRUE(store_buffer->publish_ready_store(store));
-    EXPECT_EQ(store_buffer->get_occupied_entry_count(), 1u);
+    EXPECT_TRUE(store_forwarding_buffer->publish_ready_store(store));
+    EXPECT_EQ(store_forwarding_buffer->get_occupied_entry_count(), 1u);
 
     uint64_t load_result = 0;
-    EXPECT_TRUE(store_buffer->forward_load(0x1000, 4, load_result));
+    EXPECT_TRUE(store_forwarding_buffer->forward_load(0x1000, 4, load_result));
     EXPECT_EQ(load_result, 0x22222222u);
 }

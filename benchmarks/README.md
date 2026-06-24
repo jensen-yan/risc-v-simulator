@@ -180,7 +180,7 @@ python3 tools/benchmarks/run_perf_suite.py ... --ooo-l1d-prefetch off|on
 - `commit_slots`
 - `commit_utilized_slots`
 - `rob_occupancy_avg`
-- `store_buffer_occupancy_avg`
+- `store_forwarding_buffer_occupancy_avg`
 - `l1i_hits`
 - `l1i_misses`
 - `l1i_stall_cycles`
@@ -197,7 +197,7 @@ python3 tools/benchmarks/run_perf_suite.py ... --ooo-l1d-prefetch off|on
 - `load_replays`
 - `load_replays_rob_store_addr_unknown`
 - `load_replays_rob_store_overlap`
-- `load_replays_store_buffer_overlap`
+- `load_replays_store_forwarding_buffer_overlap`
 - `loads_blocked_by_store`
 - `predictor_control_incorrect`
 - `predictor_jalr_mispredicts`

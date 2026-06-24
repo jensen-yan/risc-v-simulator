@@ -95,6 +95,14 @@ _避免使用_：把地址未知推测和恢复规则分散写在 `ExecuteStage`
 执行侧的早期恢复路径，用于已经解析的 branch/JALR 预测错误。
 _避免使用_：把早期控制流恢复埋在通用执行单元完成逻辑里
 
+**Store Queue（存储队列）**：
+执行侧 store 生命周期状态，记录一条 store 的地址 ready、数据 ready、完成、提交与推测清理边界；当前仍是一条 `STORE` 执行，不代表已经拆成独立 STA/STD uop。
+_避免使用_：把 ready-store forwarding 表误称为完整 store queue
+
+**Store Forwarding Buffer（存储转发表）**：
+保存地址和值都 ready 的 store 视图，用于 younger load 的 store-to-load forwarding 和 overlap blocking；它不是 committed SBuffer，也不直接代表架构内存已更新。
+_避免使用_：Store Buffer
+
 **Execute DCache Access（执行阶段 DCache 访问）**：
 执行侧 load/store 的 D$ 时序握手，包括请求启动、阻塞处理、延迟统计和 cache 计数器更新。
 _避免使用_：在 load/store 执行分支里重复 D$ 请求记账逻辑
@@ -134,7 +142,7 @@ _避免使用_：把预测器训练、profile 统计和 commit-loop flush 编排
 _避免使用_：把特权/系统指令语义保留为 commit loop 中的零散分支
 
 **Commit Retire Effects（提交阶段退休效果）**：
-指令成功退休后的通用记账工作，包括 store-buffer 退休、rename checkpoint 清理，以及 load/store profile 更新。
+指令成功退休后的通用记账工作，包括 store-forwarding-buffer 退休、rename checkpoint 清理，以及 load/store profile 更新。
 _避免使用_：把已退休工作记账混进主 commit loop
 
 ## 内存顺序术语

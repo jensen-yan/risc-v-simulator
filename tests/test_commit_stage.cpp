@@ -3,7 +3,7 @@
 #include "cpu/ooo/register_rename.h"
 #include "cpu/ooo/reorder_buffer.h"
 #include "cpu/ooo/stages/commit_stage.h"
-#include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/store_forwarding_buffer.h"
 #include "core/memory.h"
 
 #include <memory>
@@ -56,7 +56,8 @@ protected:
     void SetUp() override {
         state.reorder_buffer = std::make_unique<ReorderBuffer>();
         state.register_rename = std::make_unique<RegisterRenameUnit>();
-        state.store_buffer = std::make_unique<StoreBuffer>();
+        state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
         state.cycle_count = 17;
     }
 };

@@ -27,7 +27,9 @@ public:
             state_.perf_counters.increment(id, amount);
         }
         void updateWaitingOperands(const CompletionEvent& completion_event) {
-            state_.reservation_station->update_operands(completion_event, state_.store_buffer.get());
+            state_.reservation_station->update_operands(completion_event,
+                                                        state_.store_queue.get(),
+                                                        state_.store_forwarding_buffer.get());
         }
         void updatePhysicalRegister(RegisterFileKind kind,
                                     PhysRegNum reg,

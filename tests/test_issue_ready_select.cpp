@@ -3,7 +3,7 @@
 #include "cpu/ooo/issue_ready_select.h"
 #include "cpu/ooo/reorder_buffer.h"
 #include "cpu/ooo/reservation_station.h"
-#include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/store_forwarding_buffer.h"
 
 #include <memory>
 
@@ -60,7 +60,8 @@ CPUState makeIssueState() {
     CPUState state;
     state.reorder_buffer = std::make_unique<ReorderBuffer>();
     state.reservation_station = std::make_unique<ReservationStation>();
-    state.store_buffer = std::make_unique<StoreBuffer>();
+    state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
     return state;
 }
 

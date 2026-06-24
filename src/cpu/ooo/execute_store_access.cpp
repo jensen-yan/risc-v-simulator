@@ -53,6 +53,10 @@ ExecuteStoreAccess::Result ExecuteStoreAccess::perform(ExecutionUnit& unit,
          unit.instruction->get_instruction_id(),
          unit_index);
 
+    if (state.store_queue) {
+        state.store_queue->markCompleted(unit.instruction);
+    }
+
     if (ExecuteMemoryOrder::tryRecoverViolation(unit.instruction, state)) {
         return Result::RecoveryTriggered;
     }

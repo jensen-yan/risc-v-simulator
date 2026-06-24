@@ -22,7 +22,8 @@ CPUState makeLoadState() {
     state.memory = std::make_shared<Memory>(4096);
     state.reorder_buffer = std::make_unique<ReorderBuffer>();
     state.reservation_station = std::make_unique<ReservationStation>();
-    state.store_buffer = std::make_unique<StoreBuffer>();
+    state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
     return state;
 }
 

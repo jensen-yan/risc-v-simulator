@@ -7,7 +7,8 @@
 
 namespace riscv {
 
-class StoreBuffer;
+class StoreForwardingBuffer;
+class StoreQueue;
 
 // 注意：原来的 ReservationStationEntry 已被 DynamicInst 替代
 // 保留这个别名以便于向后兼容和渐进式迁移
@@ -54,7 +55,9 @@ public:
     std::vector<ReadyEntry> ready_entries() const;
     
     // 更新操作数（来自完成事件）
-    void update_operands(const CompletionEvent& completion_event, StoreBuffer* store_buffer);
+    void update_operands(const CompletionEvent& completion_event,
+                         StoreQueue* store_queue,
+                         StoreForwardingBuffer* store_forwarding_buffer);
     
     // 释放保留站表项
     void release_entry(RSEntry rs_entry);

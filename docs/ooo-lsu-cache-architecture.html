@@ -652,7 +652,7 @@
           </div>
           <div class="fact">
             <b>96 ROB</b>
-            <span><code>ReorderBuffer::MAX_ROB_ENTRIES</code> 为 96，StoreBuffer 容量也对齐到 96。</span>
+            <span><code>ReorderBuffer::MAX_ROB_ENTRIES</code> 为 96，StoreQueue / StoreForwardingBuffer 容量也对齐到 96。</span>
           </div>
           <div class="fact">
             <b>48 RS</b>
@@ -858,7 +858,7 @@
             <div class="path">
               <h4>全流水线恢复</h4>
               <p>
-                trap、FENCE.I、memory-order violation 等路径会更重：清 ROB、RS、rename、store buffer、CDB、执行单元、
+                trap、FENCE.I、memory-order violation 等路径会更重：清 ROB、RS、rename、store queue / forwarding buffer、CDB、执行单元、
                 cache in-flight，并重启取指。
               </p>
               <p class="mono shell">src/cpu/ooo/stages/execute_stage.cpp:877, 946</p>
@@ -870,7 +870,8 @@
       <section id="lsu" class="band">
         <h3>LSU：这里没有一个传统 LoadStoreQueue 类</h3>
         <p class="lead">
-          这个实现更像 “分布式 LSU”：ROB 做顺序与 older-store hazard 查询，StoreBuffer 做 forwarding 可见性，
+          这个实现更像 “分布式 LSU”：ROB 做顺序与 older-store hazard 查询，StoreQueue 保存 store 生命周期状态，
+          StoreForwardingBuffer 做 forwarding 可见性，
           ExecuteStage 做 replay / cache wait / memory-order violation recovery，CommitStage 做真实 store 可见性。
         </p>
 
@@ -881,9 +882,9 @@
             <p class="mono shell">include/cpu/ooo/dynamic_inst.h:66</p>
           </div>
           <div class="panel">
-            <h4>StoreBuffer</h4>
-            <p>保存已知地址和值的更老 store，服务 younger load 的 full forwarding、partial merge 或 overlap 阻塞。</p>
-            <p class="mono shell">include/cpu/ooo/store_buffer.h:23</p>
+            <h4>StoreQueue / StoreForwardingBuffer</h4>
+            <p>StoreQueue 记录地址 ready、数据 ready、commit 和发布状态；StoreForwardingBuffer 保存已知地址和值的更老 store，服务 younger load 的 full forwarding、partial merge 或 overlap 阻塞。</p>
+            <p class="mono shell">include/cpu/ooo/store_queue.h:15, include/cpu/ooo/store_forwarding_buffer.h:23</p>
           </div>
           <div class="panel">
             <h4>ExecuteStage</h4>
@@ -922,12 +923,12 @@
           </div>
 
           <div class="step-pane" id="lsu-step-3">
-            <h4>StoreBuffer 做 byte-mask 级 forwarding</h4>
+            <h4>StoreForwardingBuffer 做 byte-mask 级 forwarding</h4>
             <p>
               <code>analyze_load_forwarding()</code> 只看比当前 load 更老的 store，按 instruction id 从新到旧合并字节。
               完全覆盖可直接返回；部分覆盖会读内存再 merge；有重叠但不能安全合并则 replay。
             </p>
-            <p class="mono shell">src/cpu/ooo/store_buffer.cpp:95, 139, 179</p>
+            <p class="mono shell">src/cpu/ooo/store_forwarding_buffer.cpp:95, 139, 179</p>
           </div>
 
           <div class="step-pane" id="lsu-step-4">
@@ -942,7 +943,7 @@
           <div class="step-pane" id="lsu-step-5">
             <h4>真实 store 写入只在 Commit 阶段发生</h4>
             <p>
-              Store execute 阶段可以发布到 StoreBuffer，也可以做 D$ 时序访问，但这不等于体系结构内存已改变。
+              Store execute 阶段可以通过 StoreQueue 发布到 StoreForwardingBuffer，也可以做 D$ 时序访问，但这不等于体系结构内存已改变。
               到 ROB head 且 completed 后，Commit 才调用 <code>l1d_cache->commitStore()</code> 或直接写 Memory。
             </p>
             <p class="mono shell">src/cpu/ooo/stages/commit_stage.cpp:227, 238, 381</p>
@@ -951,8 +952,8 @@
 
         <div class="grid-2" style="margin-top: 16px;">
           <div class="callout warning">
-            <b>不要把 StoreBuffer 当提交队列。</b>
-            它更像 “forwarding 可见性结构”。Store 对 younger load 可见，不等于已经对体系结构内存可见。
+            <b>不要把 StoreForwardingBuffer 当提交队列。</b>
+            它是 “forwarding 可见性结构”。StoreQueue 记录 store 生命周期状态，但 Store 对 younger load 可见仍不等于已经对体系结构内存可见。
           </div>
           <div class="callout danger">
             <b>乱序 load 不是无条件越过 store。</b>
@@ -1054,7 +1055,7 @@
             <div class="cycle">3</div>
             <div class="timeline-item"><b>Execute semantics</b><p>计算地址、翻译地址、写入 <code>MemoryInfo</code>。</p></div>
             <div class="cycle">4</div>
-            <div class="timeline-item"><b>Hazard + forwarding</b><p>先问 ROB 更老 store 风险，再问 StoreBuffer 能否 full/partial forwarding。</p></div>
+            <div class="timeline-item"><b>Hazard + forwarding</b><p>先问 ROB 更老 store 风险，再问 StoreForwardingBuffer 能否 full/partial forwarding。</p></div>
             <div class="cycle">5</div>
             <div class="timeline-item"><b>L1D</b><p>若需要访问 cache，miss 会产生 latency；请求可被搬到 <code>memory_access_inflight</code>。</p></div>
             <div class="cycle">6</div>
@@ -1067,13 +1068,13 @@
             <div class="cycle">1</div>
             <div class="timeline-item"><b>Issue</b><p>store 本身没有普通整数目的寄存器，但依赖地址源和值源。</p></div>
             <div class="cycle">2</div>
-            <div class="timeline-item"><b>Execute semantics</b><p>地址和值 ready 后写入 <code>MemoryInfo</code>，并发布到 StoreBuffer。</p></div>
+            <div class="timeline-item"><b>Execute semantics</b><p>地址和值 ready 后写入 <code>MemoryInfo</code> / <code>StoreQueue</code>，再发布到 StoreForwardingBuffer。</p></div>
             <div class="cycle">3</div>
             <div class="timeline-item"><b>D$ 时序访问</b><p>store execute 可以用 <code>BlockingCache::access()</code> 建模 miss penalty，但不做真实架构写。</p></div>
             <div class="cycle">4</div>
             <div class="timeline-item"><b>Memory order check</b><p>如果发现 younger load 曾错误越过地址未知 store，触发 memory-order violation recovery。</p></div>
             <div class="cycle">5</div>
-            <div class="timeline-item"><b>Commit</b><p>到 ROB head 后，<code>commitStore()</code> 写 L1D / Memory，并 retire StoreBuffer entry。</p></div>
+            <div class="timeline-item"><b>Commit</b><p>到 ROB head 后，<code>commitStore()</code> 写 L1D / Memory，并 retire StoreQueue / StoreForwardingBuffer entry。</p></div>
           </div>
         </div>
 
@@ -1086,7 +1087,7 @@
             <div class="cycle">3</div>
             <div class="timeline-item"><b>Execute resolve</b><p>比较 predicted next PC 和 actual next PC。</p></div>
             <div class="cycle">4</div>
-            <div class="timeline-item"><b>Early recovery</b><p>若错预测，flush younger ROB/RS/store buffer/CDB/execution units，恢复 rename checkpoint，PC 指向正确路径。</p></div>
+            <div class="timeline-item"><b>Early recovery</b><p>若错预测，flush younger ROB/RS/store queue/forwarding buffer/CDB/execution units，恢复 rename checkpoint，PC 指向正确路径。</p></div>
             <div class="cycle">5</div>
             <div class="timeline-item"><b>Commit accounting</b><p>提交阶段更新 predictor profile、DiffTest 和 retired count；已早恢复的指令不重复清一次。</p></div>
           </div>
@@ -1107,7 +1108,7 @@
             </li>
             <li>
               <a href="../include/cpu/ooo/cpu_state.h"><code>include/cpu/ooo/cpu_state.h</code></a>
-              <span>共享状态：ROB、RS、rename、StoreBuffer、L1I/L1D、执行单元、CDB、perf profile。</span>
+              <span>共享状态：ROB、RS、rename、StoreQueue、StoreForwardingBuffer、L1I/L1D、执行单元、CDB、perf profile。</span>
             </li>
             <li>
               <a href="../include/cpu/ooo/dynamic_inst.h"><code>include/cpu/ooo/dynamic_inst.h</code></a>
@@ -1138,8 +1139,12 @@
               <span>指令语义入口；load/store 地址计算与地址翻译也在这里。</span>
             </li>
             <li>
-              <a href="../include/cpu/ooo/store_buffer.h"><code>include/cpu/ooo/store_buffer.h</code></a>
-              <span>StoreBuffer forwarding API 和 full/partial/blocked 分类。</span>
+              <a href="../include/cpu/ooo/store_queue.h"><code>include/cpu/ooo/store_queue.h</code></a>
+              <span>StoreQueue entry 生命周期、地址/数据 ready 状态和 forwarding 发布。</span>
+            </li>
+            <li>
+              <a href="../include/cpu/ooo/store_forwarding_buffer.h"><code>include/cpu/ooo/store_forwarding_buffer.h</code></a>
+              <span>StoreForwardingBuffer forwarding API 和 full/partial/blocked 分类。</span>
             </li>
             <li>
               <a href="../src/cpu/ooo/cache/blocking_cache.cpp"><code>src/cpu/ooo/cache/blocking_cache.cpp</code></a>
@@ -1157,7 +1162,7 @@
             <ol>
               <li>为什么 <code>DecodeStage</code> 分配 ROB，但 <code>IssueStage</code> 才做 rename？</li>
               <li><code>DynamicInst</code> 为什么能避免 ROB/RS/执行单元三份状态漂移？</li>
-              <li>StoreBuffer 里可见的 store，为什么还不能说已经提交到内存？</li>
+              <li>StoreForwardingBuffer 里可见的 store，为什么还不能说已经提交到内存？</li>
               <li>load 遇到更老地址未知 store 时，有哪几种选择？</li>
               <li>为什么 D$ miss 可以搬到 <code>memory_access_inflight</code>？这和完整 MSHR 差在哪里？</li>
               <li>控制流早恢复和 memory-order violation recovery 清理范围有什么不同？</li>
@@ -1175,7 +1180,7 @@
                 <span>理解 RS ready、CDB wakeup、执行单元调度。</span>
               </div>
               <div class="test-item">
-                <b><code>test_store_buffer</code></b>
+                <b><code>test_store_forwarding_buffer</code></b>
                 <span>理解 full forwarding、partial merge、overlap block。</span>
               </div>
               <div class="test-item">

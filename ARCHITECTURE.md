@@ -127,7 +127,10 @@ flowchart LR
   rec -.-> rs
   rec -.-> rob
   rec -.-> c
-  sb["Store Buffer"] --- e
+  sq["Store Queue"] --- dis
+  sq --- e
+  sq --- c
+  sfb["Store Forwarding Buffer"] --- e
   rob --- r
 ```
 
@@ -135,6 +138,7 @@ flowchart LR
 - `OutOfOrderCPU::step()` 负责装配每个阶段的 `Stage::Context`，阶段执行入口只接收自己的 context，不直接暴露整份 `CPUState`。
 - 当某个阶段的 context 仍然需要承载跨领域能力时，优先把稳定规则下沉为更深模块，例如当前的 `DispatchAdmission`、`ExecuteMemoryOrder` 和 `OooRecovery`，而不是继续扩大 stage interface。
 - `DispatchAdmission` 集中维护一条 ROB entry 进入后端时的 rename 事务、operand binding、RS placement、ready-store publication 和 rename checkpoint 保存；`DispatchStage` 只保留每拍宽度、串行化阻塞和 stall/counter orchestration。
+- `StoreQueue` 保存 store 的地址 ready、数据 ready、完成、提交和 flush 生命周期；`StoreForwardingBuffer` 只保存地址和值都 ready 的 forwarding view。
 - `OooRecovery` 集中维护乱序流水线恢复时的资源清理规则；触发 recovery 的阶段只负责判断原因、restart PC 或 younger-than 范围。
 - 判断一个改动该不该放进 `cpu/ooo/` 的标准：
   如果它解决的是调度、flush、提交一致性、资源竞争，通常属于 OOO。
@@ -157,6 +161,8 @@ flowchart TD
     ELA["ExecuteLoadAccess\nforwarding / memory read / D$ read / exception"]
     ELV["ExecuteLoadValue\nload value formatting"]
     ESA["ExecuteStoreAccess\nstore D$ write / inflight / recovery trigger"]
+    SQ["StoreQueue\nstore addr/data/commit state"]
+    SFB["StoreForwardingBuffer\nready-store forwarding view"]
     EDC["ExecuteDCacheAccess\nD$ timing handshake"]
     EMI["ExecuteMemoryInflight\nissued miss queue"]
     EMO["ExecuteMemoryOrder\naddr-unknown speculation / violation"]
@@ -167,7 +173,7 @@ flowchart TD
     CS["CommitStage\nROB head retirement loop / halt decision"]
     CME["CommitMemoryEffects\nstore / AMO architectural memory effects"]
     CRE["CommitRegisterEffects\nGPR/FPR/fflags/rename commit"]
-    CRT["CommitRetireEffects\nstore-buffer / checkpoint / profile bookkeeping"]
+    CRT["CommitRetireEffects\nstore queue / forwarding view / checkpoint bookkeeping"]
     CCF["CommitControlFlowEffects\nbranch/JAL/JALR retire redirect"]
     CSE["CommitSystemEffects\nCSR / trap / MRET / FENCE.I"]
   end
@@ -181,9 +187,12 @@ flowchart TD
   ELC --> ELH
   ELC --> ELA
   ELA --> ELV
+  ELA --> SFB
   ELA --> EDC
   ELC --> EMI
   ES --> ESA
+  ESA --> SQ
+  SQ --> SFB
   ESA --> EDC
   ESA --> EMI
   ESA --> EMO
@@ -194,6 +203,7 @@ flowchart TD
   EMO --> REC
 
   CS --> CME
+  CME --> SQ
   CS --> CRE
   CS --> CRT
   CS --> CCF
@@ -207,11 +217,11 @@ flowchart TD
 - 改 load 被阻塞、replay 归因、older store/AMO 判定：
   优先看 `ExecuteLoadHazard`。
 - 改 store-to-load forwarding、partial merge、load 从内存或 D$ 得到最终值：
-  优先看 `ExecuteLoadAccess`，值格式化规则看 `ExecuteLoadValue`。
+  优先看 `ExecuteLoadAccess` 和 `StoreForwardingBuffer`，值格式化规则看 `ExecuteLoadValue`。
 - 改 ready load 如何在 replay、cache wait、inflight、exception、complete 之间流转：
   优先看 `ExecuteLoadCompletion`。
 - 改 store 执行完成、D$ write、store miss 入 inflight、store 触发 memory-order recovery：
-  优先看 `ExecuteStoreAccess`。
+  优先看 `ExecuteStoreAccess`；store 地址/数据/完成/提交生命周期看 `StoreQueue`。
 - 改 D$ hit/miss/blocking/outstanding/stall counter：
   优先看 `ExecuteDCacheAccess`。
 - 改已发出的 load/store miss 如何等待并提交完成事件：
@@ -231,7 +241,7 @@ flowchart TD
   优先看 `CommitMemoryEffects`。
 - 改整数/浮点寄存器、fflags、rename map 的提交：
   优先看 `CommitRegisterEffects`。
-- 改退休后的 store-buffer、rename checkpoint、load/store profile bookkeeping：
+- 改退休后的 store-forwarding-buffer、rename checkpoint、load/store profile bookkeeping：
   优先看 `CommitRetireEffects`。
 - 改 branch/JAL/JALR 退休时的 predictor/profile/redirect flush：
   优先看 `CommitControlFlowEffects`。
@@ -265,7 +275,8 @@ flowchart TD
 | issue 宽度、执行单元选择、ready slot 为什么没发射 | `IssueReadySelect` |
 | load 为什么 replay、replay 属于哪一类 | `ExecuteLoadCompletion` / `ExecuteLoadHazard` / `ExecuteMemoryOrder` |
 | load 是否应该绕过地址未知 store | `ExecuteMemoryOrder` |
-| store-to-load forwarding 命中率、partial merge 行为 | `ExecuteLoadAccess` / `StoreBuffer` / `CommitRetireEffects` |
+| store 地址/数据 ready、完成、提交生命周期 | `StoreQueue` / `DispatchAdmission` / `ExecuteStoreAccess` / `CommitMemoryEffects` |
+| store-to-load forwarding 命中率、partial merge 行为 | `ExecuteLoadAccess` / `StoreForwardingBuffer` / `CommitRetireEffects` |
 | D$ miss、outstanding limit、stall 周期 | `ExecuteDCacheAccess` / `ExecuteMemoryInflight` |
 | store miss 是否阻塞执行单元或进入 inflight | `ExecuteStoreAccess` / `ExecuteMemoryInflight` |
 | branch 早恢复是否减少错误路径工作 | `ExecuteControlRecovery` / `CommitControlFlowEffects` / `OooRecovery` |

@@ -27,7 +27,8 @@ target_sources(risc-v-sim-lib PRIVATE
     register_rename.cpp
     reorder_buffer.cpp
     reservation_station.cpp
-    store_buffer.cpp
+    store_forwarding_buffer.cpp
+    store_queue.cpp
 )
 
 if(RISCV_SIM_ENABLE_DRAMSIM3)

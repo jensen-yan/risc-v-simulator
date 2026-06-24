@@ -154,8 +154,11 @@ OooRecovery::Result OooRecovery::recoverFullPipeline(CPUState& state,
 
     result.flushed_completion_events = state.completion_fabric.clear();
 
-    if (request.flush_store_buffer && state.store_buffer) {
-        state.store_buffer->flush();
+    if (request.flush_store_forwarding_buffer && state.store_forwarding_buffer) {
+        state.store_forwarding_buffer->flush();
+    }
+    if (request.flush_store_forwarding_buffer && state.store_queue) {
+        state.store_queue->flush();
     }
 
     if (state.l1i_cache) {
@@ -303,8 +306,11 @@ OooRecovery::Result OooRecovery::recoverYoungerThan(CPUState& state,
     if (state.reservation_station) {
         state.reservation_station->flush_younger_than(request.instruction_id);
     }
-    if (state.store_buffer) {
-        state.store_buffer->flush_after(request.instruction_id);
+    if (state.store_forwarding_buffer) {
+        state.store_forwarding_buffer->flush_after(request.instruction_id);
+    }
+    if (state.store_queue) {
+        state.store_queue->flushAfter(request.instruction_id);
     }
     result.flushed_completion_events =
         flushYoungerCompletionEvents(state, request.instruction_id);

@@ -3,7 +3,8 @@
 #include "cpu/ooo/dynamic_inst.h"
 #include "cpu/ooo/register_rename.h"
 #include "cpu/ooo/reservation_station.h"
-#include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/store_forwarding_buffer.h"
+#include "cpu/ooo/store_queue.h"
 
 #include <unordered_map>
 
@@ -30,7 +31,8 @@ public:
     DispatchAdmission(
         RegisterRenameUnit& register_rename,
         ReservationStation& reservation_station,
-        StoreBuffer& store_buffer,
+        StoreQueue& store_queue,
+        StoreForwardingBuffer& store_forwarding_buffer,
         std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint>& rename_checkpoints);
 
     Result tryAdmit(const DynamicInstPtr& instruction,
@@ -43,7 +45,8 @@ private:
 
     RegisterRenameUnit& register_rename_;
     ReservationStation& reservation_station_;
-    StoreBuffer& store_buffer_;
+    StoreQueue& store_queue_;
+    StoreForwardingBuffer& store_forwarding_buffer_;
     std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint>& rename_checkpoints_;
 };
 

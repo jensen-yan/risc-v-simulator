@@ -397,7 +397,7 @@ TEST_F(ReorderBufferTest, PublishedOverlappingOlderStoreDoesNotBlockLoadHazardCh
     store_memory.memory_address = 0x240;
     store_memory.memory_size = 4;
     store_memory.memory_value = 0x12345678;
-    store_memory.store_buffer_published = true;
+    store_memory.store_forwarding_buffer_published = true;
 
     DecodedInstruction load_inst = createInstruction(InstructionType::I_TYPE, 3, 4, 0);
     load_inst.opcode = Opcode::LOAD;
@@ -406,7 +406,7 @@ TEST_F(ReorderBufferTest, PublishedOverlappingOlderStoreDoesNotBlockLoadHazardCh
     ASSERT_TRUE(younger_load != nullptr);
 
     EXPECT_FALSE(rob.has_earlier_store_hazard(younger_load->get_instruction_id(), 0x240, 4))
-        << "已经对 store buffer 可见的更老 store，应交给 forwarding 路径处理";
+        << "已经对 store forwarding buffer 可见的更老 store，应交给 forwarding 路径处理";
     EXPECT_EQ(rob.get_earlier_store_hazard_kind(younger_load->get_instruction_id(), 0x240, 4),
               ReorderBuffer::StoreHazardKind::None);
 }

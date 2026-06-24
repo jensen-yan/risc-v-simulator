@@ -93,7 +93,7 @@ TEST(ReservationStationTest, UpdateOperandsMakesWaitingEntryReady) {
     producer->set_physical_dest(32);
     producer->set_physical_dest_kind(RegisterFileKind::Integer);
     producer->set_result(0xAABBCCDD);
-    rs.update_operands(CompletionEvent(producer), nullptr);
+    rs.update_operands(CompletionEvent(producer), nullptr, nullptr);
 
     const auto ready = rs.ready_entries();
     ASSERT_EQ(ready.size(), 1u);

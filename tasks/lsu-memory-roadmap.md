@@ -28,5 +28,6 @@
 - `tools/benchmarks/build_lsu_microbench.sh` 已提供统一构建入口
 - `benchmarks/manifest/default.json` 已接入可选 LSU 微基准
 - 新增 `benchmarks/manifest/memory_learning.json`，便于单独跑 LSU / memory 学习路线
-- 第一批 LSU 计数器已落地：load replay 根因、forwarding 细分、store buffer 占用
+- 第一批 LSU 计数器已落地：load replay 根因、forwarding 细分、store forwarding buffer 占用
+- LSU 结构命名开始对齐现代 CPU：`StoreQueue` 记录 store 生命周期，`StoreForwardingBuffer` 只表示 ready-store forwarding view
 - 下一步优先看 `lsu_store_forward / stream_copy / stream_triad` 的新统计，再决定先做 LSU 机制还是转向 L2 / prefetcher

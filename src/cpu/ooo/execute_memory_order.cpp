@@ -220,8 +220,8 @@ void ExecuteMemoryOrder::recordLoadReplayReason(const DynamicInstPtr& instructio
         case PerfCounterId::LOAD_REPLAYS_ROB_STORE_OVERLAP:
             memory_info.replay_rob_store_overlap_count++;
             break;
-        case PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP:
-            memory_info.replay_store_buffer_overlap_count++;
+        case PerfCounterId::LOAD_REPLAYS_STORE_FORWARDING_BUFFER_OVERLAP:
+            memory_info.replay_store_forwarding_buffer_overlap_count++;
             break;
         default:
             break;

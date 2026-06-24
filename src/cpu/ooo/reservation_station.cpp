@@ -1,5 +1,6 @@
 #include "cpu/ooo/reservation_station.h"
-#include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/store_forwarding_buffer.h"
+#include "cpu/ooo/store_queue.h"
 #include "common/debug_types.h"
 #include <algorithm>
 
@@ -52,7 +53,9 @@ ReservationStation::DispatchResult ReservationStation::dispatch_instruction(Dyna
     return result;
 }
 
-void ReservationStation::update_operands(const CompletionEvent& completion_event, StoreBuffer* store_buffer) {
+void ReservationStation::update_operands(const CompletionEvent& completion_event,
+                                         StoreQueue* store_queue,
+                                         StoreForwardingBuffer* store_forwarding_buffer) {
     if (!completion_event.valid || !completion_event.instruction) return;
     
     auto phys_dest = completion_event.instruction->get_physical_dest();
@@ -90,8 +93,13 @@ void ReservationStation::update_operands(const CompletionEvent& completion_event
                 LOGT(RS, "rs[%d] src3 ready: p%d = 0x%" PRIx64, i, phys_dest, result);
             }
 
-            if (store_buffer) {
-                store_buffer->publish_ready_store(inst);
+            if (store_queue) {
+                store_queue->syncFromInstruction(inst);
+            }
+            if (store_queue && store_forwarding_buffer) {
+                store_queue->publishReadyStore(inst, *store_forwarding_buffer);
+            } else if (store_forwarding_buffer) {
+                store_forwarding_buffer->publish_ready_store(inst);
             }
         }
     }

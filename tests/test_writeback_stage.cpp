@@ -4,7 +4,7 @@
 #include "cpu/ooo/reorder_buffer.h"
 #include "cpu/ooo/reservation_station.h"
 #include "cpu/ooo/stages/writeback_stage.h"
-#include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/store_forwarding_buffer.h"
 
 #include <memory>
 #include <vector>
@@ -36,7 +36,8 @@ protected:
         state.reorder_buffer = std::make_unique<ReorderBuffer>();
         state.register_rename = std::make_unique<RegisterRenameUnit>();
         state.reservation_station = std::make_unique<ReservationStation>();
-        state.store_buffer = std::make_unique<StoreBuffer>();
+        state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
     }
 };
 

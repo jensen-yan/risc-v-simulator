@@ -16,20 +16,20 @@ ExecuteLoadAccess::Result ExecuteLoadAccess::perform(ExecutionUnit& unit, CPUSta
         static_cast<uint8_t>(access_size == 8 ? 0xFFu : ((1u << access_size) - 1u));
 
     if (!unit.dcache.request_sent) {
-        const auto forwarding_info = state.store_buffer->analyze_load_forwarding(
+        const auto forwarding_info = state.store_forwarding_buffer->analyze_load_forwarding(
             addr, access_size, unit.instruction->get_instruction_id());
         const auto forwarding_kind = forwarding_info.kind;
         const uint64_t forwarded_value = forwarding_info.value;
         const bool needs_memory_merge =
-            forwarding_kind == StoreBuffer::LoadForwardingKind::PartialMatch &&
+            forwarding_kind == StoreForwardingBuffer::LoadForwardingKind::PartialMatch &&
             forwarding_info.byte_mask != 0 &&
             forwarding_info.byte_mask != full_forward_mask;
 
-        if (forwarding_kind == StoreBuffer::LoadForwardingKind::FullMatch ||
-            (forwarding_kind == StoreBuffer::LoadForwardingKind::PartialMatch && !needs_memory_merge)) {
+        if (forwarding_kind == StoreForwardingBuffer::LoadForwardingKind::FullMatch ||
+            (forwarding_kind == StoreForwardingBuffer::LoadForwardingKind::PartialMatch && !needs_memory_merge)) {
             memory_info.store_forwarded = true;
             state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED);
-            if (forwarding_kind == StoreBuffer::LoadForwardingKind::FullMatch) {
+            if (forwarding_kind == StoreForwardingBuffer::LoadForwardingKind::FullMatch) {
                 state.perf_counters.increment(PerfCounterId::LOADS_FORWARDED_FULL_MATCH);
                 memory_info.load_final_source = DynamicInst::MemoryInfo::LoadFinalSource::ForwardedFull;
                 for (size_t idx = 0; idx < forwarding_info.contributing_count; ++idx) {
@@ -121,9 +121,9 @@ ExecuteLoadAccess::Result ExecuteLoadAccess::perform(ExecutionUnit& unit, CPUSta
                         ->get_memory_info()
                         .caused_forwarded_partial_count++;
                 }
-            } else if (forwarding_kind == StoreBuffer::LoadForwardingKind::BlockedByOverlap) {
+            } else if (forwarding_kind == StoreForwardingBuffer::LoadForwardingKind::BlockedByOverlap) {
                 if (forwarding_info.primary_store) {
-                    forwarding_info.primary_store->get_memory_info().caused_store_buffer_overlap_block_count++;
+                    forwarding_info.primary_store->get_memory_info().caused_store_forwarding_buffer_overlap_block_count++;
                 }
                 state.perf_counters.increment(PerfCounterId::LOADS_BLOCKED_BY_STORE);
                 return Result::BlockedByStore;

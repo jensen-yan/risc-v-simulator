@@ -7,7 +7,8 @@
 #include "cpu/ooo/register_rename.h"
 #include "cpu/ooo/reservation_station.h"
 #include "cpu/ooo/reorder_buffer.h"
-#include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/store_forwarding_buffer.h"
+#include "cpu/ooo/store_queue.h"
 #include "cpu/ooo/perf_counters.h"
 #include "cpu/ooo/ooo_types.h"
 #include "cpu/ooo/dynamic_inst.h"
@@ -214,7 +215,7 @@ struct LoadProfileEntry {
     uint64_t replay_rob_store_amo = 0;
     uint64_t replay_rob_store_addr_unknown = 0;
     uint64_t replay_rob_store_overlap = 0;
-    uint64_t replay_store_buffer_overlap = 0;
+    uint64_t replay_store_forwarding_buffer_overlap = 0;
     uint64_t speculated_addr_unknown = 0;
     uint64_t speculated_addr_unknown_violation = 0;
     uint64_t blocked_addr_unknown_pair = 0;
@@ -229,7 +230,7 @@ struct StoreProfileEntry {
     uint64_t forwarded_partial = 0;
     uint64_t blocked_rob_addr_unknown = 0;
     uint64_t blocked_rob_overlap = 0;
-    uint64_t blocked_store_buffer_overlap = 0;
+    uint64_t blocked_store_forwarding_buffer_overlap = 0;
     uint64_t caused_order_violation = 0;
 };
 
@@ -272,7 +273,8 @@ struct CPUState {
     std::unique_ptr<RegisterRenameUnit> register_rename;
     std::unique_ptr<ReservationStation> reservation_station;
     std::unique_ptr<ReorderBuffer> reorder_buffer;
-    std::unique_ptr<StoreBuffer> store_buffer;  // Store Buffer用于Store-to-Load Forwarding
+    std::unique_ptr<StoreQueue> store_queue; // Store Queue记录store生命周期状态
+    std::unique_ptr<StoreForwardingBuffer> store_forwarding_buffer;  // Ready store forwarding view
     std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint> rename_checkpoints;
 
     // 分支预测器（Fetch使用；Commit更新；flush时保留状态）

@@ -42,7 +42,7 @@ ExecuteLoadCompletion::Result ExecuteLoadCompletion::perform(ExecutionUnit& unit
              unit_index);
         blocked_inst->get_memory_info().replay_count++;
         ExecuteMemoryOrder::recordLoadReplayReason(
-            blocked_inst, state, PerfCounterId::LOAD_REPLAYS_STORE_BUFFER_OVERLAP);
+            blocked_inst, state, PerfCounterId::LOAD_REPLAYS_STORE_FORWARDING_BUFFER_OVERLAP);
         return Result::Deferred;
     }
 

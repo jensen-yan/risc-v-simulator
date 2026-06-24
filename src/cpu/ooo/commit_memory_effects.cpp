@@ -72,6 +72,9 @@ CommitMemoryEffects::Result CommitMemoryEffects::applyStore(
     }
 
     state.reservation_valid = false;
+    if (state.store_queue) {
+        state.store_queue->markCommitted(instruction);
+    }
     state.perf_counters.increment(PerfCounterId::STORES_COMMITTED);
     LOGT(COMMIT, "inst=%" PRId64 " commit store addr=0x%" PRIx64 " value=0x%" PRIx64,
          instruction->get_instruction_id(), memory_info.memory_address, memory_info.memory_value);

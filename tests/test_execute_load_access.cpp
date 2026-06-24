@@ -26,7 +26,8 @@ DecodedInstruction makeStoreInstruction() {
 CPUState makeLoadState() {
     CPUState state;
     state.memory = std::make_shared<Memory>(4096);
-    state.store_buffer = std::make_unique<StoreBuffer>();
+    state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
     return state;
 }
 
@@ -61,7 +62,7 @@ TEST(ExecuteLoadAccessTest, LoadsFromMemoryWithoutCache) {
 TEST(ExecuteLoadAccessTest, UsesFullStoreForwarding) {
     auto state = makeLoadState();
     auto store = create_dynamic_inst(makeStoreInstruction(), 0x100, 1);
-    state.store_buffer->add_store(store, 0x200, 0x12345678, 4);
+    state.store_forwarding_buffer->add_store(store, 0x200, 0x12345678, 4);
     auto load = create_dynamic_inst(makeLoadInstruction(), 0x104, 2);
     auto unit = makeLoadUnit(load, 0x200, 4);
 
@@ -80,7 +81,7 @@ TEST(ExecuteLoadAccessTest, MergesPartialStoreForwardingWithMemoryValue) {
     auto state = makeLoadState();
     state.memory->writeWord(0x200, 0x12345678);
     auto store = create_dynamic_inst(makeStoreInstruction(), 0x100, 1);
-    state.store_buffer->add_store(store, 0x201, 0xAB, 1);
+    state.store_forwarding_buffer->add_store(store, 0x201, 0xAB, 1);
     auto load = create_dynamic_inst(makeLoadInstruction(), 0x104, 2);
     auto unit = makeLoadUnit(load, 0x200, 4);
 

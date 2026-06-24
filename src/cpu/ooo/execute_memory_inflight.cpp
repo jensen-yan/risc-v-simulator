@@ -105,6 +105,9 @@ void ExecuteMemoryInflight::advance(CPUState& state, const CompletionCallback& c
             LOGT(EXECUTE,
                  "inst=%" PRId64 " STORE inflight done, notify ROB",
                  inflight.instruction->get_instruction_id());
+            if (state.store_queue) {
+                state.store_queue->markCompleted(inflight.instruction);
+            }
             if (ExecuteMemoryOrder::tryRecoverViolation(inflight.instruction, state)) {
                 resetMemoryAccessInFlightState(entry);
                 return;

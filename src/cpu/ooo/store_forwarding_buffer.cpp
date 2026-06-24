@@ -1,17 +1,18 @@
-#include "cpu/ooo/store_buffer.h"
+#include "cpu/ooo/store_forwarding_buffer.h"
 #include "common/debug_types.h"
 #include "common/types.h"
 #include <algorithm>
+#include <vector>
 
 namespace riscv {
 
-StoreBuffer::StoreBuffer() : next_allocate_index(0) {
+StoreForwardingBuffer::StoreForwardingBuffer() : next_allocate_index(0) {
     for (auto& entry : entries) {
         entry.valid = false;
     }
 }
 
-int StoreBuffer::find_entry_for_instruction(const DynamicInstPtr& instruction) const {
+int StoreForwardingBuffer::find_entry_for_instruction(const DynamicInstPtr& instruction) const {
     if (!instruction) {
         return -1;
     }
@@ -24,7 +25,7 @@ int StoreBuffer::find_entry_for_instruction(const DynamicInstPtr& instruction) c
     return -1;
 }
 
-void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64_t value, uint8_t size) {
+void StoreForwardingBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64_t value, uint8_t size) {
     const int existing_index = find_entry_for_instruction(instruction);
     int target_index = existing_index;
 
@@ -39,11 +40,11 @@ void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64
     }
 
     if (target_index < 0) {
-        throw SimulatorException("store buffer is full while publishing a live store");
+        throw SimulatorException("store forwarding buffer is full while publishing a live store");
     }
 
     // 找到下一个可用的条目或更新现有条目
-    StoreBufferEntry& entry = entries[target_index];
+    StoreForwardingBufferEntry& entry = entries[target_index];
 
     entry.valid = true;
     entry.instruction = instruction;
@@ -52,10 +53,10 @@ void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64
     entry.size = size;
 
     if (instruction) {
-        instruction->get_memory_info().store_buffer_published = true;
+        instruction->get_memory_info().store_forwarding_buffer_published = true;
     }
 
-    LOGT(EXECUTE, "store buffer add[%d]: addr=0x%" PRIx64 ", value=0x%" PRIx64 ", size=%d, inst=%" PRId64 ", pc=0x%" PRIx64,
+    LOGT(EXECUTE, "store forwarding buffer add[%d]: addr=0x%" PRIx64 ", value=0x%" PRIx64 ", size=%d, inst=%" PRId64 ", pc=0x%" PRIx64,
             target_index, address, value, size, instruction->get_instruction_id(), instruction->get_pc());
 
     if (existing_index < 0) {
@@ -64,7 +65,7 @@ void StoreBuffer::add_store(DynamicInstPtr instruction, uint64_t address, uint64
     }
 }
 
-bool StoreBuffer::publish_ready_store(DynamicInstPtr instruction) {
+bool StoreForwardingBuffer::publish_ready_store(DynamicInstPtr instruction) {
     if (!instruction || !instruction->is_store_instruction()) {
         return false;
     }
@@ -79,20 +80,20 @@ bool StoreBuffer::publish_ready_store(DynamicInstPtr instruction) {
     return true;
 }
 
-bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value) const {
+bool StoreForwardingBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value) const {
     const auto kind =
         classify_load_forwarding(address, size, result_value, std::numeric_limits<uint64_t>::max());
     return kind == LoadForwardingKind::FullMatch || kind == LoadForwardingKind::PartialMatch;
 }
 
-bool StoreBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value,
+bool StoreForwardingBuffer::forward_load(uint64_t address, uint8_t size, uint64_t& result_value,
                                uint64_t current_instruction_id, bool& blocked) const {
     const auto kind = classify_load_forwarding(address, size, result_value, current_instruction_id);
     blocked = (kind == LoadForwardingKind::BlockedByOverlap);
     return kind == LoadForwardingKind::FullMatch || kind == LoadForwardingKind::PartialMatch;
 }
 
-StoreBuffer::LoadForwardingInfo StoreBuffer::analyze_load_forwarding(uint64_t address,
+StoreForwardingBuffer::LoadForwardingInfo StoreForwardingBuffer::analyze_load_forwarding(uint64_t address,
                                                                     uint8_t size,
                                                                     uint64_t current_instruction_id) const {
     LoadForwardingInfo info;
@@ -103,14 +104,14 @@ StoreBuffer::LoadForwardingInfo StoreBuffer::analyze_load_forwarding(uint64_t ad
     const uint8_t full_mask = static_cast<uint8_t>(size == 8 ? 0xFFu : ((1u << size) - 1u));
     bool saw_exact_match_store = false;
     struct OlderStoreCandidate {
-        const StoreBufferEntry* entry = nullptr;
+        const StoreForwardingBufferEntry* entry = nullptr;
     };
     std::vector<OlderStoreCandidate> candidates;
     candidates.reserve(MAX_ENTRIES);
 
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         int index = (next_allocate_index - 1 - i + MAX_ENTRIES) % MAX_ENTRIES;
-        const StoreBufferEntry& entry = entries[index];
+        const StoreForwardingBufferEntry& entry = entries[index];
 
         if (!entry.valid || !entry.instruction) {
             continue;
@@ -137,7 +138,7 @@ StoreBuffer::LoadForwardingInfo StoreBuffer::analyze_load_forwarding(uint64_t ad
               });
 
     for (const auto& candidate : candidates) {
-        const StoreBufferEntry& entry = *candidate.entry;
+        const StoreForwardingBufferEntry& entry = *candidate.entry;
         if (!info.primary_store) {
             info.primary_store = entry.instruction;
         }
@@ -185,14 +186,14 @@ StoreBuffer::LoadForwardingInfo StoreBuffer::analyze_load_forwarding(uint64_t ad
     return info;
 }
 
-StoreBuffer::LoadForwardingKind StoreBuffer::classify_load_forwarding(uint64_t address,
+StoreForwardingBuffer::LoadForwardingKind StoreForwardingBuffer::classify_load_forwarding(uint64_t address,
                                                                       uint8_t size,
                                                                       uint64_t& result_value,
                                                                       uint64_t current_instruction_id) const {
     return classify_load_forwarding(address, size, result_value, current_instruction_id, nullptr);
 }
 
-StoreBuffer::LoadForwardingKind StoreBuffer::classify_load_forwarding(uint64_t address,
+StoreForwardingBuffer::LoadForwardingKind StoreForwardingBuffer::classify_load_forwarding(uint64_t address,
                                                                       uint8_t size,
                                                                       uint64_t& result_value,
                                                                       uint64_t current_instruction_id,
@@ -230,14 +231,14 @@ StoreBuffer::LoadForwardingKind StoreBuffer::classify_load_forwarding(uint64_t a
     }
 }
 
-void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
+void StoreForwardingBuffer::retire_stores_before(uint64_t instruction_id) {
     int retired_count = 0;
     
     for (int i = 0; i < MAX_ENTRIES; ++i) {
         if (entries[i].valid && entries[i].instruction && entries[i].instruction->get_instruction_id() <= instruction_id) {
-            LOGT(EXECUTE, "store buffer retire[%d]: inst=%" PRId64 ", addr=0x%" PRIx64,
+            LOGT(EXECUTE, "store forwarding buffer retire[%d]: inst=%" PRId64 ", addr=0x%" PRIx64,
                     i, entries[i].instruction->get_instruction_id(), entries[i].address);
-            entries[i].instruction->get_memory_info().store_buffer_published = false;
+            entries[i].instruction->get_memory_info().store_forwarding_buffer_published = false;
             entries[i].valid = false;
             entries[i].instruction = nullptr; // 清除指令指针
             retired_count++;
@@ -245,18 +246,18 @@ void StoreBuffer::retire_stores_before(uint64_t instruction_id) {
     }
     
     if (retired_count > 0) {
-        LOGT(EXECUTE, "store buffer retired %d entries, instruction_id <= %" PRId64, retired_count, instruction_id);
+        LOGT(EXECUTE, "store forwarding buffer retired %d entries, instruction_id <= %" PRId64, retired_count, instruction_id);
     }
 }
 
-void StoreBuffer::flush_after(uint64_t instruction_id) {
+void StoreForwardingBuffer::flush_after(uint64_t instruction_id) {
     int flushed_count = 0;
     for (auto& entry : entries) {
         if (entry.valid && entry.instruction &&
             entry.instruction->get_instruction_id() > instruction_id) {
-            LOGT(EXECUTE, "store buffer flush younger: inst=%" PRId64 ", addr=0x%" PRIx64,
+            LOGT(EXECUTE, "store forwarding buffer flush younger: inst=%" PRId64 ", addr=0x%" PRIx64,
                  entry.instruction->get_instruction_id(), entry.address);
-            entry.instruction->get_memory_info().store_buffer_published = false;
+            entry.instruction->get_memory_info().store_forwarding_buffer_published = false;
             entry.valid = false;
             entry.instruction = nullptr;
             flushed_count++;
@@ -264,17 +265,17 @@ void StoreBuffer::flush_after(uint64_t instruction_id) {
     }
 
     if (flushed_count > 0) {
-        LOGT(EXECUTE, "store buffer flushed %d younger entries after inst=%" PRId64,
+        LOGT(EXECUTE, "store forwarding buffer flushed %d younger entries after inst=%" PRId64,
              flushed_count, instruction_id);
     }
 }
 
-void StoreBuffer::flush() {
-    LOGT(EXECUTE, "store buffer flush: clear all entries");
+void StoreForwardingBuffer::flush() {
+    LOGT(EXECUTE, "store forwarding buffer flush: clear all entries");
     
     for (auto& entry : entries) {
         if (entry.valid && entry.instruction) {
-            entry.instruction->get_memory_info().store_buffer_published = false;
+            entry.instruction->get_memory_info().store_forwarding_buffer_published = false;
         }
         entry.valid = false;
         entry.instruction = nullptr; // 清除指令指针
@@ -282,8 +283,8 @@ void StoreBuffer::flush() {
     next_allocate_index = 0;
 }
 
-void StoreBuffer::dump() const {
-    LOGT(EXECUTE, "store buffer state");
+void StoreForwardingBuffer::dump() const {
+    LOGT(EXECUTE, "store forwarding buffer state");
     LOGT(EXECUTE, "next allocation index: %d", next_allocate_index);
     
     bool has_valid = false;
@@ -301,7 +302,7 @@ void StoreBuffer::dump() const {
     }
 }
 
-size_t StoreBuffer::get_occupied_entry_count() const {
+size_t StoreForwardingBuffer::get_occupied_entry_count() const {
     size_t occupied = 0;
     for (const auto& entry : entries) {
         if (entry.valid && entry.instruction) {
@@ -311,7 +312,7 @@ size_t StoreBuffer::get_occupied_entry_count() const {
     return occupied;
 }
 
-bool StoreBuffer::addresses_overlap(uint64_t addr1, uint8_t size1, uint64_t addr2, uint8_t size2) const {
+bool StoreForwardingBuffer::addresses_overlap(uint64_t addr1, uint8_t size1, uint64_t addr2, uint8_t size2) const {
     uint64_t end1 = addr1 + size1 - 1;
     uint64_t end2 = addr2 + size2 - 1;
     
@@ -320,7 +321,7 @@ bool StoreBuffer::addresses_overlap(uint64_t addr1, uint8_t size1, uint64_t addr
     return (addr1 <= end2) && (addr2 <= end1);
 }
 
-bool StoreBuffer::can_extract_load_data(const StoreBufferEntry& store_entry, uint64_t load_addr, uint8_t load_size) const {
+bool StoreForwardingBuffer::can_extract_load_data(const StoreForwardingBufferEntry& store_entry, uint64_t load_addr, uint8_t load_size) const {
     // 检查Load访问是否完全在Store的范围内
     uint64_t store_end = store_entry.address + store_entry.size - 1;
     uint64_t load_end = load_addr + load_size - 1;
@@ -328,7 +329,7 @@ bool StoreBuffer::can_extract_load_data(const StoreBufferEntry& store_entry, uin
     return (load_addr >= store_entry.address) && (load_end <= store_end);
 }
 
-uint64_t StoreBuffer::extract_load_data(const StoreBufferEntry& store_entry, uint64_t load_addr, uint8_t load_size) const {
+uint64_t StoreForwardingBuffer::extract_load_data(const StoreForwardingBufferEntry& store_entry, uint64_t load_addr, uint8_t load_size) const {
     // 计算Load在Store数据中的偏移
     uint64_t offset = load_addr - store_entry.address;
     

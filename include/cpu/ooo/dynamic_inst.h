@@ -79,7 +79,7 @@ public:
         uint64_t memory_value;                 // 内存值
         uint8_t memory_size;                   // 访问大小（字节）
         bool address_ready;                    // 地址是否准备好
-        bool store_buffer_published;           // store 是否已经对 younger load 可见
+        bool store_forwarding_buffer_published;           // store 是否已经对 younger load 可见
         bool speculated_past_addr_unknown_store; // load 是否曾越过地址未知的更老store
         bool has_speculated_addr_unknown_source; // 是否记录了触发本次推测的更老store PC
         uint64_t speculated_addr_unknown_store_pc; // 触发本次推测的更老store PC
@@ -90,17 +90,17 @@ public:
         uint32_t replay_rob_store_amo_count;   // 更老 AMO 导致的 replay 次数
         uint32_t replay_rob_store_addr_unknown_count; // 更老 store 地址未知导致的 replay 次数
         uint32_t replay_rob_store_overlap_count;      // ROB 中重叠更老 store 导致的 replay 次数
-        uint32_t replay_store_buffer_overlap_count;   // store buffer 中重叠但不可转发导致的 replay 次数
+        uint32_t replay_store_forwarding_buffer_overlap_count;   // store forwarding buffer 中重叠但不可转发导致的 replay 次数
         uint32_t caused_forwarded_full_count;  // 作为更老 store 命中的 full forwarding 次数
         uint32_t caused_forwarded_partial_count; // 作为更老 store 命中的 partial forwarding 次数
         uint32_t caused_rob_addr_unknown_block_count; // 作为更老 store 导致地址未知阻塞的次数
         uint32_t caused_rob_overlap_block_count;      // 作为更老 store 导致 ROB overlap 阻塞的次数
-        uint32_t caused_store_buffer_overlap_block_count; // 作为更老 store 导致 store buffer overlap 阻塞的次数
+        uint32_t caused_store_forwarding_buffer_overlap_block_count; // 作为更老 store 导致 store forwarding buffer overlap 阻塞的次数
         LoadFinalSource load_final_source;     // load 最终从哪里取到数据
         
         MemoryInfo() : is_memory_op(false), is_load(false), is_store(false),
                       memory_address(0), memory_value(0), memory_size(0),
-                      address_ready(false), store_buffer_published(false),
+                      address_ready(false), store_forwarding_buffer_published(false),
                       speculated_past_addr_unknown_store(false),
                       has_speculated_addr_unknown_source(false),
                       speculated_addr_unknown_store_pc(0),
@@ -108,9 +108,9 @@ public:
                       store_forwarded(false), replay_count(0),
                       replay_host_comm_count(0), replay_rob_store_amo_count(0),
                       replay_rob_store_addr_unknown_count(0), replay_rob_store_overlap_count(0),
-                      replay_store_buffer_overlap_count(0), caused_forwarded_full_count(0),
+                      replay_store_forwarding_buffer_overlap_count(0), caused_forwarded_full_count(0),
                       caused_forwarded_partial_count(0), caused_rob_addr_unknown_block_count(0),
-                      caused_rob_overlap_block_count(0), caused_store_buffer_overlap_block_count(0),
+                      caused_rob_overlap_block_count(0), caused_store_forwarding_buffer_overlap_block_count(0),
                       load_final_source(LoadFinalSource::None) {}
     };
 

@@ -2,15 +2,18 @@
 
 namespace riscv {
 
-void CommitRetireEffects::retireStoreBufferAndRenameCheckpoint(
+void CommitRetireEffects::retireStoreStructuresAndRenameCheckpoint(
     CPUState& state,
     const DynamicInstPtr& instruction) {
     if (!instruction) {
         return;
     }
 
-    if (state.store_buffer) {
-        state.store_buffer->retire_stores_before(instruction->get_instruction_id());
+    if (state.store_queue) {
+        state.store_queue->retireStoresBefore(instruction->get_instruction_id());
+    }
+    if (state.store_forwarding_buffer) {
+        state.store_forwarding_buffer->retire_stores_before(instruction->get_instruction_id());
     }
     state.rename_checkpoints.erase(instruction->get_instruction_id());
 }
@@ -32,7 +35,7 @@ void CommitRetireEffects::recordLoadProfile(CPUState& state,
     profile.replay_rob_store_amo += memory_info.replay_rob_store_amo_count;
     profile.replay_rob_store_addr_unknown += memory_info.replay_rob_store_addr_unknown_count;
     profile.replay_rob_store_overlap += memory_info.replay_rob_store_overlap_count;
-    profile.replay_store_buffer_overlap += memory_info.replay_store_buffer_overlap_count;
+    profile.replay_store_forwarding_buffer_overlap += memory_info.replay_store_forwarding_buffer_overlap_count;
     if (memory_info.speculated_past_addr_unknown_store) {
         profile.speculated_addr_unknown++;
         state.trainLoadAddrUnknownPredictor(instruction->get_pc(), true);
@@ -69,13 +72,13 @@ void CommitRetireEffects::recordStoreProfile(CPUState& state,
     profile.forwarded_partial += memory_info.caused_forwarded_partial_count;
     profile.blocked_rob_addr_unknown += memory_info.caused_rob_addr_unknown_block_count;
     profile.blocked_rob_overlap += memory_info.caused_rob_overlap_block_count;
-    profile.blocked_store_buffer_overlap +=
-        memory_info.caused_store_buffer_overlap_block_count;
+    profile.blocked_store_forwarding_buffer_overlap +=
+        memory_info.caused_store_forwarding_buffer_overlap_block_count;
 }
 
 void CommitRetireEffects::afterInstructionRetired(CPUState& state,
                                                   const DynamicInstPtr& instruction) {
-    retireStoreBufferAndRenameCheckpoint(state, instruction);
+    retireStoreStructuresAndRenameCheckpoint(state, instruction);
     recordLoadProfile(state, instruction);
     recordStoreProfile(state, instruction);
 }

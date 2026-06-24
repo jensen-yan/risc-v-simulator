@@ -84,7 +84,8 @@ void recreateRuntimeComponents(CPUState& state, const std::shared_ptr<Memory>& m
     state.register_rename = std::make_unique<RegisterRenameUnit>();
     state.reservation_station = std::make_unique<ReservationStation>();
     state.reorder_buffer = std::make_unique<ReorderBuffer>();
-    state.store_buffer = std::make_unique<StoreBuffer>();
+    state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
     state.syscall_handler = std::make_unique<SyscallHandler>(memory);
     state.branch_predictor = std::make_unique<BranchPredictor>();
     auto icache_cfg = createDefaultL1CacheConfig();
@@ -157,19 +158,19 @@ void sampleRobOccupancy(CPUState& state) {
     }
 }
 
-void sampleStoreBufferOccupancy(CPUState& state) {
-    if (!state.store_buffer) {
+void sampleStoreForwardingBufferOccupancy(CPUState& state) {
+    if (!state.store_forwarding_buffer) {
         return;
     }
 
-    const uint64_t occupancy = state.store_buffer->get_occupied_entry_count();
-    state.perf_counters.increment(PerfCounterId::STORE_BUFFER_OCCUPANCY_SAMPLES);
-    state.perf_counters.increment(PerfCounterId::STORE_BUFFER_OCCUPANCY_TOTAL, occupancy);
+    const uint64_t occupancy = state.store_forwarding_buffer->get_occupied_entry_count();
+    state.perf_counters.increment(PerfCounterId::STORE_FORWARDING_BUFFER_OCCUPANCY_SAMPLES);
+    state.perf_counters.increment(PerfCounterId::STORE_FORWARDING_BUFFER_OCCUPANCY_TOTAL, occupancy);
 
     const uint64_t high_watermark =
-        state.perf_counters.value(PerfCounterId::STORE_BUFFER_OCCUPANCY_HIGH_WATERMARK);
+        state.perf_counters.value(PerfCounterId::STORE_FORWARDING_BUFFER_OCCUPANCY_HIGH_WATERMARK);
     if (occupancy > high_watermark) {
-        state.perf_counters.increment(PerfCounterId::STORE_BUFFER_OCCUPANCY_HIGH_WATERMARK,
+        state.perf_counters.increment(PerfCounterId::STORE_FORWARDING_BUFFER_OCCUPANCY_HIGH_WATERMARK,
                                       occupancy - high_watermark);
     }
 }
@@ -317,7 +318,7 @@ void OutOfOrderCPU::step() {
         cpu_state_.cycle_count++;
         cpu_state_.perf_counters.increment(PerfCounterId::CYCLES);
         sampleRobOccupancy(cpu_state_);
-        sampleStoreBufferOccupancy(cpu_state_);
+        sampleStoreForwardingBufferOccupancy(cpu_state_);
         sampleDCacheOutstandingOccupancy(cpu_state_);
         sampleMemoryInflightOccupancy(cpu_state_);
     } catch (const MemoryException& e) {
@@ -490,7 +491,7 @@ void OutOfOrderCPU::flush_pipeline() {
     request.reason = OooRecovery::Reason::Exception;
     request.clear_reservation = false;
     request.reset_execution_units = false;
-    request.flush_store_buffer = false;
+    request.flush_store_forwarding_buffer = false;
     OooRecovery::recoverFullPipeline(cpu_state_, request);
 }
 
@@ -693,17 +694,17 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
        << std::right << std::setw(16) << std::fixed << std::setprecision(6) << rob_avg
        << " # Average occupied ROB entries per cycle\n";
 
-    const uint64_t store_buffer_samples =
-        cpu_state_.perf_counters.value(PerfCounterId::STORE_BUFFER_OCCUPANCY_SAMPLES);
-    const uint64_t store_buffer_total =
-        cpu_state_.perf_counters.value(PerfCounterId::STORE_BUFFER_OCCUPANCY_TOTAL);
-    const double store_buffer_avg =
-        store_buffer_samples == 0
+    const uint64_t store_forwarding_buffer_samples =
+        cpu_state_.perf_counters.value(PerfCounterId::STORE_FORWARDING_BUFFER_OCCUPANCY_SAMPLES);
+    const uint64_t store_forwarding_buffer_total =
+        cpu_state_.perf_counters.value(PerfCounterId::STORE_FORWARDING_BUFFER_OCCUPANCY_TOTAL);
+    const double store_forwarding_buffer_avg =
+        store_forwarding_buffer_samples == 0
             ? 0.0
-            : static_cast<double>(store_buffer_total) / static_cast<double>(store_buffer_samples);
-    os << std::left << std::setw(40) << "cpu.store_buffer.occupancy_avg"
-       << std::right << std::setw(16) << std::fixed << std::setprecision(6) << store_buffer_avg
-       << " # Average occupied store buffer entries per cycle\n";
+            : static_cast<double>(store_forwarding_buffer_total) / static_cast<double>(store_forwarding_buffer_samples);
+    os << std::left << std::setw(40) << "cpu.store_forwarding_buffer.occupancy_avg"
+       << std::right << std::setw(16) << std::fixed << std::setprecision(6) << store_forwarding_buffer_avg
+       << " # Average occupied store forwarding buffer entries per cycle\n";
 
     const uint64_t l1d_outstanding_samples =
         cpu_state_.perf_counters.value(PerfCounterId::CACHE_L1D_OUTSTANDING_OCCUPANCY_SAMPLES);
@@ -960,7 +961,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " replay_rob_store_amo=" << prof.replay_rob_store_amo
                << " replay_rob_store_addr_unknown=" << prof.replay_rob_store_addr_unknown
                << " replay_rob_store_overlap=" << prof.replay_rob_store_overlap
-               << " replay_store_buffer_overlap=" << prof.replay_store_buffer_overlap
+               << " replay_store_forwarding_buffer_overlap=" << prof.replay_store_forwarding_buffer_overlap
                << " speculated_addr_unknown=" << prof.speculated_addr_unknown
                << " speculated_addr_unknown_violation=" << prof.speculated_addr_unknown_violation
                << " blocked_addr_unknown_pair=" << prof.blocked_addr_unknown_pair
@@ -978,12 +979,12 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
             const uint64_t a_events = a.second.forwarded_full + a.second.forwarded_partial +
                                       a.second.blocked_rob_addr_unknown +
                                       a.second.blocked_rob_overlap +
-                                      a.second.blocked_store_buffer_overlap +
+                                      a.second.blocked_store_forwarding_buffer_overlap +
                                       a.second.caused_order_violation;
             const uint64_t b_events = b.second.forwarded_full + b.second.forwarded_partial +
                                       b.second.blocked_rob_addr_unknown +
                                       b.second.blocked_rob_overlap +
-                                      b.second.blocked_store_buffer_overlap +
+                                      b.second.blocked_store_forwarding_buffer_overlap +
                                       b.second.caused_order_violation;
             if (a_events != b_events) {
                 return a_events > b_events;
@@ -1002,7 +1003,7 @@ void OutOfOrderCPU::dumpDetailedStats(std::ostream& os) const {
                << " forwarded_partial=" << prof.forwarded_partial
                << " blocked_rob_addr_unknown=" << prof.blocked_rob_addr_unknown
                << " blocked_rob_overlap=" << prof.blocked_rob_overlap
-               << " blocked_store_buffer_overlap=" << prof.blocked_store_buffer_overlap
+               << " blocked_store_forwarding_buffer_overlap=" << prof.blocked_store_forwarding_buffer_overlap
                << " caused_order_violation=" << prof.caused_order_violation << "\n";
         }
         os << "cpu.store_profile.top.end\n";

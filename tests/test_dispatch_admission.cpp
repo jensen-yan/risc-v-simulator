@@ -41,11 +41,16 @@ class DispatchAdmissionTest : public ::testing::Test {
 protected:
     RegisterRenameUnit rename_unit;
     ReservationStation reservation_station;
-    StoreBuffer store_buffer;
+    StoreQueue store_queue;
+    StoreForwardingBuffer store_forwarding_buffer;
     std::unordered_map<uint64_t, RegisterRenameUnit::Checkpoint> rename_checkpoints;
 
     DispatchAdmission admission() {
-        return DispatchAdmission(rename_unit, reservation_station, store_buffer, rename_checkpoints);
+        return DispatchAdmission(rename_unit,
+                                 reservation_station,
+                                 store_queue,
+                                 store_forwarding_buffer,
+                                 rename_checkpoints);
     }
 };
 
@@ -103,8 +108,9 @@ TEST_F(DispatchAdmissionTest, PublishesReadyStoreWhenAddressAndValueAreReadyAtAd
 
     ASSERT_TRUE(result.admitted());
     EXPECT_TRUE(result.ready_store_published);
-    EXPECT_EQ(store_buffer.get_occupied_entry_count(), 1u);
-    EXPECT_TRUE(memory_info.store_buffer_published);
+    EXPECT_EQ(store_queue.getOccupiedEntryCount(), 1u);
+    EXPECT_EQ(store_forwarding_buffer.get_occupied_entry_count(), 1u);
+    EXPECT_TRUE(memory_info.store_forwarding_buffer_published);
     EXPECT_EQ(memory_info.memory_size, 4);
     EXPECT_EQ(memory_info.memory_value, 0xdeadbeefu);
 }

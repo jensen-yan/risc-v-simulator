@@ -72,7 +72,8 @@ TEST_F(ExecuteStageTest, EmptyReservationStationRecordsFrontendStarvedThroughCon
     CPUState state;
     state.reservation_station = std::make_unique<ReservationStation>();
     state.reorder_buffer = std::make_unique<ReorderBuffer>();
-    state.store_buffer = std::make_unique<StoreBuffer>();
+    state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
 
     ExecuteStage::Context context(state);
     execute_stage_->execute(context);
@@ -93,7 +94,8 @@ TEST_F(ExecuteStageTest, CompletionBackpressureKeepsExecutionUnitBusy) {
     CPUState state;
     state.reservation_station = std::make_unique<ReservationStation>();
     state.reorder_buffer = std::make_unique<ReorderBuffer>();
-    state.store_buffer = std::make_unique<StoreBuffer>();
+    state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
 
     for (size_t i = 0; i < OOOPipelineConfig::COMPLETION_WIDTH + 1; ++i) {
         auto inst = state.reorder_buffer->allocate_entry(

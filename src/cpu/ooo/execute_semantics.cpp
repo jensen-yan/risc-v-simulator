@@ -95,12 +95,12 @@ void executeAtomicOperation(ExecutionUnit& unit, const DynamicInstPtr& instructi
     atomic_info.width = inst.funct3;
 
     if (amo_result.do_store) {
-        state.store_buffer->add_store(
+        state.store_forwarding_buffer->add_store(
             instruction,
             atomic_info.physical_address,
             amo_result.store_value,
             inst.memory_access_size);
-        state.perf_counters.increment(PerfCounterId::STORES_TO_BUFFER);
+        state.perf_counters.increment(PerfCounterId::STORES_TO_FORWARDING_BUFFER);
     }
     instruction->set_atomic_execute_info(atomic_info);
 
@@ -336,10 +336,18 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                          " value=0x%" PRIx64 " size=%d",
                          virtual_addr, physical_addr, store_value, inst.memory_access_size);
 
-                    // 仅记录待提交Store，真正写内存在commit阶段进行。
-                    state.store_buffer->add_store(
-                        instruction, physical_addr, store_value, inst.memory_access_size);
-                    state.perf_counters.increment(PerfCounterId::STORES_TO_BUFFER);
+                    // 仅发布ready store供forwarding，真正写内存在commit阶段进行。
+                    if (state.store_queue && state.store_forwarding_buffer) {
+                        state.store_queue->updateAddress(
+                            instruction, physical_addr, inst.memory_access_size);
+                        state.store_queue->updateData(instruction, store_value);
+                        state.store_queue->publishReadyStore(
+                            instruction, *state.store_forwarding_buffer);
+                    } else if (state.store_forwarding_buffer) {
+                        state.store_forwarding_buffer->add_store(
+                            instruction, physical_addr, store_value, inst.memory_access_size);
+                    }
+                    state.perf_counters.increment(PerfCounterId::STORES_TO_FORWARDING_BUFFER);
                 }
                 break;
 

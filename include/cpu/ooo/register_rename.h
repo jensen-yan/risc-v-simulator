@@ -70,8 +70,11 @@ public:
         OperandBinding src2;
         OperandBinding src3;
         RegisterFileKind dest_kind = RegisterFileKind::None;
-        PhysRegNum dest_reg;
-        bool success;
+        PhysRegNum dest_reg = 0;
+        RegNum dest_logical_reg = 0;
+        PhysRegNum previous_dest_reg = 0;
+        bool allocated_dest = false;
+        bool success = false;
     };
 
     using SourceLookupResult = OperandBinding;
@@ -90,6 +93,7 @@ public:
     
     // 对指令进行重命名
     RenameResult rename_instruction(const DecodedInstruction& instruction);
+    void rollback_rename(const RenameResult& result);
     SourceLookupResult lookup_source(RegisterFileKind kind, RegNum logical_reg) const;
     DestinationAllocateResult allocate_destination(RegisterFileKind kind, RegNum logical_reg);
     

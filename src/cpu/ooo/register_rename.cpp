@@ -235,6 +235,13 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
         result.src2 = lookup_source(fpSource2Kind(instruction), instruction.rs2);
         result.src3 = lookup_source(fpSource3Kind(instruction), instruction.rs3);
         result.dest_kind = fpDestinationKind(instruction);
+        const bool needs_dest_reg = result.dest_kind != RegisterFileKind::None &&
+                                    !(result.dest_kind == RegisterFileKind::Integer &&
+                                      instruction.rd == 0);
+        PhysRegNum old_physical_reg = 0;
+        if (needs_dest_reg) {
+            old_physical_reg = table_for_kind(result.dest_kind)[instruction.rd].physical_reg;
+        }
 
         const auto dest = allocate_destination(result.dest_kind, instruction.rd);
         if (!dest.success) {
@@ -242,6 +249,11 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
             return result;
         }
         result.dest_reg = dest.dest_reg;
+        if (needs_dest_reg) {
+            result.dest_logical_reg = instruction.rd;
+            result.previous_dest_reg = old_physical_reg;
+            result.allocated_dest = true;
+        }
         result.success = true;
         rename_count++;
         return result;
@@ -287,6 +299,9 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
             return result;
         }
         result.dest_reg = dest.dest_reg;
+        result.dest_logical_reg = instruction.rd;
+        result.previous_dest_reg = old_physical_reg;
+        result.allocated_dest = true;
 
         if (instruction.rs1 == instruction.rd && instruction.rs1 < NUM_LOGICAL_REGS) {
             result.src1.kind = RegisterFileKind::Integer;
@@ -321,6 +336,24 @@ RegisterRenameUnit::RenameResult RegisterRenameUnit::rename_instruction(
     result.success = true;
     rename_count++;
     return result;
+}
+
+void RegisterRenameUnit::rollback_rename(const RenameResult& result) {
+    if (!result.success || !result.allocated_dest || result.dest_kind == RegisterFileKind::None) {
+        return;
+    }
+
+    auto& rename_ref = table_for_kind(result.dest_kind);
+    if (result.dest_logical_reg < rename_ref.size()) {
+        rename_ref[result.dest_logical_reg].physical_reg = result.previous_dest_reg;
+        rename_ref[result.dest_logical_reg].valid = true;
+    }
+
+    release_physical_register(result.dest_kind, result.dest_reg);
+    LOGT(RENAME, "rollback rename: logical %d restores p%d, releases p%d",
+         static_cast<int>(result.dest_logical_reg),
+         static_cast<int>(result.previous_dest_reg),
+         static_cast<int>(result.dest_reg));
 }
 
 PhysRegNum RegisterRenameUnit::allocate_physical_register() {

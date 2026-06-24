@@ -2,6 +2,7 @@ target_sources(risc-v-sim-lib PRIVATE
     ooo_cpu.cpp
     branch_predictor.cpp
     completion_fabric.cpp
+    dispatch_admission.cpp
     commit_control_flow_effects.cpp
     commit_memory_effects.cpp
     commit_register_effects.cpp

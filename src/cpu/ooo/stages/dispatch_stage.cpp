@@ -103,57 +103,38 @@ void DispatchStage::execute(Context& context) {
             break;
         }
 
-        if (!context.reservationStationHasFreeEntry()) {
+        const bool save_rename_checkpoint =
+            decoded_info.opcode == Opcode::BRANCH || decoded_info.opcode == Opcode::JALR;
+        const auto admission_result =
+            context.admitInstruction(dispatchable_entry, save_rename_checkpoint);
+        if (!admission_result.admitted()) {
             if (dispatched_this_cycle == 0) {
-                LOGT(DISPATCH, "reservation station full, dispatch stalled");
-                context.recordPipelineStall(PerfCounterId::STALL_DISPATCH_RS_FULL);
-            }
-            break;
-        }
-
-        bool dispatched = false;
-
-        auto rename_result = context.renameInstruction(dispatchable_entry->get_decoded_info());
-        if (!rename_result.success) {
-            if (dispatched_this_cycle == 0) {
-                LOGT(DISPATCH, "rename failed, dispatch stalled");
-                context.recordPipelineStall(PerfCounterId::STALL_DISPATCH_RENAME_FAIL);
-            }
-            break;
-        }
-
-        dispatchable_entry->bind_src1_operand(rename_result.src1);
-        dispatchable_entry->bind_src2_operand(rename_result.src2);
-        dispatchable_entry->bind_src3_operand(rename_result.src3);
-        dispatchable_entry->set_physical_dest_kind(rename_result.dest_kind);
-        dispatchable_entry->set_physical_dest(rename_result.dest_reg);
-
-        auto dispatch_result = context.dispatchToReservationStation(dispatchable_entry);
-        if (!dispatch_result.success) {
-            context.releasePhysicalRegister(rename_result.dest_kind, rename_result.dest_reg);
-            if (dispatched_this_cycle == 0) {
-                LOGT(DISPATCH, "rs dispatch failed, rollback rename");
-                context.recordPipelineStall(PerfCounterId::STALL_DISPATCH_RS_FULL);
+                switch (admission_result.status) {
+                    case DispatchAdmission::Status::ReservationStationFull:
+                        LOGT(DISPATCH, "reservation station full, dispatch stalled");
+                        context.recordPipelineStall(PerfCounterId::STALL_DISPATCH_RS_FULL);
+                        break;
+                    case DispatchAdmission::Status::RenameStall:
+                        LOGT(DISPATCH, "rename failed, dispatch stalled");
+                        context.recordPipelineStall(PerfCounterId::STALL_DISPATCH_RENAME_FAIL);
+                        break;
+                    case DispatchAdmission::Status::InvalidInstruction:
+                        LOGW(DISPATCH, "invalid instruction during dispatch admission");
+                        context.recordPipelineStall(PerfCounterId::STALL_DISPATCH_NO_DISPATCHABLE);
+                        break;
+                    case DispatchAdmission::Status::Admitted:
+                        break;
+                }
             }
             break;
         }
 
         LOGT(DISPATCH, "dispatched slot=%zu inst=%" PRId64 " to rs[%d]",
-             slot, dispatchable_entry->get_instruction_id(), dispatch_result.rs_entry);
-        context.publishReadyStore(dispatchable_entry);
-        dispatched = true;
-
-        if (!dispatched) {
-            break;
-        }
+             slot,
+             dispatchable_entry->get_instruction_id(),
+             static_cast<int>(admission_result.rs_entry));
 
         context.incrementCounter(PerfCounterId::DISPATCHED_INSTRUCTIONS);
-        dispatchable_entry->set_dispatch_cycle(context.cycleCount());
-        dispatchable_entry->set_status(DynamicInst::Status::DISPATCHED);
-        if (decoded_info.opcode == Opcode::BRANCH || decoded_info.opcode == Opcode::JALR) {
-            context.saveRenameCheckpoint(dispatchable_entry->get_instruction_id(),
-                                         context.captureRenameCheckpoint());
-        }
         dispatched_this_cycle++;
 
         if (is_serializing_control) {

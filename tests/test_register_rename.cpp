@@ -153,6 +153,27 @@ TEST_F(RegisterRenameTest, PhysicalRegisterAllocation) {
         << "空闲寄存器应该减少1";
 }
 
+TEST_F(RegisterRenameTest, RollbackRenameRestoresMappingAndFreeList) {
+    const auto original_mapping =
+        rename_unit.lookup_source(RegisterFileKind::Integer, 1).physical_reg;
+    const auto initial_free = rename_unit.get_free_register_count();
+
+    auto inst = createInstruction(InstructionType::R_TYPE, 1, 2, 3);
+    auto result = rename_unit.rename_instruction(inst);
+    ASSERT_TRUE(result.success);
+    ASSERT_TRUE(result.allocated_dest);
+    EXPECT_NE(rename_unit.lookup_source(RegisterFileKind::Integer, 1).physical_reg,
+              original_mapping);
+    EXPECT_EQ(rename_unit.get_free_register_count(), initial_free - 1);
+
+    rename_unit.rollback_rename(result);
+
+    EXPECT_EQ(rename_unit.lookup_source(RegisterFileKind::Integer, 1).physical_reg,
+              original_mapping);
+    EXPECT_EQ(rename_unit.get_free_register_count(), initial_free);
+    EXPECT_TRUE(rename_unit.is_physical_register_ready(result.dest_kind, result.dest_reg));
+}
+
 // 测试4：物理寄存器状态管理
 TEST_F(RegisterRenameTest, PhysicalRegisterStateManagement) {
     auto inst = createInstruction(InstructionType::R_TYPE, 1, 0, 0);

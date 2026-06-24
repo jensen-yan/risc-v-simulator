@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cpu/ooo/dispatch_admission.h"
 #include "cpu/ooo/pipeline_stage.h"
 #include "cpu/ooo/cpu_state.h"
 
@@ -32,32 +33,17 @@ public:
         ROBEntry robHeadEntry() const { return state_.reorder_buffer->get_head_entry(); }
         bool hasOlderInflightSerializingInstruction(uint64_t instruction_id) const;
 
-        bool reservationStationHasFreeEntry() const {
-            return state_.reservation_station->has_free_entry();
+        DispatchAdmission::Result admitInstruction(
+            const DynamicInstPtr& instruction,
+            bool save_rename_checkpoint) {
+            DispatchAdmission admission(*state_.register_rename,
+                                        *state_.reservation_station,
+                                        *state_.store_buffer,
+                                        state_.rename_checkpoints);
+            return admission.tryAdmit(instruction,
+                                      state_.cycle_count,
+                                      save_rename_checkpoint);
         }
-        ReservationStation::DispatchResult dispatchToReservationStation(
-            const DynamicInstPtr& instruction) {
-            return state_.reservation_station->dispatch_instruction(instruction);
-        }
-
-        RegisterRenameUnit::RenameResult renameInstruction(const DecodedInstruction& decoded) {
-            return state_.register_rename->rename_instruction(decoded);
-        }
-        void releasePhysicalRegister(RegisterFileKind kind, PhysRegNum reg) {
-            state_.register_rename->release_physical_register(kind, reg);
-        }
-        RegisterRenameUnit::Checkpoint captureRenameCheckpoint() const {
-            return state_.register_rename->capture_checkpoint();
-        }
-        void saveRenameCheckpoint(uint64_t instruction_id,
-                                  const RegisterRenameUnit::Checkpoint& checkpoint) {
-            state_.rename_checkpoints[instruction_id] = checkpoint;
-        }
-
-        void publishReadyStore(const DynamicInstPtr& instruction) {
-            state_.store_buffer->publish_ready_store(instruction);
-        }
-        uint64_t cycleCount() const { return state_.cycle_count; }
 
     private:
         CPUState& state_;

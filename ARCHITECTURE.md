@@ -95,7 +95,8 @@ flowchart LR
   f["Fetch"] --> d["Decode"]
   d --> r["Rename"]
   r --> dis["Dispatch"]
-  dis --> rs["Reservation Station / Issue Queue"]
+  dis --> da["DispatchAdmission\nrename transaction / operand binding"]
+  da --> rs["Reservation Station / Issue Queue"]
   rs --> iss["Issue / Ready Select"]
   iss --> e["Execute"]
   e --> w["Writeback"]
@@ -111,7 +112,8 @@ flowchart LR
 
 - `OOO` 目录的核心不是“重新实现指令语义”，而是实现时序、依赖、仲裁、恢复。
 - `OutOfOrderCPU::step()` 负责装配每个阶段的 `Stage::Context`，阶段执行入口只接收自己的 context，不直接暴露整份 `CPUState`。
-- 当某个阶段的 context 仍然需要承载跨领域能力时，优先把稳定规则下沉为更深模块，例如当前的 `ExecuteMemoryOrder` 和 `OooRecovery`，而不是继续扩大 stage interface。
+- 当某个阶段的 context 仍然需要承载跨领域能力时，优先把稳定规则下沉为更深模块，例如当前的 `DispatchAdmission`、`ExecuteMemoryOrder` 和 `OooRecovery`，而不是继续扩大 stage interface。
+- `DispatchAdmission` 集中维护一条 ROB entry 进入后端时的 rename 事务、operand binding、RS placement、ready-store publication 和 rename checkpoint 保存；`DispatchStage` 只保留每拍宽度、串行化阻塞和 stall/counter orchestration。
 - `OooRecovery` 集中维护乱序流水线恢复时的资源清理规则；触发 recovery 的阶段只负责判断原因、restart PC 或 younger-than 范围。
 - 判断一个改动该不该放进 `cpu/ooo/` 的标准：
   如果它解决的是调度、flush、提交一致性、资源竞争，通常属于 OOO。

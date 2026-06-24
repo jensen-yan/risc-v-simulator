@@ -227,7 +227,7 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                     unit.is_jump = true;  // 标记为跳转指令
                     instruction->set_jump_info(true, unit.jump_target);
                 } else if (inst.opcode == Opcode::MISC_MEM) {
-                    // FENCE/FENCE.I：在当前单核模型中作为NOP处理
+                    // FENCE/FENCE.I 无数据结果；顺序约束由 dispatch/commit 处理。
                     unit.result = 0;
                 } else {
                     unit.has_exception = true;

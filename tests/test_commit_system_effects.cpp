@@ -83,6 +83,26 @@ TEST(CommitSystemEffectsTest, FenceIRedirectsToFallthroughAndFlushesIcachePath) 
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::PIPELINE_FLUSH_FENCEI), 1u);
 }
 
+TEST(CommitSystemEffectsTest, FenceCommitsWithoutPipelineFlush) {
+    CPUState state;
+    state.reservation_valid = true;
+    state.reservation_addr = 0x80;
+    auto decoded = makeInstruction(Opcode::MISC_MEM);
+    decoded.funct3 = static_cast<Funct3>(0b000);
+    auto inst = create_dynamic_inst(decoded, 0x200, 1);
+    ASSERT_NE(inst, nullptr);
+
+    const auto result = CommitSystemEffects::apply(state, inst);
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_FALSE(result.should_stop_commit);
+    EXPECT_FALSE(result.has_flush_summary);
+    EXPECT_EQ(state.pc, 0u);
+    EXPECT_TRUE(state.reservation_valid);
+    EXPECT_EQ(state.reservation_addr, 0x80u);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::PIPELINE_FLUSH_FENCEI), 0u);
+}
+
 TEST(CommitSystemEffectsTest, IgnoresNonSystemInstruction) {
     CPUState state;
     auto inst = create_dynamic_inst(makeInstruction(Opcode::OP_IMM), 0x100, 1);

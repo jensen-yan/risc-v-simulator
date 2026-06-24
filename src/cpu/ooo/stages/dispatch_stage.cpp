@@ -7,13 +7,22 @@ namespace riscv {
 
 namespace {
 
+constexpr uint8_t kFenceFunct3 = 0b000;
 constexpr uint8_t kFenceIFunct3 = 0b001;
+
+bool isFenceInstruction(const DecodedInstruction& decoded_info) {
+    if (decoded_info.opcode != Opcode::MISC_MEM) {
+        return false;
+    }
+
+    const auto funct3 = static_cast<uint8_t>(decoded_info.funct3);
+    return funct3 == kFenceFunct3 || funct3 == kFenceIFunct3;
+}
 
 bool isSerializingControlInstruction(const DecodedInstruction& decoded_info) {
     return (decoded_info.opcode == Opcode::SYSTEM &&
             InstructionExecutor::isTrapLikeSystemInstruction(decoded_info)) ||
-           (decoded_info.opcode == Opcode::MISC_MEM &&
-            static_cast<uint8_t>(decoded_info.funct3) == kFenceIFunct3);
+           isFenceInstruction(decoded_info);
 }
 
 bool hasOlderInflightSerializingInstruction(ReorderBuffer& reorder_buffer, uint64_t instruction_id) {

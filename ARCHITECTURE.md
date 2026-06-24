@@ -179,7 +179,7 @@ flowchart TD
     CRE["CommitRegisterEffects\nGPR/FPR/fflags/rename commit"]
     CRT["CommitRetireEffects\nstore queue / forwarding view / checkpoint bookkeeping"]
     CCF["CommitControlFlowEffects\nbranch/JAL/JALR retire redirect"]
-    CSE["CommitSystemEffects\nCSR / trap / MRET / FENCE.I"]
+    CSE["CommitSystemEffects\nCSR / trap / MRET / FENCE / FENCE.I"]
   end
 
   REC["OooRecovery\nshared flush / younger cleanup / restart"]
@@ -253,7 +253,7 @@ flowchart TD
   优先看 `CommitRetireEffects`。
 - 改 branch/JAL/JALR 退休时的 predictor/profile/redirect flush：
   优先看 `CommitControlFlowEffects`。
-- 改 CSR、ECALL、EBREAK、MRET、FENCE.I、trap entry、serializing full flush：
+- 改 CSR、ECALL、EBREAK、MRET、FENCE/FENCE.I、trap entry、serializing full flush：
   优先看 `CommitSystemEffects`。
 - 改 ROB head commit loop、halt/error 策略、pipeline trace 记录时机：
   优先看 `CommitStage`。

@@ -626,7 +626,7 @@ TEST_F(OutOfOrderCPUTest, LrScWordInstruction) {
     EXPECT_EQ(memory->readWord(0x204), 0x22u) << "SC.W成功时应写入新值";
 }
 
-TEST_F(OutOfOrderCPUTest, FenceInstructionAsNop) {
+TEST_F(OutOfOrderCPUTest, FenceInstructionSerializesButKeepsArchitecturalNopResult) {
     // ADDI  x1, x0, 1
     // FENCE
     // ADDI  x2, x1, 1
@@ -643,7 +643,7 @@ TEST_F(OutOfOrderCPUTest, FenceInstructionAsNop) {
     }
 
     EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
-    EXPECT_EQ(cpu->getRegister(2), 2) << "FENCE应按NOP处理，不影响后续计算";
+    EXPECT_EQ(cpu->getRegister(2), 2) << "FENCE应只约束乱序，不改变架构计算结果";
 }
 
 TEST_F(OutOfOrderCPUTest, HostCommLoadWaitsForOlderTohostStoreToCommit) {
@@ -674,6 +674,42 @@ TEST_F(OutOfOrderCPUTest, HostCommLoadWaitsForOlderTohostStoreToCommit) {
 
     EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
     EXPECT_EQ(cpu->getRegister(15), 1u) << "fromhost load 应等待更老的 tohost store 生效后再读取";
+}
+
+TEST_F(OutOfOrderCPUTest, FenceOrdersHostCommExternalPacketWriteBeforeYoungerLoad) {
+    memory->setHostCommAddresses(0x100, 0x108);
+    memory->writeByte(0x200, 'B');
+
+    // x2=tohost, x3=fromhost, x4=magic packet, x5=SYS_write,
+    // x6=fd, x7=buffer, x8=count.
+    writeInstruction(0x00, createITypeInstruction(0x100, 0, 0x0, 2, 0x13));
+    writeInstruction(0x04, createITypeInstruction(0x108, 0, 0x0, 3, 0x13));
+    writeInstruction(0x08, createITypeInstruction(0x180, 0, 0x0, 4, 0x13));
+    writeInstruction(0x0C, createITypeInstruction(64, 0, 0x0, 5, 0x13));
+    writeInstruction(0x10, createITypeInstruction(1, 0, 0x0, 6, 0x13));
+    writeInstruction(0x14, createITypeInstruction(0x200, 0, 0x0, 7, 0x13));
+    writeInstruction(0x18, createITypeInstruction(1, 0, 0x0, 8, 0x13));
+    writeInstruction(0x1C, createSTypeInstruction(0, 5, 4, 0x3, 0x23));
+    writeInstruction(0x20, createSTypeInstruction(8, 6, 4, 0x3, 0x23));
+    writeInstruction(0x24, createSTypeInstruction(16, 7, 4, 0x3, 0x23));
+    writeInstruction(0x28, createSTypeInstruction(24, 8, 4, 0x3, 0x23));
+    writeInstruction(0x2C, createITypeInstruction(0, 0, 0x0, 0, 0x0F));      // FENCE
+    writeInstruction(0x30, createSTypeInstruction(0, 4, 2, 0x3, 0x23));      // tohost = packet
+    writeInstruction(0x34, createITypeInstruction(0, 3, 0x3, 15, 0x03));     // poll fromhost
+    writeInstruction(0x38, createBTypeInstruction(-4, 15, 0, 0x0));          // beq x15,x0,0x34
+    writeInstruction(0x3C, createSTypeInstruction(0, 0, 3, 0x3, 0x23));      // fromhost = 0
+    writeInstruction(0x40, createITypeInstruction(0, 0, 0x0, 0, 0x0F));      // FENCE
+    writeInstruction(0x44, createITypeInstruction(0, 4, 0x3, 12, 0x03));     // read packet[0]
+    writeInstruction(0x48, createECallInstruction());
+
+    cpu->setPC(0x0);
+    for (int i = 0; i < 500 && !cpu->isHalted(); ++i) {
+        cpu->step();
+    }
+
+    EXPECT_TRUE(cpu->isHalted()) << "程序应该停机";
+    EXPECT_EQ(cpu->getRegister(12), 1u)
+        << "FENCE后的普通load应看到host通过External写回的syscall返回值，而不是旧SYS_write编号";
 }
 
 TEST_F(OutOfOrderCPUTest, DetailedStatsIncludeLoadReplayAndForwardingProfile) {

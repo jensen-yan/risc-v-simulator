@@ -8,6 +8,7 @@ namespace riscv {
 
 namespace {
 
+constexpr uint8_t kFenceFunct3 = 0b000;
 constexpr uint8_t kFenceIFunct3 = 0b001;
 constexpr uint32_t kMstatusCsrAddr = 0x300;
 
@@ -68,16 +69,21 @@ CommitSystemEffects::Result CommitSystemEffects::apply(
                 result.redirect_pc = state.pc;
             }
         }
-    } else if (decoded_info.opcode == Opcode::MISC_MEM &&
-               static_cast<uint8_t>(decoded_info.funct3) == kFenceIFunct3) {
-        result.applied = true;
-        result.has_flush_summary = true;
-        result.flush_reason = OooRecovery::Reason::FenceI;
-        result.should_stop_commit =
-            handleFenceI(state, instruction->get_pc(), decoded_info.is_compressed);
-        if (result.should_stop_commit) {
-            result.has_redirect_pc = true;
-            result.redirect_pc = state.pc;
+    } else if (decoded_info.opcode == Opcode::MISC_MEM) {
+        const auto funct3 = static_cast<uint8_t>(decoded_info.funct3);
+        if (funct3 == kFenceFunct3) {
+            result.applied = true;
+            LOGT(COMMIT, "inst=%" PRId64 " commit FENCE", instruction->get_instruction_id());
+        } else if (funct3 == kFenceIFunct3) {
+            result.applied = true;
+            result.has_flush_summary = true;
+            result.flush_reason = OooRecovery::Reason::FenceI;
+            result.should_stop_commit =
+                handleFenceI(state, instruction->get_pc(), decoded_info.is_compressed);
+            if (result.should_stop_commit) {
+                result.has_redirect_pc = true;
+                result.redirect_pc = state.pc;
+            }
         }
     }
 

@@ -146,7 +146,7 @@ branch、JAL 或 JALR 退休时应用的预测器、profile、计数器更新，
 _避免使用_：把预测器训练、profile 统计和 commit-loop flush 编排混在一个代码块里
 
 **Commit System Effects（提交阶段系统效果）**：
-串行化指令退休时应用的 CSR、trap、syscall、MRET 和 FENCE.I 效果。
+串行化指令退休时应用的 CSR、trap、syscall、MRET 和 FENCE/FENCE.I 效果。普通 FENCE 是内存顺序栅栏，不改变架构寄存器结果；FENCE.I 还会触发取指路径刷新。
 _避免使用_：把特权/系统指令语义保留为 commit loop 中的零散分支
 
 **Commit Retire Effects（提交阶段退休效果）**：

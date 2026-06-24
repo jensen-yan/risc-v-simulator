@@ -49,7 +49,7 @@ TEST(StoreQueueTest, TracksStoreAddressAndDataReadinessSeparately) {
     EXPECT_TRUE(store->get_memory_info().store_forwarding_buffer_published);
 }
 
-TEST(StoreQueueTest, SyncFromInstructionCapturesReadyStoreData) {
+TEST(StoreQueueTest, SyncFromInstructionDoesNotCaptureStoreDataBeforeStoreDataOp) {
     StoreQueue store_queue;
     auto store = makeStore(1);
     store->set_src2_ready(true, 0xdeadbeef);
@@ -58,10 +58,15 @@ TEST(StoreQueueTest, SyncFromInstructionCapturesReadyStoreData) {
 
     const auto* entry = store_queue.findEntryForInstruction(store);
     ASSERT_NE(entry, nullptr);
-    EXPECT_TRUE(entry->data_ready);
+    EXPECT_FALSE(entry->data_ready);
     EXPECT_FALSE(entry->address_ready);
-    EXPECT_EQ(entry->value, 0xdeadbeefu);
     EXPECT_EQ(entry->size, 4u);
+
+    ASSERT_TRUE(store_queue.updateData(store, 0xdeadbeef));
+    entry = store_queue.findEntryForInstruction(store);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_TRUE(entry->data_ready);
+    EXPECT_EQ(entry->value, 0xdeadbeefu);
     EXPECT_EQ(store->get_memory_info().memory_value, 0xdeadbeefu);
 }
 

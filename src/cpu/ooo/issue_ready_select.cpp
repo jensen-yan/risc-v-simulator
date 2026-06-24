@@ -107,10 +107,13 @@ ExecutionUnit* executionUnit(CPUState& state, ExecutionUnitType unit_type, size_
     return nullptr;
 }
 
-void startExecutionUnit(ExecutionUnit& unit, const DynamicInstPtr& instruction) {
+void startExecutionUnit(ExecutionUnit& unit,
+                        const DynamicInstPtr& instruction,
+                        ExecutionWorkKind work_kind) {
     const auto& decoded_info = instruction->get_decoded_info();
     unit.busy = true;
     unit.instruction = instruction;
+    unit.work_kind = work_kind;
     unit.has_exception = false;
     unit.completion_pending = false;
     unit.dcache.reset();
@@ -131,6 +134,18 @@ const char* unitTypeName(ExecutionUnitType unit_type) {
             return "STORE";
     }
     return "UNKNOWN";
+}
+
+const char* workKindName(ExecutionWorkKind work_kind) {
+    switch (work_kind) {
+        case ExecutionWorkKind::FullInstruction:
+            return "full";
+        case ExecutionWorkKind::StoreAddress:
+            return "store-address";
+        case ExecutionWorkKind::StoreData:
+            return "store-data";
+    }
+    return "unknown";
 }
 
 bool isAmoWaitingForOlderStore(const CPUState& state, const DynamicInstPtr& instruction) {
@@ -194,7 +209,7 @@ void classifyEmptySlots(CPUState& state,
                                    : 0;
     if (rs_occupied == 0) {
         result.frontend_empty_slots += empty_slots;
-    } else if (state.reservation_station->get_ready_entry_count() == 0) {
+    } else if (state.reservation_station->get_ready_entry_count(state.store_queue.get()) == 0) {
         result.dependency_blocked_slots += empty_slots;
     } else {
         result.resource_blocked_slots += empty_slots;
@@ -215,7 +230,7 @@ IssueReadySelect::Result IssueReadySelect::select(CPUState& state, size_t issue_
         return result;
     }
 
-    const auto ready_entries = state.reservation_station->ready_entries();
+    const auto ready_entries = state.reservation_station->ready_entries(state.store_queue.get());
     auto availability = captureAvailability(state);
     std::vector<bool> consumed(ready_entries.size(), false);
     const auto addr_unknown_store_snapshot =
@@ -254,10 +269,14 @@ IssueReadySelect::Result IssueReadySelect::select(CPUState& state, size_t issue_
             break;
         }
 
-        consumed[*chosen_ready_index] = true;
+        const auto& entry = ready_entries[*chosen_ready_index];
+        for (size_t i = 0; i < ready_entries.size(); ++i) {
+            if (ready_entries[i].instruction == entry.instruction) {
+                consumed[i] = true;
+            }
+        }
         reserveUnit(availability, chosen_unit_type, *chosen_unit_index);
 
-        const auto& entry = ready_entries[*chosen_ready_index];
         if (isAmoWaitingForOlderStore(state, entry.instruction)) {
             state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
             ++result.amo_wait_slots;
@@ -283,12 +302,13 @@ IssueReadySelect::Result IssueReadySelect::select(CPUState& state, size_t issue_
         entry.instruction->set_status(DynamicInst::Status::EXECUTING);
         auto& exec_info = entry.instruction->get_execution_info();
         exec_info.remaining_cycles = exec_info.execution_cycles;
-        startExecutionUnit(*unit, entry.instruction);
+        startExecutionUnit(*unit, entry.instruction, entry.work_kind);
 
         result.selected.push_back(
-            {entry.instruction, entry.rs_entry, chosen_unit_type, *chosen_unit_index, unit});
-        LOGT(EXECUTE, "issue select inst=%" PRId64 " from rs[%d] to %s%zu",
+            {entry.instruction, entry.rs_entry, entry.work_kind, chosen_unit_type, *chosen_unit_index, unit});
+        LOGT(EXECUTE, "issue select inst=%" PRId64 " %s from rs[%d] to %s%zu",
              entry.instruction->get_instruction_id(),
+             workKindName(entry.work_kind),
              entry.rs_entry,
              unitTypeName(chosen_unit_type),
              *chosen_unit_index);

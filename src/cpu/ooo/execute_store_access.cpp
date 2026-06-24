@@ -7,6 +7,18 @@
 
 namespace riscv {
 
+namespace {
+
+void requeueInternalStoreOp(ExecutionUnit& unit) {
+    auto instruction = unit.instruction;
+    if (instruction) {
+        instruction->set_status(DynamicInst::Status::DISPATCHED);
+    }
+    resetExecutionUnitState(unit);
+}
+
+} // namespace
+
 ExecuteStoreAccess::Result ExecuteStoreAccess::perform(ExecutionUnit& unit,
                                                        size_t unit_index,
                                                        CPUState& state) {
@@ -23,21 +35,28 @@ ExecuteStoreAccess::Result ExecuteStoreAccess::perform(ExecutionUnit& unit,
         return Result::Completed;
     }
 
-    const auto& memory_info = unit.instruction->get_memory_info();
-    if (memory_info.address_ready && memory_info.memory_size != 0 &&
-        !unit.instruction->is_src2_ready()) {
+    if (unit.work_kind == ExecutionWorkKind::StoreAddress) {
         if (ExecuteMemoryOrder::tryRecoverViolation(unit.instruction, state)) {
             return Result::RecoveryTriggered;
         }
 
         auto address_ready_inst = unit.instruction;
-        address_ready_inst->set_status(DynamicInst::Status::DISPATCHED);
-        resetExecutionUnitState(unit);
+        requeueInternalStoreOp(unit);
         LOGT(EXECUTE,
-             "inst=%" PRId64 " STORE%zu address ready, wait for store data",
+             "inst=%" PRId64 " STORE%zu store-address op complete",
              address_ready_inst->get_instruction_id(),
              unit_index);
         return Result::AddressOnlyCompleted;
+    }
+
+    if (unit.work_kind == ExecutionWorkKind::StoreData) {
+        auto data_ready_inst = unit.instruction;
+        requeueInternalStoreOp(unit);
+        LOGT(EXECUTE,
+             "inst=%" PRId64 " STORE%zu store-data op complete",
+             data_ready_inst->get_instruction_id(),
+             unit_index);
+        return Result::DataOnlyCompleted;
     }
 
     if (ExecuteHostCommAccess::mustSerialize(

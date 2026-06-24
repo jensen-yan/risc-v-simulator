@@ -42,6 +42,12 @@ enum class ExecutionUnitType {
     STORE       // 存储单元
 };
 
+enum class ExecutionWorkKind {
+    FullInstruction, // 普通完整指令，或地址/数据都 ready 后的完整 store
+    StoreAddress,   // store-address internal op：只计算/翻译 store 地址
+    StoreData,      // store-data internal op：只捕获 store data
+};
+
 // 前向声明
 class DynamicInst;
 using DynamicInstPtr = std::shared_ptr<DynamicInst>;

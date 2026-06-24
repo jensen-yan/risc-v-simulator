@@ -37,9 +37,10 @@ DynamicInstPtr dispatchStoreToRs(CPUState& state, uint64_t pc = 0x100, uint64_t 
 }
 
 ExecutionUnit makeStoreUnit(const DynamicInstPtr& store) {
-    ExecutionUnit unit;
+    ExecutionUnit unit{};
     unit.busy = true;
     unit.instruction = store;
+    unit.work_kind = ExecutionWorkKind::FullInstruction;
     unit.load_address = 0x200;
     unit.load_size = 4;
     return unit;
@@ -50,6 +51,14 @@ ExecutionUnit makeStoreUnit(const DynamicInstPtr& store) {
 TEST(ExecuteStoreAccessTest, CompletesImmediatelyWithoutCache) {
     auto state = makeStoreState();
     auto store = dispatchStoreToRs(state);
+    store->set_src2_ready(true, 0x1234);
+    auto& memory_info = store->get_memory_info();
+    memory_info.is_memory_op = true;
+    memory_info.is_store = true;
+    memory_info.address_ready = true;
+    memory_info.memory_address = 0x200;
+    memory_info.memory_size = 4;
+    memory_info.memory_value = 0x1234;
     auto unit = makeStoreUnit(store);
 
     const auto result = ExecuteStoreAccess::perform(unit, 0, state);
@@ -71,10 +80,28 @@ TEST(ExecuteStoreAccessTest, AddressOnlyStoreWaitsForDataWithoutCompletingRob) {
     memory_info.memory_address = 0x200;
     memory_info.memory_size = 4;
     auto unit = makeStoreUnit(store);
+    unit.work_kind = ExecutionWorkKind::StoreAddress;
 
     const auto result = ExecuteStoreAccess::perform(unit, 0, state);
 
     EXPECT_EQ(result, ExecuteStoreAccess::Result::AddressOnlyCompleted);
+    EXPECT_EQ(store->get_status(), DynamicInst::Status::DISPATCHED);
+    EXPECT_FALSE(store->is_completed());
+    EXPECT_FALSE(unit.busy);
+    EXPECT_EQ(unit.instruction, nullptr);
+}
+
+TEST(ExecuteStoreAccessTest, StoreDataOpWaitsForAddressWithoutCompletingRob) {
+    auto state = makeStoreState();
+    auto store = dispatchStoreToRs(state);
+    store->set_status(DynamicInst::Status::EXECUTING);
+    store->set_src2_ready(true, 0x12345678);
+    auto unit = makeStoreUnit(store);
+    unit.work_kind = ExecutionWorkKind::StoreData;
+
+    const auto result = ExecuteStoreAccess::perform(unit, 0, state);
+
+    EXPECT_EQ(result, ExecuteStoreAccess::Result::DataOnlyCompleted);
     EXPECT_EQ(store->get_status(), DynamicInst::Status::DISPATCHED);
     EXPECT_FALSE(store->is_completed());
     EXPECT_FALSE(unit.busy);

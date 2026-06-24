@@ -66,6 +66,7 @@ struct ExecutionUnit {
     bool busy;
     int remaining_cycles;
     DynamicInstPtr instruction;    // 使用DynamicInst指针代替原来的副本
+    ExecutionWorkKind work_kind = ExecutionWorkKind::FullInstruction;
     uint64_t result;
     bool has_exception;
     std::string exception_msg;
@@ -147,6 +148,7 @@ inline void resetExecutionUnitState(ExecutionUnit& unit) {
     unit.busy = false;
     unit.remaining_cycles = 0;
     unit.instruction = nullptr;
+    unit.work_kind = ExecutionWorkKind::FullInstruction;
     unit.result = 0;
     unit.has_exception = false;
     unit.exception_msg.clear();

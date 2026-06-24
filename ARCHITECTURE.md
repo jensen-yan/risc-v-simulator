@@ -139,8 +139,8 @@ flowchart LR
 - 当某个阶段的 context 仍然需要承载跨领域能力时，优先把稳定规则下沉为更深模块，例如当前的 `DispatchAdmission`、`ExecuteMemoryOrder` 和 `OooRecovery`，而不是继续扩大 stage interface。
 - `DispatchAdmission` 集中维护一条 ROB entry 进入后端时的 rename 事务、operand binding、RS placement、ready-store publication 和 rename checkpoint 保存；`DispatchStage` 只保留每拍宽度、串行化阻塞和 stall/counter orchestration。
 - `StoreQueue` 保存 store 的地址 ready、数据 ready、完成、提交和 flush 生命周期；`StoreForwardingBuffer` 只保存地址和值都 ready 的 forwarding view。
-- store 当前支持 soft STA/STD split：`src1` ready 且地址未解析时，store 可以先占用 STORE unit 完成地址计算和翻译；若 `src2` 尚未 ready，该指令会回到 `DISPATCHED` 并保留 RS entry，不向 Completion Fabric / ROB 报完成。
-- 这还不是 true STA/STD uop split：ROB entry 和 RS entry 仍是一条 store，后续要进一步拆成两个独立 scheduler item，才接近现代高性能 LSU 的 STA/STD 调度。
+- store 当前支持 internal STA/STD split：`ReservationStation::ReadyEntry` 会把同一条 store 暴露为 `StoreAddress`、`StoreData` 或完整 store work kind。`StoreAddress` 只计算/翻译地址并写 `StoreQueue`；`StoreData` 只捕获数据并写 `StoreQueue`；完整 store 只有地址和值都 ready 后才走 D$ 时序和 ROB completion。
+- 这还不是 true STA/STD uop split：ROB entry、RS entry 和 `DynamicInst` 仍是一条 store；当前每个 issue 选择周期同一条 store 最多选中一个 work kind，后续要进一步拆出独立 uop/子 entry 才接近现代高性能 LSU 的并行 STA/STD 调度。
 - `OooRecovery` 集中维护乱序流水线恢复时的资源清理规则；触发 recovery 的阶段只负责判断原因、restart PC 或 younger-than 范围。
 - 判断一个改动该不该放进 `cpu/ooo/` 的标准：
   如果它解决的是调度、flush、提交一致性、资源竞争，通常属于 OOO。
@@ -163,8 +163,8 @@ flowchart TD
     ELA["ExecuteLoadAccess\nforwarding / memory read / D$ read / exception"]
     ELV["ExecuteLoadValue\nload value formatting"]
     ESA["ExecuteStoreAccess\nstore D$ write / inflight / recovery trigger"]
-    STA["soft STA\naddr-only issue"]
-    STD["soft STD\ndata wakeup / full store issue"]
+    STA["internal STA\naddr-only issue"]
+    STD["internal STD\ndata-only issue"]
     SQ["StoreQueue\nstore addr/data/commit state"]
     SFB["StoreForwardingBuffer\nready-store forwarding view"]
     EDC["ExecuteDCacheAccess\nD$ timing handshake"]
@@ -229,7 +229,7 @@ flowchart TD
 - 改 ready load 如何在 replay、cache wait、inflight、exception、complete 之间流转：
   优先看 `ExecuteLoadCompletion`。
 - 改 store 执行完成、D$ write、store miss 入 inflight、store 触发 memory-order recovery：
-  优先看 `ExecuteStoreAccess`；store 地址/数据/完成/提交生命周期看 `StoreQueue`。当前地址源 ready 时可以先做 soft STA，数据未 ready 时不释放 RS entry、不提交 ROB completion。
+  优先看 `ExecuteStoreAccess`；store 地址/数据/完成/提交生命周期看 `StoreQueue`。当前地址源 ready 时可以先做 `StoreAddress`，数据源 ready 时可以先做 `StoreData`，完整 store 才提交 ROB completion。
 - 改 D$ hit/miss/blocking/outstanding/stall counter：
   优先看 `ExecuteDCacheAccess`。
 - 改已发出的 load/store miss 如何等待并提交完成事件：

@@ -13,6 +13,7 @@ public:
         BlockedByDCacheOutstanding,
         ReplayedForHostComm,
         AddressOnlyCompleted,
+        DataOnlyCompleted,
         RecoveryTriggered,
     };
 

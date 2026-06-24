@@ -96,7 +96,7 @@ TEST_F(DispatchAdmissionTest, ReservationStationFullStallsBeforeRenameSideEffect
     EXPECT_EQ(inst->get_physical_dest_kind(), RegisterFileKind::None);
 }
 
-TEST_F(DispatchAdmissionTest, PublishesReadyStoreWhenAddressAndValueAreReadyAtAdmission) {
+TEST_F(DispatchAdmissionTest, AllocatesReadyStoreButDefersForwardingUntilStoreDataOp) {
     rename_unit.update_architecture_register(1, 0x1000);
     rename_unit.update_architecture_register(2, 0xdeadbeef);
     auto inst = makeDynamicInst(makeStoreInstruction(1, 2, 4), 2);
@@ -107,12 +107,13 @@ TEST_F(DispatchAdmissionTest, PublishesReadyStoreWhenAddressAndValueAreReadyAtAd
     auto result = admission().tryAdmit(inst, 80, false);
 
     ASSERT_TRUE(result.admitted());
-    EXPECT_TRUE(result.ready_store_published);
+    EXPECT_FALSE(result.ready_store_published);
     EXPECT_EQ(store_queue.getOccupiedEntryCount(), 1u);
-    EXPECT_EQ(store_forwarding_buffer.get_occupied_entry_count(), 1u);
-    EXPECT_TRUE(memory_info.store_forwarding_buffer_published);
+    EXPECT_EQ(store_forwarding_buffer.get_occupied_entry_count(), 0u);
+    EXPECT_FALSE(memory_info.store_forwarding_buffer_published);
     EXPECT_EQ(memory_info.memory_size, 4);
-    EXPECT_EQ(memory_info.memory_value, 0xdeadbeefu);
+    EXPECT_TRUE(inst->is_src2_ready());
+    EXPECT_EQ(inst->get_src2_value(), 0xdeadbeefu);
 }
 
 TEST_F(DispatchAdmissionTest, SavesRenameCheckpointWhenRequested) {

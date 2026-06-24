@@ -45,11 +45,6 @@ bool StoreQueue::syncFromInstruction(const DynamicInstPtr& instruction) {
         entry->size = memory_info.memory_size;
     }
 
-    if (instruction->is_src2_ready()) {
-        entry->data_ready = true;
-        entry->value = instruction->get_src2_value();
-        memory_info.memory_value = entry->value;
-    }
     return true;
 }
 
@@ -111,7 +106,8 @@ bool StoreQueue::markCommitted(const DynamicInstPtr& instruction) {
 bool StoreQueue::publishReadyStore(const DynamicInstPtr& instruction,
                                    StoreForwardingBuffer& store_forwarding_buffer) {
     auto* entry = ensureEntry(instruction);
-    if (!entry || !entry->address_ready || !entry->data_ready || entry->size == 0) {
+    if (!entry || !entry->address_ready || !entry->data_ready || entry->size == 0 ||
+        entry->forwarding_published) {
         return false;
     }
 
@@ -157,6 +153,27 @@ const StoreQueueEntry* StoreQueue::findEntryForInstruction(
     const DynamicInstPtr& instruction) const {
     const int index = findEntryIndex(instruction);
     return index >= 0 ? &entries_[index] : nullptr;
+}
+
+bool StoreQueue::isAddressReady(const DynamicInstPtr& instruction) const {
+    const auto* entry = findEntryForInstruction(instruction);
+    if (entry) {
+        return entry->address_ready && entry->size != 0;
+    }
+    if (!instruction) {
+        return false;
+    }
+    const auto& memory_info = instruction->get_memory_info();
+    return memory_info.address_ready && memory_info.memory_size != 0;
+}
+
+bool StoreQueue::isDataReady(const DynamicInstPtr& instruction) const {
+    const auto* entry = findEntryForInstruction(instruction);
+    return entry && entry->data_ready;
+}
+
+bool StoreQueue::isReadyForStoreAccess(const DynamicInstPtr& instruction) const {
+    return isAddressReady(instruction) && isDataReady(instruction);
 }
 
 int StoreQueue::findEntryIndex(const DynamicInstPtr& instruction) const {

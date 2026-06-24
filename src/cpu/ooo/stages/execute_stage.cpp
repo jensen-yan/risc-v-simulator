@@ -11,6 +11,22 @@
 
 namespace riscv {
 
+namespace {
+
+const char* workKindName(ExecutionWorkKind work_kind) {
+    switch (work_kind) {
+        case ExecutionWorkKind::FullInstruction:
+            return "full";
+        case ExecutionWorkKind::StoreAddress:
+            return "store-address";
+        case ExecutionWorkKind::StoreData:
+            return "store-data";
+    }
+    return "unknown";
+}
+
+} // namespace
+
 ExecuteStage::ExecuteStage() {
     // 构造函数：初始化执行阶段
 }
@@ -29,8 +45,11 @@ void ExecuteStage::execute(Context& context) {
     const auto issue_result = IssueReadySelect::select(state, OOOPipelineConfig::ISSUE_WIDTH);
     for (size_t slot = 0; slot < issue_result.selected.size(); ++slot) {
         const auto& selected = issue_result.selected[slot];
-        LOGT(EXECUTE, "issue slot=%zu inst=%" PRId64 " from rs[%d] to execution unit",
-             slot, selected.instruction->get_instruction_id(), selected.rs_entry);
+        LOGT(EXECUTE, "issue slot=%zu inst=%" PRId64 " %s from rs[%d] to execution unit",
+             slot,
+             selected.instruction->get_instruction_id(),
+             workKindName(selected.work_kind),
+             selected.rs_entry);
 
         ExecutionUnit* unit = selected.unit;
         if (!unit) {
@@ -57,8 +76,9 @@ void ExecuteStage::execute(Context& context) {
                 break;
         }
 
-        LOGT(EXECUTE, "inst=%" PRId64 " start on %s%d, cycles=%d",
+        LOGT(EXECUTE, "inst=%" PRId64 " %s start on %s%d, cycles=%d",
              selected.instruction->get_instruction_id(),
+             workKindName(selected.work_kind),
              unit_type_str,
              static_cast<int>(selected.unit_index),
              unit->remaining_cycles);

@@ -6,6 +6,53 @@
 
 namespace riscv {
 
+namespace {
+
+bool storeAddressReady(const DynamicInstPtr& instruction, const StoreQueue* store_queue) {
+    if (!instruction || !instruction->is_store_instruction() || !instruction->is_src1_ready()) {
+        return false;
+    }
+    if (store_queue) {
+        return !store_queue->isAddressReady(instruction);
+    }
+    const auto& memory_info = instruction->get_memory_info();
+    return !memory_info.address_ready || memory_info.memory_size == 0;
+}
+
+bool storeDataReady(const DynamicInstPtr& instruction, const StoreQueue* store_queue) {
+    if (!instruction || !instruction->is_store_instruction() || !instruction->is_src2_ready()) {
+        return false;
+    }
+    return !store_queue || !store_queue->isDataReady(instruction);
+}
+
+bool storeFullReady(const DynamicInstPtr& instruction, const StoreQueue* store_queue) {
+    if (!instruction || !instruction->is_store_instruction()) {
+        return false;
+    }
+    if (store_queue) {
+        return store_queue->isReadyForStoreAccess(instruction);
+    }
+
+    const auto& memory_info = instruction->get_memory_info();
+    return memory_info.address_ready && memory_info.memory_size != 0 &&
+           instruction->is_src2_ready();
+}
+
+int workKindOrder(ExecutionWorkKind work_kind) {
+    switch (work_kind) {
+        case ExecutionWorkKind::StoreAddress:
+            return 0;
+        case ExecutionWorkKind::StoreData:
+            return 1;
+        case ExecutionWorkKind::FullInstruction:
+            return 2;
+    }
+    return 3;
+}
+
+} // namespace
+
 ReservationStation::ReservationStation() 
     : rs_entries(MAX_RS_ENTRIES),
       dispatched_count(0),
@@ -187,38 +234,49 @@ size_t ReservationStation::get_occupied_entry_count() const {
     return occupied;
 }
 
-size_t ReservationStation::get_ready_entry_count() const {
-    size_t ready = 0;
-    for (const auto& entry : rs_entries) {
-        if (entry &&
-            entry->get_status() != DynamicInst::Status::EXECUTING &&
-            is_instruction_ready(entry)) {
-            ++ready;
-        }
-    }
-    return ready;
+size_t ReservationStation::get_ready_entry_count(const StoreQueue* store_queue) const {
+    return ready_entries(store_queue).size();
 }
 
-std::vector<ReservationStation::ReadyEntry> ReservationStation::ready_entries() const {
+std::vector<ReservationStation::ReadyEntry> ReservationStation::ready_entries(
+    const StoreQueue* store_queue) const {
     std::vector<ReadyEntry> ready;
     for (int i = 0; i < MAX_RS_ENTRIES; ++i) {
         const auto& entry = rs_entries[i];
-        if (!entry || entry->get_status() == DynamicInst::Status::EXECUTING ||
-            !is_instruction_ready(entry)) {
+        if (!entry || entry->get_status() == DynamicInst::Status::EXECUTING) {
             continue;
         }
-        ready.push_back({static_cast<RSEntry>(i), entry});
+        const auto rs_entry = static_cast<RSEntry>(i);
+        if (entry->is_store_instruction()) {
+            if (storeAddressReady(entry, store_queue)) {
+                ready.push_back({rs_entry, entry, ExecutionWorkKind::StoreAddress});
+            }
+            if (storeDataReady(entry, store_queue)) {
+                ready.push_back({rs_entry, entry, ExecutionWorkKind::StoreData});
+            }
+            if (storeFullReady(entry, store_queue)) {
+                ready.push_back({rs_entry, entry, ExecutionWorkKind::FullInstruction});
+            }
+            continue;
+        }
+
+        if (is_instruction_ready(entry, store_queue)) {
+            ready.push_back({rs_entry, entry, ExecutionWorkKind::FullInstruction});
+        }
     }
     std::sort(ready.begin(), ready.end(), [](const ReadyEntry& lhs, const ReadyEntry& rhs) {
-        return lhs.instruction->get_instruction_id() < rhs.instruction->get_instruction_id();
+        if (lhs.instruction->get_instruction_id() != rhs.instruction->get_instruction_id()) {
+            return lhs.instruction->get_instruction_id() < rhs.instruction->get_instruction_id();
+        }
+        return workKindOrder(lhs.work_kind) < workKindOrder(rhs.work_kind);
     });
     return ready;
 }
 
-bool ReservationStation::is_entry_ready(RSEntry rs_entry) const {
+bool ReservationStation::is_entry_ready(RSEntry rs_entry, const StoreQueue* store_queue) const {
     if (rs_entry >= MAX_RS_ENTRIES) return false;
     DynamicInstPtr inst = rs_entries[rs_entry];
-    return inst && is_instruction_ready(inst);
+    return inst && is_instruction_ready(inst, store_queue);
 }
 
 // ========== 私有方法实现 ==========
@@ -234,18 +292,13 @@ RSEntry ReservationStation::allocate_entry() {
     return MAX_RS_ENTRIES;
 }
 
-bool ReservationStation::is_instruction_ready(DynamicInstPtr instruction) const {
+bool ReservationStation::is_instruction_ready(DynamicInstPtr instruction,
+                                              const StoreQueue* store_queue) const {
     if (!instruction) return false;
     if (instruction->is_store_instruction()) {
-        if (!instruction->is_src1_ready()) {
-            return false;
-        }
-
-        const auto& memory_info = instruction->get_memory_info();
-        if (!memory_info.address_ready) {
-            return true;
-        }
-        return instruction->is_src2_ready();
+        return storeAddressReady(instruction, store_queue) ||
+               storeDataReady(instruction, store_queue) ||
+               storeFullReady(instruction, store_queue);
     }
     return instruction->is_ready_to_execute();
 }

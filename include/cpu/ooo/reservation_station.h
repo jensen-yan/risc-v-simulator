@@ -46,13 +46,14 @@ public:
     struct ReadyEntry {
         RSEntry rs_entry;
         DynamicInstPtr instruction;
+        ExecutionWorkKind work_kind = ExecutionWorkKind::FullInstruction;
     };
     
     // 派发指令到保留站（使用DynamicInst）
     DispatchResult dispatch_instruction(DynamicInstPtr dynamic_inst);
     
     // 获取当前可参与 Issue / Ready Select 的 ready 表项，按程序顺序返回。
-    std::vector<ReadyEntry> ready_entries() const;
+    std::vector<ReadyEntry> ready_entries(const StoreQueue* store_queue = nullptr) const;
     
     // 更新操作数（来自完成事件）
     void update_operands(const CompletionEvent& completion_event,
@@ -83,10 +84,10 @@ public:
 
     // 统计查询（用于性能分析）
     size_t get_occupied_entry_count() const;
-    size_t get_ready_entry_count() const;
+    size_t get_ready_entry_count(const StoreQueue* store_queue = nullptr) const;
     
     // 检查表项是否准备好执行
-    bool is_entry_ready(RSEntry rs_entry) const;
+    bool is_entry_ready(RSEntry rs_entry, const StoreQueue* store_queue = nullptr) const;
     
 private:
     // 分配保留站表项
@@ -96,7 +97,8 @@ private:
     void initialize_free_list();
     
     // 检查指令是否准备好执行
-    bool is_instruction_ready(DynamicInstPtr instruction) const;
+    bool is_instruction_ready(DynamicInstPtr instruction,
+                              const StoreQueue* store_queue = nullptr) const;
 };
 
 } // namespace riscv

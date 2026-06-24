@@ -198,4 +198,72 @@ TEST_F(ExecuteStageTest, StoreAddressCanExecuteBeforeStoreDataIsReady) {
     EXPECT_EQ(countBusyStoreUnits(state), 0u);
 }
 
+TEST_F(ExecuteStageTest, StoreDataCanExecuteBeforeStoreAddressIsReady) {
+    CPUState state;
+    state.memory = std::make_shared<Memory>(4096);
+    state.privilege_state = std::make_unique<PrivilegeState>();
+    state.address_translation =
+        std::make_unique<AddressTranslation>(state.memory, state.privilege_state.get());
+    state.reservation_station = std::make_unique<ReservationStation>();
+    state.reorder_buffer = std::make_unique<ReorderBuffer>();
+    state.store_queue = std::make_unique<StoreQueue>();
+    state.store_forwarding_buffer = std::make_unique<StoreForwardingBuffer>();
+
+    auto store = state.reorder_buffer->allocate_entry(makeStoreInstruction(), 0x100, 1);
+    ASSERT_NE(store, nullptr);
+    store->set_src2_ready(true, 0x12345678);
+    store->set_src3_ready(true, 0);
+    ASSERT_TRUE(state.reservation_station->dispatch_instruction(store).success);
+
+    ExecuteStage::Context context(state);
+    execute_stage_->execute(context);
+
+    const auto* entry = state.store_queue->findEntryForInstruction(store);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_TRUE(entry->data_ready);
+    EXPECT_EQ(entry->value, 0x12345678u);
+    EXPECT_FALSE(entry->address_ready);
+    EXPECT_EQ(state.store_forwarding_buffer->get_occupied_entry_count(), 0u);
+    EXPECT_EQ(store->get_status(), DynamicInst::Status::EXECUTING);
+    EXPECT_TRUE(state.completion_fabric.empty());
+    EXPECT_EQ(countBusyStoreUnits(state), 1u);
+
+    execute_stage_->execute(context);
+
+    EXPECT_EQ(store->get_status(), DynamicInst::Status::DISPATCHED);
+    EXPECT_FALSE(store->is_completed());
+    EXPECT_EQ(state.reservation_station->get_entry(store->get_rs_entry()), store);
+    EXPECT_TRUE(state.completion_fabric.empty());
+    EXPECT_EQ(countBusyStoreUnits(state), 0u);
+
+    store->set_src1_ready(true, 0x200);
+    execute_stage_->execute(context);
+
+    entry = state.store_queue->findEntryForInstruction(store);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_TRUE(entry->address_ready);
+    EXPECT_EQ(entry->address, 0x208u);
+    EXPECT_TRUE(entry->data_ready);
+    EXPECT_TRUE(entry->forwarding_published);
+    EXPECT_TRUE(store->get_memory_info().store_forwarding_buffer_published);
+    EXPECT_EQ(state.store_forwarding_buffer->get_occupied_entry_count(), 1u);
+    EXPECT_EQ(store->get_status(), DynamicInst::Status::EXECUTING);
+    EXPECT_TRUE(state.completion_fabric.empty());
+    EXPECT_EQ(countBusyStoreUnits(state), 1u);
+
+    execute_stage_->execute(context);
+
+    EXPECT_EQ(store->get_status(), DynamicInst::Status::EXECUTING);
+    EXPECT_FALSE(store->is_completed());
+    EXPECT_TRUE(entry->forwarding_published);
+    EXPECT_EQ(state.store_forwarding_buffer->get_occupied_entry_count(), 1u);
+    EXPECT_TRUE(state.completion_fabric.empty());
+    EXPECT_EQ(countBusyStoreUnits(state), 1u);
+
+    execute_stage_->execute(context);
+    EXPECT_EQ(state.reservation_station->get_entry(store->get_rs_entry()), nullptr);
+    EXPECT_FALSE(state.completion_fabric.empty());
+    EXPECT_EQ(countBusyStoreUnits(state), 0u);
+}
+
 } // namespace riscv

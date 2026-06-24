@@ -2,6 +2,7 @@
 
 #include "cpu/ooo/dynamic_inst.h"
 #include "cpu/ooo/reservation_station.h"
+#include "cpu/ooo/store_queue.h"
 
 #include <vector>
 
@@ -104,6 +105,7 @@ TEST(ReservationStationTest, UpdateOperandsMakesWaitingEntryReady) {
 
 TEST(ReservationStationTest, StoreCanIssueAddressBeforeStoreDataIsReady) {
     ReservationStation rs;
+    StoreQueue store_queue;
     auto store = makeDynamicInst(
         makeInstruction(InstructionType::S_TYPE, Opcode::STORE),
         0x1000,
@@ -111,21 +113,54 @@ TEST(ReservationStationTest, StoreCanIssueAddressBeforeStoreDataIsReady) {
         /*src1_ready=*/true,
         /*src2_ready=*/false);
     ASSERT_TRUE(rs.dispatch_instruction(store).success);
+    ASSERT_TRUE(store_queue.allocateStore(store));
 
-    auto ready = rs.ready_entries();
+    auto ready = rs.ready_entries(&store_queue);
     ASSERT_EQ(ready.size(), 1u);
     EXPECT_EQ(ready[0].instruction, store);
+    EXPECT_EQ(ready[0].work_kind, ExecutionWorkKind::StoreAddress);
 
-    auto& memory_info = store->get_memory_info();
-    memory_info.address_ready = true;
-    memory_info.memory_address = 0x2000;
-    memory_info.memory_size = 4;
-    EXPECT_TRUE(rs.ready_entries().empty());
+    ASSERT_TRUE(store_queue.updateAddress(store, 0x2000, 4));
+    EXPECT_TRUE(rs.ready_entries(&store_queue).empty());
 
     store->set_src2_ready(true, 0x12345678);
-    ready = rs.ready_entries();
+    ready = rs.ready_entries(&store_queue);
     ASSERT_EQ(ready.size(), 1u);
     EXPECT_EQ(ready[0].instruction, store);
+    EXPECT_EQ(ready[0].work_kind, ExecutionWorkKind::StoreData);
+
+    ASSERT_TRUE(store_queue.updateData(store, 0x12345678));
+    ready = rs.ready_entries(&store_queue);
+    ASSERT_EQ(ready.size(), 1u);
+    EXPECT_EQ(ready[0].instruction, store);
+    EXPECT_EQ(ready[0].work_kind, ExecutionWorkKind::FullInstruction);
+}
+
+TEST(ReservationStationTest, StoreCanIssueDataBeforeStoreAddressIsReady) {
+    ReservationStation rs;
+    StoreQueue store_queue;
+    auto store = makeDynamicInst(
+        makeInstruction(InstructionType::S_TYPE, Opcode::STORE),
+        0x1000,
+        1,
+        /*src1_ready=*/false,
+        /*src2_ready=*/true);
+    ASSERT_TRUE(rs.dispatch_instruction(store).success);
+    ASSERT_TRUE(store_queue.allocateStore(store));
+
+    auto ready = rs.ready_entries(&store_queue);
+    ASSERT_EQ(ready.size(), 1u);
+    EXPECT_EQ(ready[0].instruction, store);
+    EXPECT_EQ(ready[0].work_kind, ExecutionWorkKind::StoreData);
+
+    ASSERT_TRUE(store_queue.updateData(store, 0x5678));
+    EXPECT_TRUE(rs.ready_entries(&store_queue).empty());
+
+    store->set_src1_ready(true, 0x2000);
+    ready = rs.ready_entries(&store_queue);
+    ASSERT_EQ(ready.size(), 1u);
+    EXPECT_EQ(ready[0].instruction, store);
+    EXPECT_EQ(ready[0].work_kind, ExecutionWorkKind::StoreAddress);
 }
 
 TEST(ReservationStationTest, ReadyEntriesReturnProgramOrderAndSkipExecuting) {

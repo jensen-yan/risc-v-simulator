@@ -49,6 +49,9 @@ public:
 
     size_t getOccupiedEntryCount() const;
     const StoreQueueEntry* findEntryForInstruction(const DynamicInstPtr& instruction) const;
+    bool isAddressReady(const DynamicInstPtr& instruction) const;
+    bool isDataReady(const DynamicInstPtr& instruction) const;
+    bool isReadyForStoreAccess(const DynamicInstPtr& instruction) const;
 
 private:
     std::array<StoreQueueEntry, MAX_ENTRIES> entries_{};

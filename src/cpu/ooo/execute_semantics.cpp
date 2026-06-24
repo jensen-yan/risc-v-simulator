@@ -313,27 +313,42 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
             case InstructionType::S_TYPE:
                 // 存储指令 - 使用预解析的静态信息
                 {
-                    const uint64_t virtual_addr =
-                        instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
-                    const uint64_t physical_addr =
-                        translateStoreAddress(state, virtual_addr, inst.memory_access_size);
+                    const bool execute_address =
+                        unit.work_kind == ExecutionWorkKind::FullInstruction ||
+                        unit.work_kind == ExecutionWorkKind::StoreAddress;
+                    const bool execute_data =
+                        unit.work_kind == ExecutionWorkKind::FullInstruction ||
+                        unit.work_kind == ExecutionWorkKind::StoreData;
                     const bool store_data_ready = instruction->is_src2_ready();
 
                     auto& memory_info = instruction->get_memory_info();
                     memory_info.is_memory_op = true;
                     memory_info.is_store = true;
-                    memory_info.memory_address = physical_addr;
-                    memory_info.memory_size = inst.memory_access_size;
-                    memory_info.address_ready = true;
-                    if (store_data_ready) {
+                    if (memory_info.memory_size == 0) {
+                        memory_info.memory_size = inst.memory_access_size;
+                    }
+
+                    uint64_t virtual_addr = 0;
+                    uint64_t physical_addr = memory_info.memory_address;
+                    if (execute_address) {
+                        virtual_addr =
+                            instruction->get_src1_value() + static_cast<uint64_t>(static_cast<int64_t>(inst.imm));
+                        physical_addr = translateStoreAddress(state, virtual_addr, inst.memory_access_size);
+                        memory_info.memory_address = physical_addr;
+                        memory_info.memory_size = inst.memory_access_size;
+                        memory_info.address_ready = true;
+                        unit.load_address = physical_addr;
+                        unit.load_size = inst.memory_access_size;
+                    } else {
+                        unit.load_address = memory_info.memory_address;
+                        unit.load_size = memory_info.memory_size;
+                    }
+
+                    if (execute_data && store_data_ready) {
                         memory_info.memory_value = instruction->get_src2_value();
                     }
 
-                    unit.load_address = physical_addr;
-                    unit.load_size = inst.memory_access_size;
-
-                    // 异常已在解码时检测，这里直接使用预解析的信息
-                    if (store_data_ready) {
+                    if (execute_address && execute_data && store_data_ready) {
                         LOGT(EXECUTE,
                              "execute STORE: va=0x%" PRIx64 " pa=0x%" PRIx64
                              " value=0x%" PRIx64 " size=%d",
@@ -341,31 +356,41 @@ void OOOExecuteSemantics::executeInstruction(ExecutionUnit& unit, const DynamicI
                              physical_addr,
                              instruction->get_src2_value(),
                              inst.memory_access_size);
-                    } else {
+                    } else if (execute_address) {
                         LOGT(EXECUTE,
                              "execute STORE address: va=0x%" PRIx64 " pa=0x%" PRIx64
-                             " size=%d, data not ready",
+                             " size=%d",
                              virtual_addr,
                              physical_addr,
+                             inst.memory_access_size);
+                    } else if (execute_data && store_data_ready) {
+                        LOGT(EXECUTE,
+                             "execute STORE data: value=0x%" PRIx64 " size=%d",
+                             instruction->get_src2_value(),
                              inst.memory_access_size);
                     }
 
                     // 仅发布ready store供forwarding，真正写内存在commit阶段进行。
+                    bool published = false;
                     if (state.store_queue) {
-                        state.store_queue->updateAddress(
-                            instruction, physical_addr, inst.memory_access_size);
-                        if (store_data_ready) {
-                            state.store_queue->updateData(instruction, instruction->get_src2_value());
-                            if (state.store_forwarding_buffer) {
-                                state.store_queue->publishReadyStore(
-                                    instruction, *state.store_forwarding_buffer);
-                            }
+                        if (execute_address) {
+                            state.store_queue->updateAddress(
+                                instruction, physical_addr, inst.memory_access_size);
                         }
-                    } else if (state.store_forwarding_buffer && store_data_ready) {
+                        if (execute_data && store_data_ready) {
+                            state.store_queue->updateData(instruction, instruction->get_src2_value());
+                        }
+                        if (state.store_forwarding_buffer) {
+                            published = state.store_queue->publishReadyStore(
+                                instruction, *state.store_forwarding_buffer);
+                        }
+                    } else if (state.store_forwarding_buffer && execute_address && execute_data &&
+                               store_data_ready) {
                         state.store_forwarding_buffer->add_store(
                             instruction, physical_addr, instruction->get_src2_value(), inst.memory_access_size);
+                        published = true;
                     }
-                    if (store_data_ready) {
+                    if (published) {
                         state.perf_counters.increment(PerfCounterId::STORES_TO_FORWARDING_BUFFER);
                     }
                 }

@@ -12,6 +12,7 @@ public:
     struct SelectedInstruction {
         DynamicInstPtr instruction;
         RSEntry rs_entry = 0;
+        ExecutionWorkKind work_kind = ExecutionWorkKind::FullInstruction;
         ExecutionUnitType unit_type = ExecutionUnitType::ALU;
         size_t unit_index = 0;
         ExecutionUnit* unit = nullptr;

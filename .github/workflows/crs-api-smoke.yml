@@ -12,14 +12,10 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
     env:
-      http_proxy: ""
-      https_proxy: ""
-      all_proxy: ""
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
       ALL_PROXY: ""
       NO_PROXY: ""
-      no_proxy: ""
       LD_PRELOAD: ""
 
     steps:

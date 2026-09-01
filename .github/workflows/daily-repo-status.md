@@ -14,7 +14,10 @@ permissions:
   issues: read
   pull-requests: read
 
-network: defaults
+network:
+  allowed:
+    - defaults
+    - api.deepseek.com
 
 tools:
   bash: ["cat", "ls", "find", "grep", "head", "tail", "wc"]
@@ -32,7 +35,15 @@ safe-outputs:
     title-prefix: "[repo-status] "
     labels: [report, daily-status]
     close-older-issues: true
-engine: gemini
+engine:
+  id: copilot
+  env:
+    COPILOT_PROVIDER_BASE_URL: https://api.deepseek.com
+    COPILOT_PROVIDER_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    COPILOT_PROVIDER_TYPE: openai
+    COPILOT_PROVIDER_WIRE_API: completions
+    COPILOT_MODEL: deepseek-chat
+model: deepseek-chat
 
 source: githubnext/agentics/workflows/repo-status.md@578e0e0ea6291fed42a36d3fd46cec6a0e86afd8
 ---

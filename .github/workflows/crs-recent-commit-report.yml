@@ -1,0 +1,80 @@
+name: CRS Recent Commit Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_count:
+        description: Number of recent main commits to analyze
+        required: true
+        default: "6"
+        type: choice
+        options:
+          - "3"
+          - "6"
+          - "10"
+      publish_issue:
+        description: Append the report to the rolling issue
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  report:
+    name: node033 / CRS recent commits
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout report script
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Prepare temporary report directory
+        shell: bash
+        run: mkdir -p "${RUNNER_TEMP}/crs-recent-report"
+
+      - name: Collect GitHub context
+        shell: bash
+        env:
+          COMMIT_COUNT: ${{ inputs.commit_count }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/crs_recent_report.py collect \
+            --commit-count "${COMMIT_COUNT}" \
+            --output "${RUNNER_TEMP}/crs-recent-report/context.json"
+
+      - name: Analyze with CRS gpt-5.6-sol
+        shell: bash
+        env:
+          CRS_OPENAI_API_KEY: ${{ secrets.CRS_OPENAI_API_KEY }}
+          CRS_BASE_URL: http://172.28.11.121:18080
+          CRS_MODEL: gpt-5.6-sol
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          NO_PROXY: ""
+          LD_PRELOAD: ""
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/crs_recent_report.py analyze \
+            --context "${RUNNER_TEMP}/crs-recent-report/context.json" \
+            --output "${RUNNER_TEMP}/crs-recent-report/report.md"
+
+      - name: Publish report
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PUBLISH_ISSUE: ${{ inputs.publish_issue }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/crs_recent_report.py publish \
+            --report "${RUNNER_TEMP}/crs-recent-report/report.md" \
+            --publish-issue "${PUBLISH_ISSUE}"

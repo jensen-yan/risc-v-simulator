@@ -1,0 +1,83 @@
+name: CRS API Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: node033 / gpt-5.6-sol
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+
+    steps:
+      - name: Check runner prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner=${RUNNER_NAME} os=${RUNNER_OS} arch=${RUNNER_ARCH}"
+          docker version --format 'client={{.Client.Version}} server={{.Server.Version}}'
+          python3 --version
+
+      - name: Call CRS Responses API
+        shell: bash
+        env:
+          CRS_OPENAI_API_KEY: ${{ secrets.CRS_OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
+          export NO_PROXY=172.28.11.121
+          export no_proxy=172.28.11.121
+          test -n "${CRS_OPENAI_API_KEY}"
+
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          request = urllib.request.Request(
+              "http://172.28.11.121:18080/responses",
+              data=json.dumps(
+                  {
+                      "model": "gpt-5.6-sol",
+                      "input": "Reply with exactly: OK",
+                      "reasoning": {"effort": "low"},
+                      "max_output_tokens": 64,
+                  }
+              ).encode(),
+              headers={
+                  "Authorization": f"Bearer {os.environ['CRS_OPENAI_API_KEY']}",
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+
+          opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+          with opener.open(request, timeout=120) as response:
+              result = json.load(response)
+
+          output_text = "".join(
+              content.get("text", "")
+              for output in result.get("output", [])
+              for content in output.get("content", [])
+              if content.get("type") == "output_text"
+          ).strip()
+
+          assert result.get("status") == "completed", result.get("status")
+          assert result.get("model") == "gpt-5.6-sol", result.get("model")
+          assert output_text, "Responses API returned no output_text"
+
+          print(
+              json.dumps(
+                  {
+                      "status": result["status"],
+                      "model": result["model"],
+                      "reply": output_text,
+                      "usage": result.get("usage"),
+                  },
+                  ensure_ascii=False,
+              )
+          )
+          PY

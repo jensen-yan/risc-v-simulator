@@ -11,14 +11,23 @@ jobs:
     name: node033 / gpt-5.6-sol
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
+    env:
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      NO_PROXY: ""
+      no_proxy: ""
+      LD_PRELOAD: ""
 
     steps:
-      - name: Check runner prerequisites
+      - name: Check runner identity and Python
         shell: bash
         run: |
           set -euo pipefail
           echo "runner=${RUNNER_NAME} os=${RUNNER_OS} arch=${RUNNER_ARCH}"
-          docker version --format 'client={{.Client.Version}} server={{.Server.Version}}'
           python3 --version
 
       - name: Call CRS Responses API
@@ -28,8 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
-          export NO_PROXY=172.28.11.121
-          export no_proxy=172.28.11.121
+          unset NO_PROXY no_proxy LD_PRELOAD
           test -n "${CRS_OPENAI_API_KEY}"
 
           python3 - <<'PY'
@@ -81,3 +89,14 @@ jobs:
               )
           )
           PY
+
+      - name: Check gh-aw Docker prerequisite
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v docker >/dev/null; then
+            echo "::warning::docker is unavailable; gh-aw cannot run on this runner yet"
+            exit 1
+          fi
+          docker version --format 'client={{.Client.Version}} server={{.Server.Version}}'

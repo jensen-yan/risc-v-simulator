@@ -122,13 +122,16 @@ void CommitStage::execute(Context& context) {
         }
         
         const auto& committed_inst = commit_result.instruction;
-        auto make_flush_summary = [&](OooRecovery::Reason reason) {
+        // flush 摘要必须使用「触发 flush 之前」的快照：部分路径（system effects、
+        // trap）会在其后清空 ROB 与 fetch buffer，事后读取会恒为 0。
+        auto make_flush_summary = [&](OooRecovery::Reason reason,
+                                      uint64_t flushed_rob_entries,
+                                      size_t fetch_buffer_dropped) {
             PipelineTracer::FlushSummary summary;
             summary.triggered = true;
             summary.reason = OooRecovery::reasonName(reason);
-            summary.flushed_rob_entries =
-                static_cast<uint64_t>(ReorderBuffer::MAX_ROB_ENTRIES - state.reorder_buffer->get_free_entry_count());
-            summary.fetch_buffer_dropped = state.fetch_buffer.size();
+            summary.flushed_rob_entries = flushed_rob_entries;
+            summary.fetch_buffer_dropped = fetch_buffer_dropped;
             return summary;
         };
         PipelineTracer::FlushSummary flush_summary;
@@ -146,7 +149,10 @@ void CommitStage::execute(Context& context) {
         }
 
         if (committed_inst->has_trap()) {
-            flush_summary = make_flush_summary(OooRecovery::Reason::Trap);
+            flush_summary = make_flush_summary(
+                OooRecovery::Reason::Trap,
+                static_cast<uint64_t>(context.reorderBufferUsedEntryCount()),
+                state.fetch_buffer.size());
             state.instruction_count++;
             state.perf_counters.increment(PerfCounterId::INSTRUCTIONS_RETIRED);
             CommitSystemEffects::enterMachineTrap(state,
@@ -201,14 +207,25 @@ void CommitStage::execute(Context& context) {
 
         const auto control_flow_effect = CommitControlFlowEffects::apply(state, committed_inst);
         if (control_flow_effect.needs_redirect_flush) {
-            flush_summary = make_flush_summary(control_flow_effect.flush_reason);
+            flush_summary = make_flush_summary(
+                control_flow_effect.flush_reason,
+                static_cast<uint64_t>(context.reorderBufferUsedEntryCount()),
+                state.fetch_buffer.size());
             flush_summary.has_redirect_pc = true;
             flush_summary.redirect_pc = control_flow_effect.redirect_pc;
         }
-        
+
+        // CommitSystemEffects::apply 会在 MRET/FENCE.I/EBREAK/ECALL(trap) 时
+        // 在内部直接触发 full-pipeline flush，因此在调用前快照 flush 统计。
+        const uint64_t pre_system_flush_rob_entries =
+            static_cast<uint64_t>(context.reorderBufferUsedEntryCount());
+        const size_t pre_system_flush_fetch_buffer = state.fetch_buffer.size();
         const auto system_effect = CommitSystemEffects::apply(state, committed_inst);
         if (system_effect.has_flush_summary) {
-            flush_summary = make_flush_summary(system_effect.flush_reason);
+            flush_summary = make_flush_summary(
+                system_effect.flush_reason,
+                pre_system_flush_rob_entries,
+                pre_system_flush_fetch_buffer);
             if (system_effect.has_redirect_pc) {
                 flush_summary.has_redirect_pc = true;
                 flush_summary.redirect_pc = system_effect.redirect_pc;

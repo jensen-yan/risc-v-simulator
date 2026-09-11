@@ -102,10 +102,10 @@ void ExecuteStage::update_execution_units(CPUState& state) {
             if (unit.remaining_cycles <= 0) {
                 const auto& inst = unit.instruction->get_decoded_info();
                 if (inst.opcode == Opcode::AMO &&
-                    state.reorder_buffer->has_earlier_store_uncommitted(unit.instruction->get_instruction_id())) {
-                    // 双保险：若AMO执行期间出现顺序约束，延迟完成，等待更老Store/AMO提交。
+                    !state.reorder_buffer->is_head_instruction(unit.instruction->get_instruction_id())) {
+                    // Match the issue gate; atomic completion must remain at ROB head.
                     unit.remaining_cycles = 1;
-                    LOGT(EXECUTE, "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay completion",
+                    LOGT(EXECUTE, "inst=%" PRId64 " AMO waits for ROB head, delay completion",
                         unit.instruction->get_instruction_id());
                     continue;
                 }

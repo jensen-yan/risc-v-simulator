@@ -107,6 +107,9 @@ protected:
     // 保存标准输出用于重定向测试
     std::streambuf* orig_cout_;
     std::streambuf* orig_cerr_;
+    std::streambuf* orig_cin_;
+    std::ios::iostate orig_cin_state_;
+    std::istringstream input_;
     std::ostringstream captured_cout_;
     std::ostringstream captured_cerr_;
     
@@ -118,12 +121,18 @@ protected:
         // 重定向标准输出，用于测试输出
         orig_cout_ = std::cout.rdbuf();
         orig_cerr_ = std::cerr.rdbuf();
+        orig_cin_ = std::cin.rdbuf();
+        orig_cin_state_ = std::cin.rdstate();
+        std::cin.rdbuf(input_.rdbuf());
+        std::cin.clear();
     }
     
     void TearDown() override {
         // 恢复标准输出
         std::cout.rdbuf(orig_cout_);
         std::cerr.rdbuf(orig_cerr_);
+        std::cin.rdbuf(orig_cin_);
+        std::cin.clear(orig_cin_state_);
         
         syscall_handler_.reset();
         mock_cpu_.reset();
@@ -344,6 +353,37 @@ TEST_F(SyscallHandlerTest, SysReadInvalidFileDescriptor) {
     // 对于无效fd，通常返回-1（错误）
     int64_t result = static_cast<int64_t>(mock_cpu_->getRegister(10));
     EXPECT_EQ(result, -1) << "无效fd应该返回-1";
+}
+
+TEST_F(SyscallHandlerTest, ReadInvalidRangeDoesNotConsumeInputOrWritePrefix) {
+    input_.str("abcd\n");
+    const uint64_t address = memory_->getSize() - 2;
+    memory_->writeByte(address, 0x55);
+    memory_->writeByte(address + 1, 0x66);
+    setupSyscall(SyscallHandler::SYS_READ, 0, address, 4);
+    EXPECT_NO_THROW(EXPECT_FALSE(syscall_handler_->handleSyscall(mock_cpu_.get())));
+    EXPECT_EQ(mock_cpu_->getRegister(10), static_cast<uint64_t>(-1));
+    EXPECT_EQ(memory_->readByte(address), 0x55);
+    EXPECT_EQ(memory_->readByte(address + 1), 0x66);
+    EXPECT_EQ(std::cin.peek(), 'a');
+}
+
+TEST_F(SyscallHandlerTest, ReadOverflowingRangeDoesNotConsumeInput) {
+    input_.str("abcd\n");
+    setupSyscall(SyscallHandler::SYS_READ, 0, 0x100, UINT64_MAX);
+    EXPECT_FALSE(syscall_handler_->handleSyscall(mock_cpu_.get()));
+    EXPECT_EQ(mock_cpu_->getRegister(10), static_cast<uint64_t>(-1));
+    EXPECT_EQ(std::cin.peek(), 'a');
+}
+
+TEST_F(SyscallHandlerTest, ReadSupportsNonzeroMemoryBaseAndExactEnd) {
+    memory_ = std::make_shared<Memory>(16, 0x80000000);
+    syscall_handler_ = std::make_unique<SyscallHandler>(memory_);
+    input_.str("abcd\n");
+    setupSyscall(SyscallHandler::SYS_READ, 0, 0x8000000c, 4);
+    EXPECT_FALSE(syscall_handler_->handleSyscall(mock_cpu_.get()));
+    EXPECT_EQ(mock_cpu_->getRegister(10), 4u);
+    EXPECT_EQ(memory_->readWord(0x8000000c), 0x64636261u);
 }
 
 TEST_F(SyscallHandlerTest, SysReadZeroBytes) {

@@ -10,7 +10,6 @@ commit message 尽量详细点，用中文
 ## 文档阅读顺序
 - 构建、运行、测试命令优先看 `README.md`。
 - 模块边界、目录职责、主执行路径优先看 `ARCHITECTURE.md`。
-- 复杂任务的执行计划与维护约定优先看 `PLANS.md`。
 - 当前任务背景、重构计划、阶段记录优先看 `tasks/`。
 - 如果文档之间有冲突，优先以当前用户要求和 `tasks/` 中最新任务说明为准。
 
@@ -26,14 +25,12 @@ commit message 尽量详细点，用中文
 
 ### Domain docs
 
-本仓库使用 single-context 领域文档布局：`CONTEXT.md` 记录领域术语，`ARCHITECTURE.md` 记录架构说明，复杂任务继续使用 `PLANS.md`、`docs/exec-plans/` 和 `tasks/`。See `docs/agents/domain.md`.
+本仓库使用 single-context 领域文档布局：`CONTEXT.md` 记录领域术语，`ARCHITECTURE.md` 记录架构说明，任务背景查看 `tasks/`。See `docs/agents/domain.md`.
 
-## 计划约定（新增）
-- 遇到复杂任务时，不要直接开始改代码或长链路实验，先按 `PLANS.md` 新建或更新对应 ExecPlan。
-- 适合使用 ExecPlan 的任务包括：性能分析、长链路 debug、跨模块重构、分阶段功能开发、需要多轮实验才能收敛的调查任务。
-- ExecPlan 默认放在本地 `docs/exec-plans/{active,completed,blocked}/`，作为工作文档持续更新。
-- 除非明确需要共享、交接或保留正式决策记录，否则 ExecPlan 实例默认不提交到 git。
-- 如果已有 `tasks/` 文档，ExecPlan 只记录本轮推进的动态上下文、证据和下一步动作，不重复复制整份任务背景。
+## 计划约定
+- 默认不新建或维护 ExecPlan；需要时在对话中说明步骤与验证结果即可。
+- 保留已有 `PLANS.md` 和 `docs/exec-plans/` 作为历史参考，不主动删除。
+- 只有用户明确要求时才创建新的计划文档。
 
 ## Bug 修复原则（新增）
 - 修复 bug 时，优先做“通用一致性”方案，不做仅覆盖单一现象的定点修复。

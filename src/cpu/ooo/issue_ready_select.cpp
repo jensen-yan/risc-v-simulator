@@ -148,10 +148,10 @@ const char* workKindName(ExecutionWorkKind work_kind) {
     return "unknown";
 }
 
-bool isAmoWaitingForOlderStore(const CPUState& state, const DynamicInstPtr& instruction) {
+bool isAmoWaitingForRobHead(const CPUState& state, const DynamicInstPtr& instruction) {
     return instruction && instruction->get_decoded_info().opcode == Opcode::AMO &&
-           state.reorder_buffer &&
-           state.reorder_buffer->has_earlier_store_uncommitted(instruction->get_instruction_id());
+           (!state.reorder_buffer ||
+            !state.reorder_buffer->is_head_instruction(instruction->get_instruction_id()));
 }
 
 void maybeMarkAddrUnknownSpeculation(
@@ -277,11 +277,12 @@ IssueReadySelect::Result IssueReadySelect::select(CPUState& state, size_t issue_
         }
         reserveUnit(availability, chosen_unit_type, *chosen_unit_index);
 
-        if (isAmoWaitingForOlderStore(state, entry.instruction)) {
+        // Reservation and atomic memory effects are committed state, not speculative state.
+        if (isAmoWaitingForRobHead(state, entry.instruction)) {
             state.recordPipelineStall(PerfCounterId::STALL_EXECUTE_AMO_WAIT);
             ++result.amo_wait_slots;
             LOGT(EXECUTE,
-                 "inst=%" PRId64 " AMO waits on earlier uncommitted store-like op, delay issue",
+                 "inst=%" PRId64 " AMO waits for ROB head, delay issue",
                  entry.instruction->get_instruction_id());
             continue;
         }

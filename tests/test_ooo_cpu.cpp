@@ -95,6 +95,71 @@ protected:
     uint32_t createEBreakInstruction() {
         return 0x00100073;  // EBREAK指令的机器码
     }
+
+    void checkWrongPathReservation(bool initial_lr, bool wrong_path_sc) {
+        auto& state = const_cast<CPUState&>(cpu->getCPUState());
+        state.l1i_cache.reset();
+        state.l1d_cache.reset();
+        memory->writeWord(0x204, 0x11);
+        memory->writeWord(0x208, 0x33);
+
+        uint32_t pc = 0;
+        auto emit = [&](uint32_t instruction) {
+            writeInstruction(pc, instruction);
+            pc += 4;
+        };
+        emit(createITypeInstruction(0x204, 0, 0, 1, 0x13));
+        emit(createITypeInstruction(0x22, 0, 0, 2, 0x13));
+        const uint32_t wrong_address = initial_lr && !wrong_path_sc ? 0x208 : 0x204;
+        emit(createITypeInstruction(wrong_address, 0, 0, 3, 0x13));
+        if (initial_lr) {
+            emit(createAMOTypeInstruction(0x02, 0, 1, 0x2, 5));
+        }
+        // A real RAW chain delays branch resolution while independent wrong-path
+        // atomic operands are ready. No ROB entries or execution latencies are injected.
+        emit(createITypeInstruction(1, 5, 0, 7, 0x13));
+        for (int i = 0; i < 12; ++i) {
+            emit(createITypeInstruction(1, 7, 0, 7, 0x13));
+        }
+        const uint32_t branch_pc = pc;
+        emit(createBTypeInstruction(8, 0, 7, 0x1)); // BNE, initially predicted not taken.
+        const uint32_t wrong_pc = pc;
+        emit(createAMOTypeInstruction(wrong_path_sc ? 0x03 : 0x02,
+                                      wrong_path_sc ? 2 : 0, 3, 0x2, 8));
+        emit(createAMOTypeInstruction(0x03, 2, 1, 0x2, 6));
+        emit(createITypeInstruction(93, 0, 0, 17, 0x13));
+        emit(createECallInstruction());
+
+        DynamicInstPtr wrong_atomic;
+        DynamicInstPtr branch;
+        cpu->setPC(0);
+        for (int cycle = 0; cycle < 400 && !cpu->isHalted(); ++cycle) {
+            cpu->step();
+            for (int entry = 0; entry < ReorderBuffer::MAX_ROB_ENTRIES; ++entry) {
+                if (!state.reorder_buffer->is_entry_valid(entry)) {
+                    continue;
+                }
+                auto inst = state.reorder_buffer->get_entry(entry);
+                if (inst->get_pc() == wrong_pc) {
+                    wrong_atomic = inst;
+                } else if (inst->get_pc() == branch_pc) {
+                    branch = inst;
+                }
+            }
+        }
+
+        ASSERT_NE(wrong_atomic, nullptr) << "Wrong-path atomic must actually enter the ROB";
+        ASSERT_NE(branch, nullptr);
+        EXPECT_TRUE(branch->is_control_recovered_early());
+        EXPECT_FALSE(wrong_atomic->has_atomic_execute_info());
+        EXPECT_EQ(wrong_atomic->get_execute_cycle(), 0u);
+        EXPECT_TRUE(cpu->isHalted());
+        EXPECT_EQ(cpu->getRegister(8), 0u);
+        EXPECT_EQ(cpu->getRegister(6), initial_lr ? 0u : 1u);
+        EXPECT_EQ(memory->readWord(0x204), initial_lr ? 0x22u : 0x11u);
+        EXPECT_EQ(memory->readWord(0x208), 0x33u);
+        EXPECT_EQ(state.perf_counters.value(PerfCounterId::AMOS_COMMITTED), initial_lr ? 2u : 1u);
+    }
 };
 
 // 测试1：基本CPU初始化
@@ -624,6 +689,66 @@ TEST_F(OutOfOrderCPUTest, LrScWordInstruction) {
     EXPECT_EQ(cpu->getRegister(5), 0x11) << "LR.W应读取旧内存值";
     EXPECT_EQ(cpu->getRegister(6), 0) << "SC.W在预留命中时应返回0";
     EXPECT_EQ(memory->readWord(0x204), 0x22u) << "SC.W成功时应写入新值";
+}
+
+TEST_F(OutOfOrderCPUTest, WrongPathLrCannotCreateReservation) {
+    checkWrongPathReservation(false, false);
+}
+
+TEST_F(OutOfOrderCPUTest, WrongPathLrCannotReplaceCommittedReservation) {
+    checkWrongPathReservation(true, false);
+}
+
+TEST_F(OutOfOrderCPUTest, WrongPathScCannotConsumeCommittedReservation) {
+    checkWrongPathReservation(true, true);
+}
+
+TEST_F(OutOfOrderCPUTest, LrScReservationChangesOnlyAtCommit) {
+    auto& state = const_cast<CPUState&>(cpu->getCPUState());
+    state.l1i_cache.reset();
+    state.l1d_cache.reset();
+    memory->writeWord(0x204, 0x11);
+    writeInstruction(0x0, createITypeInstruction(0x204, 0, 0, 1, 0x13));
+    writeInstruction(0x4, createITypeInstruction(0x22, 0, 0, 2, 0x13));
+    writeInstruction(0x8, createAMOTypeInstruction(0x02, 0, 1, 0x2, 5));
+    writeInstruction(0xC, createAMOTypeInstruction(0x03, 2, 1, 0x2, 6));
+    // A second SC must observe the first SC's committed reservation release.
+    writeInstruction(0x10, createAMOTypeInstruction(0x03, 2, 1, 0x2, 7));
+    writeInstruction(0x14, createITypeInstruction(93, 0, 0, 17, 0x13));
+    writeInstruction(0x18, createECallInstruction());
+
+    bool saw_lr_before_commit = false;
+    bool saw_sc_before_commit = false;
+    cpu->setPC(0);
+    for (int cycle = 0; cycle < 200 && !cpu->isHalted(); ++cycle) {
+        cpu->step();
+        for (int entry = 0; entry < ReorderBuffer::MAX_ROB_ENTRIES; ++entry) {
+            if (!state.reorder_buffer->is_entry_valid(entry)) {
+                continue;
+            }
+            auto inst = state.reorder_buffer->get_entry(entry);
+            if (!inst->has_atomic_execute_info()) {
+                continue;
+            }
+            EXPECT_TRUE(state.reorder_buffer->is_head_instruction(inst->get_instruction_id()));
+            if (inst->get_pc() == 0x8) {
+                saw_lr_before_commit = true;
+                EXPECT_FALSE(state.reservation_valid);
+            } else if (inst->get_pc() == 0xC) {
+                saw_sc_before_commit = true;
+                EXPECT_TRUE(state.reservation_valid);
+                EXPECT_EQ(state.reservation_addr, 0x204u);
+                EXPECT_EQ(memory->readWord(0x204), 0x11u);
+            }
+        }
+    }
+    EXPECT_TRUE(saw_lr_before_commit);
+    EXPECT_TRUE(saw_sc_before_commit);
+    EXPECT_TRUE(cpu->isHalted());
+    EXPECT_EQ(cpu->getRegister(5), 0x11u);
+    EXPECT_EQ(cpu->getRegister(6), 0u);
+    EXPECT_EQ(cpu->getRegister(7), 1u);
+    EXPECT_EQ(memory->readWord(0x204), 0x22u);
 }
 
 TEST_F(OutOfOrderCPUTest, FenceInstructionSerializesButKeepsArchitecturalNopResult) {

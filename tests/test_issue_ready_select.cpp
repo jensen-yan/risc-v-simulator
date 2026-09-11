@@ -199,6 +199,40 @@ TEST(IssueReadySelectTest, AmoWaitConsumesSlotWithoutStartingExecution) {
     EXPECT_EQ(state.perf_counters.value(PerfCounterId::TOPDOWN_SLOTS_AMO_WAIT), 1u);
 }
 
+TEST(IssueReadySelectTest, AmoWaitsForOlderNonMemoryInstructionToCommit) {
+    auto state = makeIssueState();
+    auto older = state.reorder_buffer->allocate_entry(makeAluInstruction(), 0x100, 1);
+    ASSERT_NE(older, nullptr);
+    auto amo = allocateReady(state, makeAmoInstruction(), 0x104, 2);
+
+    const auto blocked = IssueReadySelect::select(state, 4);
+    EXPECT_TRUE(blocked.selected.empty());
+    EXPECT_EQ(blocked.amo_wait_slots, 1u);
+    EXPECT_EQ(amo->get_status(), DynamicInst::Status::DISPATCHED);
+
+    state.reorder_buffer->update_entry(older, 0);
+    const auto completed_but_uncommitted = IssueReadySelect::select(state, 4);
+    EXPECT_TRUE(completed_but_uncommitted.selected.empty());
+    EXPECT_EQ(completed_but_uncommitted.amo_wait_slots, 1u);
+
+    ASSERT_TRUE(state.reorder_buffer->commit_instruction().success);
+    const auto at_head = IssueReadySelect::select(state, 4);
+    ASSERT_EQ(at_head.selected.size(), 1u);
+    EXPECT_EQ(at_head.selected[0].instruction, amo);
+}
+
+TEST(IssueReadySelectTest, OnlyHeadAmoCanIssueInSameCycle) {
+    auto state = makeIssueState();
+    auto first = allocateReady(state, makeAmoInstruction(), 0x100, 1);
+    auto second = allocateReady(state, makeAmoInstruction(), 0x104, 2);
+
+    const auto result = IssueReadySelect::select(state, 4);
+
+    ASSERT_EQ(result.selected.size(), 1u);
+    EXPECT_EQ(result.selected[0].instruction, first);
+    EXPECT_EQ(second->get_status(), DynamicInst::Status::DISPATCHED);
+}
+
 TEST(IssueReadySelectTest, BlocksKnownBadAddrUnknownPairAndSelectsYoungerReadyWork) {
     auto state = makeIssueState();
     const uint64_t store_pc = 0x100;

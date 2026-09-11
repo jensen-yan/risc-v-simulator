@@ -8,12 +8,20 @@ namespace riscv {
 ExecuteMemoryOrder::AddrUnknownStoreSnapshot
 ExecuteMemoryOrder::captureAddrUnknownStoreSnapshot(const CPUState& state) {
     AddrUnknownStoreSnapshot snapshot;
-    if (!state.reorder_buffer) {
+    if (!state.reorder_buffer || state.reorder_buffer->is_empty()) {
         return snapshot;
     }
 
-    for (int i = 0; i < ReorderBuffer::MAX_ROB_ENTRIES; ++i) {
-        const auto rob_entry = static_cast<ROBEntry>(i);
+    // 从 ROB head 按程序序采集。slot 下标序在 head 回绕后不再等于年龄序，
+    // 否则 findFirstOlder / markBlocked 会先碰到 younger store 并漏掉更老的 Bad Pair。
+    const int occupied = ReorderBuffer::MAX_ROB_ENTRIES -
+                         static_cast<int>(state.reorder_buffer->get_free_entry_count());
+    const int head_index = static_cast<int>(state.reorder_buffer->get_head_entry());
+    snapshot.reserve(static_cast<size_t>(occupied));
+
+    for (int i = 0; i < occupied; ++i) {
+        const auto rob_entry = static_cast<ROBEntry>(
+            (head_index + i) % ReorderBuffer::MAX_ROB_ENTRIES);
         if (!state.reorder_buffer->is_entry_valid(rob_entry)) {
             continue;
         }
@@ -35,12 +43,18 @@ ExecuteMemoryOrder::captureAddrUnknownStoreSnapshot(const CPUState& state) {
 
 std::optional<uint64_t> ExecuteMemoryOrder::findFirstOlderAddrUnknownStorePc(
     const AddrUnknownStoreSnapshot& snapshot, uint64_t instruction_id) {
+    std::optional<uint64_t> oldest_pc;
+    uint64_t oldest_instruction_id = 0;
     for (const auto& entry : snapshot) {
-        if (entry.instruction_id < instruction_id) {
-            return entry.pc;
+        if (entry.instruction_id >= instruction_id) {
+            continue;
+        }
+        if (!oldest_pc.has_value() || entry.instruction_id < oldest_instruction_id) {
+            oldest_instruction_id = entry.instruction_id;
+            oldest_pc = entry.pc;
         }
     }
-    return std::nullopt;
+    return oldest_pc;
 }
 
 bool ExecuteMemoryOrder::markBlockedAddrUnknownPairIfNeeded(
@@ -56,7 +70,7 @@ bool ExecuteMemoryOrder::markBlockedAddrUnknownPairIfNeeded(
     std::optional<uint64_t> blocked_store_pc;
     for (const auto& entry : snapshot) {
         if (entry.instruction_id >= instruction->get_instruction_id()) {
-            break;
+            continue;
         }
         if (state.isBlockedAddrUnknownPair(load_pc, entry.pc)) {
             blocked_store_pc = entry.pc;

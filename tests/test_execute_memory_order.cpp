@@ -20,6 +20,16 @@ DecodedInstruction makeMemoryInstruction(Opcode opcode) {
     return decoded;
 }
 
+DecodedInstruction makeAluInstruction() {
+    DecodedInstruction decoded;
+    decoded.type = InstructionType::I_TYPE;
+    decoded.opcode = Opcode::OP_IMM;
+    decoded.rd = 1;
+    decoded.rs1 = 0;
+    decoded.imm = 1;
+    return decoded;
+}
+
 } // namespace
 
 TEST(ExecuteMemoryOrderTest, CapturesOnlyUnresolvedOlderStores) {
@@ -48,6 +58,104 @@ TEST(ExecuteMemoryOrderTest, CapturesOnlyUnresolvedOlderStores) {
     ASSERT_EQ(snapshot.size(), 1u);
     EXPECT_EQ(snapshot[0].instruction_id, 1u);
     EXPECT_EQ(snapshot[0].pc, 0x100u);
+}
+
+TEST(ExecuteMemoryOrderTest, FindsOldestAddrUnknownStoreWithoutAssumingSnapshotOrder) {
+    const ExecuteMemoryOrder::AddrUnknownStoreSnapshot snapshot = {
+        {80, 0x400},
+        {10, 0x300},
+        {3, 0x100},
+    };
+
+    const auto oldest_pc = ExecuteMemoryOrder::findFirstOlderAddrUnknownStorePc(snapshot, 50);
+
+    ASSERT_TRUE(oldest_pc.has_value());
+    EXPECT_EQ(*oldest_pc, 0x100u);
+}
+
+TEST(ExecuteMemoryOrderTest, MarksBlockedPairWhenYoungerUnknownStoreAppearsFirst) {
+    CPUState state;
+    state.reorder_buffer = std::make_unique<ReorderBuffer>();
+
+    auto load = create_dynamic_inst(makeMemoryInstruction(Opcode::LOAD), 0x200, 50);
+    state.recordAddrUnknownPairViolation(load->get_pc(), 0x100);
+
+    const ExecuteMemoryOrder::AddrUnknownStoreSnapshot snapshot = {
+        {10, 0x300},
+        {80, 0x400},
+        {3, 0x100},
+    };
+
+    EXPECT_TRUE(ExecuteMemoryOrder::markBlockedAddrUnknownPairIfNeeded(state, load, snapshot));
+    EXPECT_TRUE(load->get_memory_info().blocked_by_addr_unknown_pair);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::LOADS_BLOCKED_ADDR_UNKNOWN_PAIR), 1u);
+}
+
+TEST(ExecuteMemoryOrderTest, SnapshotAndBlockedPairSurviveRobWraparound) {
+    CPUState state;
+    state.reorder_buffer = std::make_unique<ReorderBuffer>();
+
+    const auto alu_decoded = makeAluInstruction();
+    const auto store_decoded = makeMemoryInstruction(Opcode::STORE);
+    auto& rob = *state.reorder_buffer;
+
+    ASSERT_NE(rob.allocate_entry(alu_decoded, 0x10, 1), nullptr);
+    ASSERT_NE(rob.allocate_entry(alu_decoded, 0x14, 2), nullptr);
+
+    auto oldest_store = rob.allocate_entry(store_decoded, 0x100, 3);
+    ASSERT_NE(oldest_store, nullptr);
+    oldest_store->get_memory_info().address_ready = false;
+    oldest_store->get_memory_info().memory_size = 0;
+
+    uint64_t filler_id = 1000;
+    uint64_t filler_pc = 0x1000;
+    while (!rob.is_full()) {
+        ASSERT_NE(rob.allocate_entry(alu_decoded, filler_pc, filler_id), nullptr);
+        filler_id++;
+        filler_pc += 4;
+    }
+
+    for (int retire = 0; retire < 2; ++retire) {
+        const auto head = rob.get_entry(rob.get_head_entry());
+        ASSERT_NE(head, nullptr);
+        rob.update_entry(head, 0);
+        const auto commit = rob.commit_instruction();
+        ASSERT_TRUE(commit.success);
+    }
+
+    auto mid_store = rob.allocate_entry(store_decoded, 0x300, 10);
+    ASSERT_NE(mid_store, nullptr);
+    mid_store->get_memory_info().address_ready = false;
+    mid_store->get_memory_info().memory_size = 0;
+
+    auto young_store = rob.allocate_entry(store_decoded, 0x400, 80);
+    ASSERT_NE(young_store, nullptr);
+    young_store->get_memory_info().address_ready = false;
+    young_store->get_memory_info().memory_size = 0;
+
+    ASSERT_EQ(rob.get_head_entry(), oldest_store->get_rob_entry());
+    ASSERT_LT(mid_store->get_rob_entry(), oldest_store->get_rob_entry());
+    ASSERT_LT(young_store->get_rob_entry(), oldest_store->get_rob_entry());
+
+    const auto snapshot = ExecuteMemoryOrder::captureAddrUnknownStoreSnapshot(state);
+    ASSERT_EQ(snapshot.size(), 3u);
+    EXPECT_EQ(snapshot[0].instruction_id, 3u);
+    EXPECT_EQ(snapshot[0].pc, 0x100u);
+    EXPECT_EQ(snapshot[1].instruction_id, 10u);
+    EXPECT_EQ(snapshot[1].pc, 0x300u);
+    EXPECT_EQ(snapshot[2].instruction_id, 80u);
+    EXPECT_EQ(snapshot[2].pc, 0x400u);
+
+    auto load = create_dynamic_inst(makeMemoryInstruction(Opcode::LOAD), 0x200, 50);
+    state.recordAddrUnknownPairViolation(load->get_pc(), 0x100);
+
+    const auto oldest_pc = ExecuteMemoryOrder::findFirstOlderAddrUnknownStorePc(snapshot, load->get_instruction_id());
+    ASSERT_TRUE(oldest_pc.has_value());
+    EXPECT_EQ(*oldest_pc, 0x100u);
+
+    EXPECT_TRUE(ExecuteMemoryOrder::markBlockedAddrUnknownPairIfNeeded(state, load, snapshot));
+    EXPECT_TRUE(load->get_memory_info().blocked_by_addr_unknown_pair);
+    EXPECT_EQ(state.perf_counters.value(PerfCounterId::LOADS_BLOCKED_ADDR_UNKNOWN_PAIR), 1u);
 }
 
 TEST(ExecuteMemoryOrderTest, MarksBlockedAddrUnknownPairOnce) {

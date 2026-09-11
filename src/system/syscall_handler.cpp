@@ -126,6 +126,14 @@ void SyscallHandler::handleRead(ICpuInterface* cpu) {
             cpu->setRegister(10, static_cast<uint64_t>(-1));
             return;
         }
+        // Validate before consuming host input; subtraction avoids address overflow.
+        const uint64_t base = memory_->getBaseAddress();
+        const uint64_t size = memory_->getSize();
+        if (bufAddr < base || bufAddr - base >= size ||
+            count > size - (bufAddr - base)) {
+            cpu->setRegister(10, static_cast<uint64_t>(-1));
+            return;
+        }
         // 从标准输入读取（简化实现）
         std::string input;
         std::getline(std::cin, input);
